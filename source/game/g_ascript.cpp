@@ -218,6 +218,7 @@ static const asEnumVal_t asHUDStatEnumVals[] =
 	ASLIB_ENUM_VAL( STAT_START_SPEED ),
 	ASLIB_ENUM_VAL( STAT_RACE_STATE ),
 	ASLIB_ENUM_VAL( STAT_PREJUMP_STATE ),
+	ASLIB_ENUM_VAL( STAT_PRESHOT_STATE ),
 	// !racesow
 	ASLIB_ENUM_VAL( STAT_MESSAGE_SELF ),
 	ASLIB_ENUM_VAL( STAT_MESSAGE_OTHER ),
@@ -2977,6 +2978,19 @@ static bool asFunc_RS_ResetPjState( int playerNum )
 	return true;
 }
 
+static bool asFunc_RS_QueryPsState( int playerNum )
+{
+	if( RS_QueryPsState( playerNum ) )
+		return true;
+	return false;
+}
+
+static bool asFunc_RS_ResetPsState( int playerNum )
+{
+	RS_ResetPsState( playerNum );
+	return true;
+}
+
 static void asFunc_RS_Cancelvote( edict_t *ent, bool admin )
 {
 	G_Cancelvote_f( ent, admin );
@@ -3369,6 +3383,8 @@ static const asglobfuncs_t asGlobFuncs[] =
 	// racesow
 	{ "bool RS_QueryPjState( int playerNum )", asFUNCTION(asFunc_RS_QueryPjState), NULL },
 	{ "bool RS_ResetPjState( int playerNum )", asFUNCTION(asFunc_RS_ResetPjState), NULL },
+	{ "bool RS_QueryPsState( int playerNum )", asFUNCTION(asFunc_RS_QueryPsState), NULL },
+	{ "bool RS_ResetPsState( int playerNum )", asFUNCTION(asFunc_RS_ResetPsState), NULL },
 	{ "void RS_Cancelvote( Entity @ent, bool admin )", asFUNCTION(asFunc_RS_Cancelvote), NULL },
 	{ "void RS_QueryTop( Client @client, String @mapname, int limit, int cmd)", asFUNCTION(asFunc_RS_QueryTop), NULL },
 	{ "void RS_QueryMaps( Client @client, const String &pattern, const String &tags, int page )", asFUNCTION(asFunc_RS_QueryMaps), NULL },

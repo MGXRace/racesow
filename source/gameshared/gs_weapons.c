@@ -323,6 +323,9 @@ char *gs_weaponStateNames[] =
 
 #define NOAMMOCLICK_PENALTY 100
 #define NOAMMOCLICK_AUTOSWITCH 50
+// racesow - preshot reset
+#define PRESHOT_RESET 2000
+// !racesow
 
 /*
 * GS_SelectBestWeapon
@@ -430,6 +433,20 @@ int GS_ThinkPlayerWeapon( player_state_t *playerState, int buttons, int msecs, i
 		playerState->stats[STAT_WEAPON_TIME] -= msecs;
 	else
 		playerState->stats[STAT_WEAPON_TIME] = 0;
+
+	// racesow - keep track for defined time to allow for preshot reset
+	if( playerState->stats[STAT_PRESHOT_RESET] > 0 )
+	{
+		playerState->stats[STAT_PRESHOT_RESET] -= msecs;
+	}
+	else
+	{
+		playerState->stats[STAT_PRESHOT_RESET] = 0;
+		// racesow - if player hasn't shot for defined time, reset preshot
+		RS_ResetPsState( playerState->playerNum );
+	}
+	// !racesow
+		
 
 	firedef = GS_FiredefForPlayerState( playerState, playerState->stats[STAT_WEAPON] );
 
@@ -574,6 +591,25 @@ int GS_ThinkPlayerWeapon( player_state_t *playerState, int buttons, int msecs, i
 			if( firedef->ammo_id != AMMO_NONE && firedef->usage_count )
 				playerState->inventory[firedef->ammo_id] -= firedef->usage_count;
 		}
+
+		// racesow - preshot count
+		if( playerState->stats[STAT_WEAPON] == WEAP_ROCKETLAUNCHER )
+		{
+			RS_IncrementRockets( playerState->playerNum );
+			playerState->stats[STAT_PRESHOT_RESET] = PRESHOT_RESET;
+		}
+		else if( playerState->stats[STAT_WEAPON] == WEAP_PLASMAGUN )
+		{
+			RS_IncrementPlasma( playerState->playerNum );
+			playerState->stats[STAT_PRESHOT_RESET] = PRESHOT_RESET;
+		}
+		else if( playerState->stats[STAT_WEAPON] == WEAP_GRENADELAUNCHER )
+		{
+			RS_IncrementGrenades( playerState->playerNum );
+			playerState->stats[STAT_PRESHOT_RESET] = PRESHOT_RESET;
+		}
+		// !racesow
+
 	}
 done:
 	return playerState->stats[STAT_WEAPON];

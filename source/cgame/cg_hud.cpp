@@ -674,6 +674,7 @@ static const reference_numeric_t cg_numeric_references[] =
 	{ "START_SPEED", CG_GetRaceStatValue, (void *)STAT_START_SPEED },
 	{ "RACE_STATE", CG_GetRaceStatValue, (void *)STAT_RACE_STATE },
 	{ "PREJUMP_STATE", CG_GetRaceStatValue, (void *)STAT_PREJUMP_STATE },
+	{ "PRESHOT_STATE", CG_GetRaceStatValue, (void *)STAT_PRESHOT_STATE },
 
 	// racesow cvars
 	{ "SHOW_ANGLE_METER", CG_GetCvar, "cg_showAngleMeter" },

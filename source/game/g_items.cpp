@@ -280,6 +280,12 @@ static bool Pickup_Health( edict_t *other, const gsitem_t *item, int flags )
 		if( HEALTH_TO_INT( other->health ) >= other->max_health )
 			return false;
 
+	// racesow : very ugly hack :(
+	// avoid trigger spamming on certain maps, other solutions?
+	if( other->health > 197 )
+		return false;
+	// !racesow
+
 	// start from at least 0.5, so the player sees his health increase the correct amount
 	if( other->health < 0.5 )
 		other->health = 0.5;
