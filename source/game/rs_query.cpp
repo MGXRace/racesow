@@ -497,7 +497,8 @@ void RS_QueryTop_Done( stat_query_t *query, bool success, void *customp )
 	int count, playerNum, i, status, indent;
 	rs_racetime_t top, racetime, timediff, oldtop, besttop;
 	cJSON *data, *node, *player, *tmp, *oldnode, *curnode;
-	char *mapname, *oneliner, *error_message, *name, *simplified, *oldoneliner;
+	char *mapname, *name, *simplified;
+	const char *oneliner, *error_message, *oldoneliner;
 	bool firstoldtime = true, firstnewtime = true, oldtime = false; // topall
 
 	gclient_t *client = (gclient_t *)customp;
