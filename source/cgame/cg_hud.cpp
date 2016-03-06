@@ -3350,6 +3350,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawCheckPoint",
 		CG_LFuncDrawCheckpoint,
+		NULL,
 		1,
 		"Draws last checkpoint time of argument id",
 		false
