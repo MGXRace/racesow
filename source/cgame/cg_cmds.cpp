@@ -80,7 +80,7 @@ static void CG_SC_Privsay( void )
 	if( !name || filter->integer & 1 || rs_chatBlocked[who-1] )
 		return;
 
-	CG_LocalPrint( false, "%s%s %s %s%s\n", name, S_COLOR_RED, in, S_COLOR_GREEN, text );
+	CG_LocalPrint( "%s%s %s %s%s\n", name, S_COLOR_RED, in, S_COLOR_GREEN, text );
 
 	if( cg_chatBeep->integer )
 		trap_S_StartGlobalSound( CG_MediaSfx( cgs.media.sfxChat ), CHAN_AUTO, 1.0f );
@@ -1157,7 +1157,6 @@ static const svcmd_t cg_svcmds[] =
 	{ "memo", CG_SC_MenuModal },
 	{ "motd", CG_SC_MOTD },
 	{ "aw", CG_SC_AddAward },
-	{ "cmd", CG_SC_ExecuteText },
 	{ "qm", CG_SC_MenuQuick },
 	{ "cpa", CG_SC_CheckpointsAdd }, //racesow
 	{ "cpc", CG_SC_CheckpointsClear }, //racesow

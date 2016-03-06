@@ -147,10 +147,10 @@ static int CG_GetStatEnemyTeam( const void *parameter )
 static int CG_GetLongStatValue( const void *parameter )
 {
 	int result;
-	assert( (qintptr)parameter >= 0 && (qintptr)( parameter ) + 1 < MAX_STATS );
+	assert( (intptr_t)parameter >= 0 && (intptr_t)( parameter ) + 1 < MAX_STATS );
 
-	result = ( cg.predictedPlayerState.stats[(qintptr)parameter] & 0xFFFF ) << 16;
-	result |= ( cg.predictedPlayerState.stats[(qintptr)(parameter)+1] & 0xFFFF );
+	result = ( cg.predictedPlayerState.stats[(intptr_t)parameter] & 0xFFFF ) << 16;
+	result |= ( cg.predictedPlayerState.stats[(intptr_t)(parameter)+1] & 0xFFFF );
 	return result;
 }
 // !racesow
