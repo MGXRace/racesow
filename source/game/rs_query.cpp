@@ -153,7 +153,7 @@ void RS_AuthNick( rs_authplayer_t *player, char *nick )
 		return;
 
 	b64name = (char*)base64_encode( (unsigned char *)nick, strlen( nick ), NULL );
-	query = rs_sqapi->CreateRootQuery( va( "%s/api/nick/%s", rs_statsUrl->string, b64name ), true );
+	query = rs_sqapi->CreateRootQuery( NULL, va( "%s/api/nick/%s", rs_statsUrl->string, b64name ), true );
 	free( b64name );
 
 	RS_SignQuery( query );
@@ -207,7 +207,7 @@ void RS_AuthMap( void )
 		return;
 
 	// Form the query
-	query = rs_sqapi->CreateRootQuery( va( "%s/api/map/%s", rs_statsUrl->string, authmap.b64name ), true );
+	query = rs_sqapi->CreateRootQuery( NULL, va( "%s/api/map/%s", rs_statsUrl->string, authmap.b64name ), true );
 	rs_sqapi->SetCallback( query, RS_AuthMap_Done, NULL );
 
 	RS_SignQuery( query );
@@ -248,7 +248,7 @@ void RS_ReportRace( rs_authplayer_t *player, int rtime, int *cp, int cpNum, bool
 		cJSON_AddItemToArray( arr, cJSON_CreateNumber( cp[i] ) );
 
 	// Form the query
-	query = rs_sqapi->CreateRootQuery( va( "%s/api/race/", rs_statsUrl->string ), false );
+	query = rs_sqapi->CreateRootQuery( NULL, va( "%s/api/race/", rs_statsUrl->string ), false );
 	rs_sqapi->SetField( query, "pid", va( "%d", player->id ) );
 	rs_sqapi->SetField( query, "mid", va( "%d", authmap.id ) );
 	rs_sqapi->SetField( query, "time", va( "%d", rtime ) );
@@ -297,7 +297,7 @@ void RS_ReportMap( const char *tags, const char *oneliner, bool force )
 	b64tags = (char*)base64_encode( (unsigned char *)token, strlen( token ), NULL );
 
 	// Form the query
-	query = rs_sqapi->CreateRootQuery( va( "%s/api/map/%s", rs_statsUrl->string, authmap.b64name ), false );
+	query = rs_sqapi->CreateRootQuery( NULL, va( "%s/api/map/%s", rs_statsUrl->string, authmap.b64name ), false );
 	rs_sqapi->SetField( query, "playTime", va( "%d", authmap.playTime ) );
 	rs_sqapi->SetField( query, "races", va( "%d", authmap.races ) );
 	rs_sqapi->SetField( query, "tags", b64tags );
@@ -335,7 +335,7 @@ void RS_ReportPlayer( rs_authplayer_t *player )
 
 	// Form the query
 	b64name = (char*)base64_encode( (unsigned char *)player->login, strlen( player->login ), NULL );
-	query = rs_sqapi->CreateRootQuery( va( "%s/api/player/%s", rs_statsUrl->string, b64name ), false );
+	query = rs_sqapi->CreateRootQuery( NULL, va( "%s/api/player/%s", rs_statsUrl->string, b64name ), false );
 	free( b64name );
 
 	rs_sqapi->SetField( query, "mid", va( "%d", authmap.id ) );
@@ -402,7 +402,7 @@ void RS_ReportNick( rs_authplayer_t *player, const char *nick )
 
 	// Form the query
 	b64name = (char*)base64_encode( (unsigned char *)player->login, strlen( player->login ), NULL );
-	query = rs_sqapi->CreateRootQuery( va( "%s/api/nick/%s", rs_statsUrl->string, b64name ), false );
+	query = rs_sqapi->CreateRootQuery( NULL, va( "%s/api/nick/%s", rs_statsUrl->string, b64name ), false );
 	free( b64name );
 
 	rs_sqapi->SetField( query, "nick", nick );
@@ -476,7 +476,7 @@ void RS_QueryPlayer( rs_authplayer_t *player )
 
 	// Form the query and query parameters
 	b64name = (char*)base64_encode( (unsigned char *)player->login, strlen( player->login ), NULL );
-	query = rs_sqapi->CreateRootQuery( va( "%s/api/player/%s", rs_statsUrl->string, b64name ), true );
+	query = rs_sqapi->CreateRootQuery( NULL, va( "%s/api/player/%s", rs_statsUrl->string, b64name ), true );
 	free( b64name );
 
 	rs_sqapi->SetField( query, "mid", va( "%d", authmap.id ) );
@@ -684,7 +684,7 @@ void RS_QueryTop( gclient_t *client, const char* mapname, int limit, int cmd)
 		return;
 	}
 
-	query = rs_sqapi->CreateRootQuery( url, true );
+	query = rs_sqapi->CreateRootQuery( NULL, url, true );
 	rs_sqapi->SetField( query, "map", b64name );
 	rs_sqapi->SetField( query, "limit", va( "%d", limit ) );
 
@@ -771,7 +771,7 @@ void RS_QueryMaps( gclient_t *client, const char *pattern, const char *tags, int
 	page = page == 0 ? 0 : page - 1;
 
 	// Form the query
-	query = rs_sqapi->CreateRootQuery( va( "%s/api/map/", rs_statsUrl->string ), true );
+	query = rs_sqapi->CreateRootQuery( NULL, va( "%s/api/map/", rs_statsUrl->string ), true );
 	rs_sqapi->SetField( query, "pattern", b64pattern );
 	rs_sqapi->SetField( query, "tags", b64tags );
 	rs_sqapi->SetField( query, "start", va( "%d", page * RS_MAPLIST_ITEMS ) );
@@ -841,7 +841,7 @@ void RS_QueryRandmap( char* tags[], void *data )
 	b64tags = (char*)base64_encode( (unsigned char *)b64tags, strlen( b64tags ), NULL );
 
 	// Form the query
-	query = rs_sqapi->CreateRootQuery( va( "%s/api/map/", rs_statsUrl->string ), true );
+	query = rs_sqapi->CreateRootQuery( NULL, va( "%s/api/map/", rs_statsUrl->string ), true );
 	rs_sqapi->SetField( query, "pattern", "" );
 	rs_sqapi->SetField( query, "tags", b64tags );
 	rs_sqapi->SetField( query, "rand", "1" );

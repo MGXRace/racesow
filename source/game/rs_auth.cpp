@@ -126,7 +126,6 @@ bool RS_SetName( gclient_t *client, const char *name )
  */
 void RS_Playtime ( gclient_t *client ) {
 	rs_authplayer_t *player;
-	static char simpNew[MAX_NAME_CHARS];
 
 	int playerNum = (int)( client - game.clients );
 	if( playerNum < 0 && playerNum >= gs.maxclients ) {
