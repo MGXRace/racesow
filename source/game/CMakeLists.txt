@@ -5,7 +5,10 @@ include_directories(${ANGELSCRIPT_INCLUDE_DIR})
 file(GLOB GAME_HEADERS
     "*.h"
     "ai/*.h"
-	"../gameshared/*.h"
+    "../gameshared/*.h"
+    "../qcommon/cjson.h"
+    "../qalgo/base64.h"
+    "../qalgo/sha2.h"
 )
 
 file(GLOB GAME_SOURCES
@@ -13,6 +16,9 @@ file(GLOB GAME_SOURCES
     "ai/*.cpp"
     "../gameshared/*.c"
     "../matchmaker/mm_rating.c"
+    "../qcommon/cjson.c"
+    "../qalgo/base64.c"
+    "../qalgo/sha2.c"
 )
 
 add_library(game SHARED ${GAME_SOURCES} ${GAME_HEADERS})
