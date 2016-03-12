@@ -7,23 +7,25 @@ include(QfusionUtils)
 
 # You can override this var with commandline option -DQFUSION_GAME_DIR=name
 if (NOT QFUSION_GAME_DIR)
-    set(QFUSION_GAME_DIR base)
+    set(QFUSION_GAME_DIR basewsw)
 endif()
 
 # You can override this var with commandline option -DQFUSION_CLIENT_NAME=name
 if (NOT QFUSION_CLIENT_NAME)
-    set(QFUSION_CLIENT_NAME qfusion)
+    set(QFUSION_CLIENT_NAME warsow)
 endif()
 
 # You can override this var with commandline option -DQFUSION_SERVER_NAME=name
 if (NOT QFUSION_SERVER_NAME)
-    set(QFUSION_SERVER_NAME qfusion_server)
+    set(QFUSION_SERVER_NAME wsw_server)
 endif()
 
 # You can override this var with commandline option -DQFUSION_TVSERVER_NAME=name
 if (NOT QFUSION_TVSERVER_NAME)
-    set(QFUSION_TVSERVER_NAME qfusiontv_server)
+    set(QFUSION_TVSERVER_NAME wswtv_server)
 endif()
+
+set(QFUSION_APPLICATION_VERSION_HEADER \"version.warsow.h\")
 
 if (QFUSION_APPLICATION_VERSION_HEADER)
 	add_definitions(-DAPPLICATION_VERSION_HEADER=${QFUSION_APPLICATION_VERSION_HEADER})
