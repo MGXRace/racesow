@@ -59,6 +59,7 @@ void BindGlobals( ASInterface *as )
 // update function for bound api
 void BindFrame( ASInterface *as )
 {
+	RunMatchMakerFrame();
 	RunWindowFrame();
 }
 
@@ -66,6 +67,7 @@ void BindFrame( ASInterface *as )
 void BindShutdown( ASInterface *as )
 {
 	UnbindWindow();
+	UnbindMatchMaker();
 }
 
 }

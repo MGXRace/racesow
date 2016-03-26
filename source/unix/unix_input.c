@@ -20,130 +20,33 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "../client/client.h"
 #include "x11.h"
 #include "keysym2ucs.h"
+#include <sys/time.h>
+#include <unistd.h>
+#include "../sdl/sdl_input_joy.h"
 
 // Vic: transplanted the XInput2 code from jquake
 
 // TODO: add in_mouse?
 cvar_t *in_grabinconsole;
 
-static qboolean focus = qfalse;
-static qboolean minimized = qfalse;
+static bool focus = false;
+static bool minimized = false;
 
-static qboolean input_inited = qfalse;
-static qboolean mouse_active = qfalse;
-static qboolean input_active = qfalse;
-
-static int shift_level = 0;
+static bool input_inited = false;
+static bool mouse_active = false;
+static bool input_active = false;
 
 static int xi_opcode;
 
 static int mx, my;
 
-static Atom XA_TARGETS, XA_text, XA_utf8_string;
+Atom XA_TARGETS, XA_text, XA_utf8_string;
 
-static char* clip_data;
+char* clip_data;
 
 int Sys_XTimeToSysTime( unsigned long xtime );
 
-#define CTRLC 3
-#define CTRLV 22
-
 //============================================
-
-/*
-* Sys_GetClipboardData
-*
-* Orginally from EzQuake
-*/
-char *Sys_GetClipboardData( qboolean primary )
-{
-	Window win;
-	Atom type;
-	int format, ret;
-	unsigned long nitems, bytes_after, bytes_left;
-	unsigned char *data;
-	char *buffer;
-	Atom atom;
-
-	if( !x11display.dpy )
-		return NULL;
-
-	if( primary )
-	{
-		atom = XInternAtom( x11display.dpy, "PRIMARY", True );
-	}
-	else
-	{
-		atom = XInternAtom( x11display.dpy, "CLIPBOARD", True );
-	}
-	if( atom == None )
-		return NULL;
-
-	win = XGetSelectionOwner( x11display.dpy, atom );
-	if( win == None )
-		return NULL;
-
-	XConvertSelection( x11display.dpy, atom, XA_utf8_string, atom, win, CurrentTime );
-	XFlush( x11display.dpy );
-
-	XGetWindowProperty( x11display.dpy, win, atom, 0, 0, False, AnyPropertyType, &type, &format, &nitems, &bytes_left,
-		&data );
-	if( bytes_left <= 0 )
-		return NULL;
-
-	ret = XGetWindowProperty( x11display.dpy, win, atom, 0, bytes_left, False, AnyPropertyType, &type,
-		&format, &nitems, &bytes_after, &data );
-	if( ret == Success )
-	{
-		buffer = Q_malloc( bytes_left + 1 );
-		memcpy( buffer, data, bytes_left + 1 );
-	}
-	else
-	{
-		buffer = NULL;
-	}
-
-	XFree( data );
-
-	return buffer;
-}
-
-/*
-* Sys_SetClipboardData
-* Adapted from GLFW - x11_clipboard:_glfwPlatformSetClipboardString
-* See: https://github.com/glfw/glfw/blob/master/src/x11_clipboard.c
-*
-* @param e The XEvent of the request
-* @returns The proterty Atom for the appropriate response
-*/
-qboolean Sys_SetClipboardData( char *data )
-{
-	// Save the message
-	Q_free( clip_data );
-	clip_data = Q_malloc( strlen( data ) - 1 );
-	memcpy( clip_data, data, strlen( data ) - 1 );
-	
-	// Requesting clipboard ownership
-	Atom XA_CLIPBOARD = XInternAtom( x11display.dpy, "CLIPBOARD", True );
-	if( XA_CLIPBOARD == None )
-		return qfalse;
-
-	XSetSelectionOwner( x11display.dpy, XA_CLIPBOARD, x11display.win, CurrentTime );
-
-	// Check if we got ownership
-	if( XGetSelectionOwner( x11display.dpy, XA_CLIPBOARD ) == x11display.win )
-		return qtrue;
-
-	return qfalse;
-}
-
-/*
-* Sys_FreeClipboardData
-*/
-void Sys_FreeClipboardData( char *data )
-{
-	Q_free( data );
-}
 
 /*
 * Sys_SendClipboardData
@@ -211,6 +114,61 @@ static Atom Sys_ClipboardProperty( XSelectionRequestEvent* request )
 	// Not supported
 	return None;
 }
+
+/**
+* XPending() actually performs a blocking read if no events available. From Fakk2, by way of
+* Heretic2, by way of SDL, original idea GGI project. The benefit of this approach over the quite
+* badly behaved XAutoRepeatOn/Off is that you get focus handling for free, which is a major win
+* with debug and windowed mode. It rests on the assumption that the X server will use the same
+* timestamp on press/release event pairs for key repeats.
+*/
+static bool X11_PendingInput( void )
+{
+	assert( x11display.dpy );
+
+	// Flush the display connection and look to see if events are queued
+	XFlush( x11display.dpy );
+	if( XEventsQueued( x11display.dpy, QueuedAlready ) )
+		return true;
+
+	{ // More drastic measures are required -- see if X is ready to talk
+		static struct timeval zero_time;
+		int x11_fd;
+		fd_set fdset;
+
+		x11_fd = ConnectionNumber( x11display.dpy );
+		FD_ZERO( &fdset );
+		FD_SET( x11_fd, &fdset );
+		if( select( x11_fd+1, &fdset, NULL, NULL, &zero_time ) == 1 )
+			return ( XPending( x11display.dpy ) );
+	}
+
+	// Oh well, nothing is ready ..
+	return false;
+}
+
+static bool repeated_press( XEvent *event )
+{
+	XEvent peekevent;
+	bool repeated = false;
+
+	assert( x11display.dpy );
+
+	if( X11_PendingInput() )
+	{
+		XPeekEvent( x11display.dpy, &peekevent );
+		if( ( peekevent.type == KeyPress ) &&
+			( peekevent.xkey.keycode == event->xkey.keycode ) &&
+			( peekevent.xkey.time == event->xkey.time ) )
+		{
+			repeated = true;
+			// we only skip the KeyRelease event, so we send many key down events, but no releases, while repeating
+			//XNextEvent(x11display.dpy, &peekevent);  // skip event.
+		}
+	}
+	return repeated;
+}
+
 
 /*****************************************************************************/
 
@@ -288,7 +246,7 @@ static void install_grabs_mouse( void )
 	XSync(x11display.dpy, True);
 
 	mx = my = 0;
-	mouse_active = qtrue;
+	mouse_active = true;
 }
 
 static void uninstall_grabs_mouse( void )
@@ -317,71 +275,55 @@ static void uninstall_grabs_mouse( void )
 	}
 	XIFreeDeviceInfo(info);
 
-	mouse_active = qfalse;
+	mouse_active = false;
 	mx = my = 0;
 }
 
 static void install_grabs_keyboard( void )
 {
-	int i;
-	int num_devices;
-	XIDeviceInfo *info;
-	XIEventMask mask;
+	int res;
+	int fevent;
 
 	assert( x11display.dpy && x11display.win );
 
 	if( input_active )
 		return;
 
-	XDefineCursor(x11display.dpy, x11display.win, CreateNullCursor(x11display.dpy, x11display.win));
-
-	mask.deviceid = XIAllMasterDevices;
-	mask.mask_len = XIMaskLen(XI_LASTEVENT);
-	mask.mask = calloc(mask.mask_len, sizeof(char));
-	XISetMask(mask.mask, XI_KeyPress);
-	XISetMask(mask.mask, XI_KeyRelease);
-	XISetMask(mask.mask, XI_ButtonPress);
-	XISetMask(mask.mask, XI_ButtonRelease);
-	XISelectEvents(x11display.dpy, x11display.win, &mask, 1);
-
-	info = XIQueryDevice(x11display.dpy, XIAllDevices, &num_devices);
-	for(i = 0; i < num_devices; i++) {
-		int id = info[i].deviceid;
-		if(info[i].use == XIMasterKeyboard)
-		{
-			XIGrabDevice(x11display.dpy, id, x11display.win, CurrentTime, None, GrabModeAsync, GrabModeAsync, False, &mask);
+	if( !x11display.features.wmStateFullscreen ) {
+		res = XGrabKeyboard( x11display.dpy, x11display.win, False, GrabModeAsync, GrabModeAsync, CurrentTime );
+		if( res != GrabSuccess ) {
+			Com_Printf( "Warning: XGrabKeyboard failed\n" );
+			return;
 		}
 	}
-	XIFreeDeviceInfo(info);
 
-	free(mask.mask);
+	// init X Input method, needed by Xutf8LookupString
+	x11display.im = XOpenIM( x11display.dpy, NULL, NULL, NULL );
+	x11display.ic = XCreateIC( x11display.im,
+		XNInputStyle, XIMPreeditNothing | XIMStatusNothing,
+		XNClientWindow, x11display.win,
+		NULL );
 
-	XSync(x11display.dpy, True);
+	if( x11display.ic ) {
+		XGetICValues( x11display.ic, XNFilterEvents, &fevent, NULL );
+		XSelectInput( x11display.dpy, x11display.win, fevent | x11display.wa.event_mask );
+	}
 
-	input_active = qtrue;
+	input_active = true;
 }
 
 static void uninstall_grabs_keyboard( void )
 {
-	int i;
-	int num_devices;
-	XIDeviceInfo *info;
-
 	assert( x11display.dpy && x11display.win );
 
 	if( !input_active )
 		return;
 
-	info = XIQueryDevice(x11display.dpy, XIAllDevices, &num_devices);
+	XUngrabKeyboard( x11display.dpy, CurrentTime );
 
-	for(i = 0; i < num_devices; i++) {
-		if(info[i].use == XIMasterKeyboard) {
-			XIUngrabDevice(x11display.dpy, info[i].deviceid, CurrentTime);
-		}
-	}
-	XIFreeDeviceInfo(info);
+	x11display.ic = 0;
 
-	input_active = qfalse;
+	input_active = false;
 }
 
 // Q3 version
@@ -471,7 +413,7 @@ static void _X11_CheckWMSTATE( void )
 	int actual_format;
 	int status;
 
-	minimized = qfalse;
+	minimized = false;
 	xa_WM_STATE = x11display.wmState;
 
 	status = XGetWindowProperty ( x11display.dpy, x11display.win,
@@ -492,7 +434,7 @@ static void _X11_CheckWMSTATE( void )
 	}
 
 	if( ( *property == IconicState ) || ( *property == WithdrawnState ) )
-		minimized = qtrue;
+		minimized = true;
 
 	XFree( (char *)property );
 }
@@ -500,7 +442,7 @@ static void _X11_CheckWMSTATE( void )
 static void handle_button(XGenericEventCookie *cookie)
 {
 	XIDeviceEvent *ev = (XIDeviceEvent *)cookie->data;
-	qboolean down = cookie->evtype == XI_ButtonPress;
+	bool down = cookie->evtype == XI_ButtonPress;
 	int button = ev->detail;
 	unsigned time = Sys_XTimeToSysTime(ev->time);
 	int k_button;
@@ -527,49 +469,43 @@ static void handle_button(XGenericEventCookie *cookie)
 	Key_Event(k_button, down, time);
 }
 
-static void handle_key(XGenericEventCookie *cookie)
+static void handle_key(XEvent *event)
 {
-	XIDeviceEvent *ev = (XIDeviceEvent *)cookie->data;
-	qboolean down = cookie->evtype == XI_KeyPress;
-	int keycode = ev->detail;
-	unsigned time = Sys_XTimeToSysTime(ev->time);
+	bool down = event->type == KeyPress;
+	XKeyEvent *kevent = &event->xkey;
+	unsigned time = Sys_XTimeToSysTime(event->xkey.time);
+	KeySym keysym;
+	int key;
+	int XLookupRet;
+	char buf[64];
 
-	// Ignore shift_level for game key press
-	KeySym keysym = XkbKeycodeToKeysym(x11display.dpy, keycode, 0, 0);
-	int key = XLateKey( keysym );
+	if( !down && repeated_press( event ) ) {
+		return; // don't send release events when repeating
+	}
 
-	// Set or clear 1 in the shift_level bitmask
-	if ( keysym == XK_Shift_L || keysym == XK_Shift_R )
-		shift_level ^=  (-down ^ shift_level) & 1;
+	memset( buf, 0, sizeof buf ); // XLookupString doesn't zero-terminate the buffer
+	XLookupRet = 0;
+#ifdef X_HAVE_UTF8_STRING
+	if( x11display.ic )
+		XLookupRet = Xutf8LookupString( x11display.ic, kevent, buf, sizeof buf, &keysym, 0 );
+#endif
+	if( !XLookupRet )
+		XLookupRet = XLookupString( kevent, buf, sizeof buf, &keysym, 0 );
 
-	// Set or clear 2 in the shift_level bitmask
-	else if( keysym == XK_ISO_Level3_Shift )
-		shift_level ^=  (-down ^ shift_level) & 2;
+	// get keysym without modifiers, so that movement works when e.g. a cyrillic layout is selected
+	kevent->state = 0;
+	keysym = XLookupKeysym( kevent, 0 );
+	key = XLateKey( keysym );
 
-	Key_Event(key, down, time);
+	Key_Event( key, down, time );
 
 	if( down )
 	{
-		// Use shift_level for chat and console input
-		qwchar wc = keysym2ucs(XkbKeycodeToKeysym(x11display.dpy, keycode, 0, shift_level));
-		if( wc == -1 && key > K_NUMLOCK && key <= KP_EQUAL )
-			wc = ( qwchar )key;
-
-		// Convert ctrl-c / ctrl-v combinations to the expected events
-		if( Key_IsDown(K_LCTRL) || Key_IsDown(K_RCTRL) )
-		{
-			if( key == 'v' )
-			{
-				key = CTRLV;
-				wc = CTRLV;
-			}
-			else if( key == 'c' )
-			{
-				key = CTRLC;
-				wc = CTRLC;
-			}
+		const char *p;
+		for( p = buf; *p; ) {
+			wchar_t wc = Q_GrabWCharFromUtf8String( (const char **)&p );
+			Key_CharEvent( key, wc );
 		}
-		Key_CharEvent( key, wc );
 	}
 }
 
@@ -603,10 +539,6 @@ static void handle_cookie(XGenericEventCookie *cookie)
 	case XI_ButtonRelease:
 		handle_button(cookie);
 		break;
-	case XI_KeyPress:
-	case XI_KeyRelease:
-		handle_key(cookie);
-		break;
 	default:
 		break;
 	}
@@ -633,6 +565,10 @@ static void HandleEvents( void )
 
 		switch( event.type )
 		{
+		case KeyPress:
+		case KeyRelease:
+			handle_key( &event );
+			break;
 		case FocusIn:
 			if( event.xfocus.mode == NotifyGrab || event.xfocus.mode == NotifyUngrab ) {
 				// Someone is handling a global hotkey, ignore it
@@ -640,7 +576,7 @@ static void HandleEvents( void )
 			}
 			if( !focus )
 			{
-				focus = qtrue;
+				focus = true;
 				install_grabs_keyboard();
 			}
 			break;
@@ -652,13 +588,12 @@ static void HandleEvents( void )
 			}
 			if( focus )
 			{
-				if( Cvar_Value( "vid_fullscreen" ) ) {
-					Cbuf_ExecuteText( EXEC_APPEND, "set vid_fullscreen 0\n" );
+				if ( Cvar_Value( "vid_fullscreen" ) ) {
+					XIconifyWindow( x11display.dpy, x11display.win, x11display.scr );
 				}
 				uninstall_grabs_keyboard();
-				Key_ClearStates();
-				focus = qfalse;
-				shift_level = 0;
+				IN_ClearState();
+				focus = false;
 			}
 			break;
 
@@ -668,7 +603,7 @@ static void HandleEvents( void )
 			break;
 
 		case ConfigureNotify:
-			VID_AppActivate( qtrue, qfalse );
+			VID_AppActivate( true, false );
 			break;
 
 		case PropertyNotify:
@@ -676,13 +611,14 @@ static void HandleEvents( void )
 			{
 				if ( event.xproperty.atom == x11display.wmState )
 				{
-					qboolean was_minimized = minimized;
+					bool was_minimized = minimized;
 
 					_X11_CheckWMSTATE();
 
 					if( minimized != was_minimized )
 					{
 						// FIXME: find a better place for this?..
+						SCR_PauseCinematic( minimized );
 						CL_SoundModule_Activate( !minimized );
 					}
 				}
@@ -718,6 +654,7 @@ static void HandleEvents( void )
 
 void IN_Commands( void )
 {
+	IN_SDL_JoyCommands();
 }
 
 void IN_MouseMove( usercmd_t *cmd )
@@ -729,11 +666,7 @@ void IN_MouseMove( usercmd_t *cmd )
 	}
 }
 
-void IN_JoyMove( usercmd_t *cmd )
-{
-}
-
-void IN_Activate( qboolean active )
+static void IN_Activate( bool active )
 {
 	if( !input_inited )
 		return;
@@ -752,6 +685,8 @@ void IN_Activate( qboolean active )
 		uninstall_grabs_mouse();
 		uninstall_grabs_keyboard();
 	}
+
+	IN_SDL_JoyActivate( active );
 }
 
 
@@ -766,8 +701,8 @@ void IN_Init( void )
 
 	in_grabinconsole = Cvar_Get( "in_grabinconsole", "0", CVAR_ARCHIVE );
 
-	input_active = qfalse;
-	mouse_active = qfalse;
+	input_active = false;
+	mouse_active = false;
 
 	if( !XQueryExtension( x11display.dpy, "XInputExtension", &xi_opcode, &event, &error ) ) {
 		Com_Printf( "ERROR: XInput Extension not available.\n" );
@@ -780,10 +715,11 @@ void IN_Init( void )
 
 	Com_Printf( "Successfully initialized XInput2 %d.%d\n", xi2_major, xi2_minor );
 
-	focus = qtrue;
-	input_inited = qtrue;
+	focus = true;
+	input_inited = true;
 	install_grabs_keyboard();
 	install_grabs_mouse();
+	IN_SDL_JoyInit( mouse_active );
 
 	XA_TARGETS = XInternAtom( x11display.dpy, "TARGETS", 0 );
 	XA_text = XInternAtom( x11display.dpy, "TEXT", 0 );
@@ -797,8 +733,9 @@ void IN_Shutdown( void )
 
 	uninstall_grabs_keyboard();
 	uninstall_grabs_mouse();
-	input_inited = qfalse;
-	focus = qfalse;
+	IN_SDL_JoyShutdown();
+	input_inited = false;
+	focus = false;
 }
 
 void IN_Restart( void )
@@ -809,7 +746,7 @@ void IN_Restart( void )
 
 void IN_Frame( void )
 {
-	qboolean m_active = qfalse;
+	bool m_active = false;
 
 	if( !input_inited )
 		return;
@@ -819,13 +756,57 @@ void IN_Frame( void )
 	if( focus ) {
 		if( !Cvar_Value( "vid_fullscreen" ) && ( ( cls.key_dest == key_console ) && !in_grabinconsole->integer ) )
 		{
-			m_active = qfalse;
+			m_active = false;
 		}
 		else
 		{
-			m_active = qtrue;
+			m_active = true;
 		}
 	}
 
 	IN_Activate( m_active );
+}
+
+unsigned int IN_SupportedDevices( void )
+{
+	return IN_DEVICE_KEYBOARD | IN_DEVICE_MOUSE | IN_DEVICE_JOYSTICK;
+}
+
+void IN_ShowSoftKeyboard( bool show )
+{
+}
+
+void IN_GetInputLanguage( char *dest, size_t size )
+{
+	if( size )
+		dest[0] = '\0';
+	// TODO: Implement using Xkb.
+}
+
+// TODO: IBus IME.
+
+void IN_IME_Enable( bool enable )
+{
+}
+
+size_t IN_IME_GetComposition( char *str, size_t strSize, size_t *cursorPos, size_t *convStart, size_t *convLen )
+{
+	if( str && strSize )
+		str[0] = '\0';
+	if( cursorPos )
+		*cursorPos = 0;
+	if( convStart )
+		*convStart = 0;
+	if( convLen )
+		*convLen = 0;
+	return 0;
+}
+
+unsigned int IN_IME_GetCandidates( char * const *cands, size_t candSize, unsigned int maxCands, int *selected, int *firstKey )
+{
+	if( selected )
+		*selected = -1;
+	if( firstKey )
+		*firstKey = 1;
+	return 0;
 }

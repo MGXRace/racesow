@@ -58,7 +58,7 @@ async_stream_module_t *AsyncStream_InitModule( const char *name, async_stream_al
 
 	// allocate and initialize module, store pointers
 	module = alloc_f( sizeof( *module ) + name_size, __FILE__, __LINE__ );
-	module->name = ( char * )(( qbyte * )module + sizeof( *module ));
+	module->name = ( char * )(( uint8_t * )module + sizeof( *module ));
 	Q_strncpyz( module->name, name, name_size );
 	module->alloc_f = alloc_f;
 	module->free_f = free_f;
@@ -109,11 +109,6 @@ static void AsyncStream_DoneCallback( wswcurl_req *req, int status, void *privat
 		return;
 	}
 
-	if( handler->done_cb ) {
-		const char *contentType = wswcurl_get_content_type( req );
-		handler->done_cb( status, contentType, handler->privatep );
-	}
-
 	// unlink from the list
 	if( module->root_handler == handler ) {
 		module->root_handler = handler->next;
@@ -123,6 +118,11 @@ static void AsyncStream_DoneCallback( wswcurl_req *req, int status, void *privat
 	}
 	if( handler->next ) {
 		handler->next->prev = handler->prev;
+	}
+
+	if( handler->done_cb ) {
+		const char *contentType = wswcurl_get_content_type( req );
+		handler->done_cb( status, contentType, handler->privatep );
 	}
 
 	module->free_f( handler, __FILE__, __LINE__ );
@@ -211,11 +211,11 @@ int AsyncStream_PerformRequestExt( async_stream_module_t *module, const char *ur
 
 		// append data to query string
 		sep = strchr( url, '?' );
-		request = wswcurl_create( "%s%s%s", url, sep ? "&" : "?", data );
+		request = wswcurl_create( NULL, "%s%s%s", url, sep ? "&" : "?", data );
 		postfields = NULL;
 	}
 	else if( !Q_stricmp( method, "POST" ) ) {
-		request = wswcurl_create( "%s", url );
+		request = wswcurl_create( NULL, "%s", url );
 		postfields = data;
 	}
 	else {

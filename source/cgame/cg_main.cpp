@@ -28,11 +28,11 @@ cvar_t *cg_predict;
 cvar_t *cg_predict_optimize;
 cvar_t *cg_showMiss;
 
-cvar_t *model;
-cvar_t *skin;
-cvar_t *hand;
-cvar_t *clan;
-cvar_t *handicap;
+cvar_t *cg_model;
+cvar_t *cg_skin;
+cvar_t *cg_hand;
+cvar_t *cg_clan;
+cvar_t *cg_handicap;
 
 cvar_t *cg_addDecals;
 
@@ -43,6 +43,8 @@ cvar_t *cg_gun;
 cvar_t *cg_thirdPerson;
 cvar_t *cg_thirdPersonAngle;
 cvar_t *cg_thirdPersonRange;
+
+cvar_t *cg_colorCorrection;
 
 cvar_t *cg_weaponFlashes;
 cvar_t *cg_gunx;
@@ -78,14 +80,11 @@ cvar_t *cg_volume_players;
 cvar_t *cg_volume_effects;
 cvar_t *cg_volume_announcer;
 cvar_t *cg_volume_voicechats;
-cvar_t *cg_grenadeTrail;
-cvar_t *cg_rocketTrail;
-cvar_t *cg_rocketFireTrail;
+cvar_t *cg_projectileTrail;
+cvar_t *cg_projectileFireTrail;
 cvar_t *cg_bloodTrail;
 cvar_t *cg_showBloodTrail;
-cvar_t *cg_grenadeTrailAlpha;
-cvar_t *cg_rocketTrailAlpha;
-cvar_t *cg_rocketFireTrailAlpha;
+cvar_t *cg_projectileFireTrailAlpha;
 cvar_t *cg_bloodTrailAlpha;
 cvar_t *cg_explosionsRing;
 cvar_t *cg_explosionsDust;
@@ -95,9 +94,9 @@ cvar_t *cg_outlineWorld;
 cvar_t *cg_outlinePlayers;
 cvar_t *cg_drawEntityBoxes;
 cvar_t *cg_fov;
-cvar_t *cg_oldMovement;
+cvar_t *cg_zoomfov;
+cvar_t *cg_movementStyle;
 cvar_t *cg_noAutohop;
-cvar_t *cg_zoomSens;
 cvar_t *cg_predictLaserBeam;
 cvar_t *cg_voiceChats;
 cvar_t *cg_shadows;
@@ -123,10 +122,8 @@ cvar_t *cg_simpleItemsSize;
 cvar_t *cg_showObituaries;
 cvar_t *cg_particles;
 cvar_t *cg_showhelp;
-cvar_t *cg_scoreboardStats;
 cvar_t *cg_showClamp;
 
-cvar_t *cg_damage_kick;
 cvar_t *cg_damage_indicator;
 cvar_t *cg_damage_indicator_time;
 cvar_t *cg_pickup_flash;
@@ -135,20 +132,24 @@ cvar_t *cg_weaponAutoSwitch;
 
 // force models
 cvar_t *cg_teamPLAYERSmodel;
+cvar_t *cg_teamPLAYERSmodelForce;
 cvar_t *cg_teamALPHAmodel;
+cvar_t *cg_teamALPHAmodelForce;
 cvar_t *cg_teamBETAmodel;
+cvar_t *cg_teamBETAmodelForce;
 
 cvar_t *cg_teamPLAYERSskin;
 cvar_t *cg_teamALPHAskin;
 cvar_t *cg_teamBETAskin;
 
 cvar_t *cg_teamPLAYERScolor;
+cvar_t *cg_teamPLAYERScolorForce;
 cvar_t *cg_teamALPHAcolor;
 cvar_t *cg_teamBETAcolor;
 
 cvar_t *cg_forceMyTeamAlpha;
-cvar_t *cg_forceTeamPlayersTeamBeta;
 cvar_t *cg_teamColoredBeams;
+cvar_t *cg_teamColoredInstaBeams;
 //cvar_t *cg_teamColorBeamMinimum;
 
 cvar_t *cg_ebbeam_old;
@@ -158,12 +159,13 @@ cvar_t *cg_ebbeam_time;
 cvar_t *cg_instabeam_width;
 cvar_t *cg_instabeam_alpha;
 cvar_t *cg_instabeam_time;
-cvar_t *cg_lgbeam_old;
 
 cvar_t *cg_playList;
 cvar_t *cg_playListShuffle;
 
 cvar_t *cg_flashWindowCount;
+
+cvar_t *cg_viewBob;
 
 /*
 * CG_API
@@ -206,11 +208,10 @@ void CG_Printf( const char *format, ... )
 /*
 * CG_LocalPrint
 */
-#define LOCALPRINT_MSG_SIZE 1024
-void CG_LocalPrint( bool team, const char *format, ... )
+void CG_LocalPrint( const char *format, ... )
 {
 	va_list	argptr;
-	char msg[LOCALPRINT_MSG_SIZE];
+	char msg[GAMECHAT_STRING_SIZE];
 
 	va_start( argptr, format );
 	Q_vsnprintfz( msg, sizeof( msg ), format, argptr );
@@ -419,8 +420,18 @@ char *_CG_CopyString( const char *in, const char *filename, int fileline )
 */
 static void CG_InitL10n( void )
 {
+	char mapl10n[10+MAX_CONFIGSTRING_CHARS];
+
 	trap_L10n_ClearDomain();
 	trap_L10n_LoadLangPOFile( "l10n/cgame" );
+
+	Q_strncpyz( mapl10n, "l10n/", sizeof( mapl10n ) );
+	Q_strncpyz( mapl10n+5, cgs.configStrings[CS_WORLDMODEL], sizeof( mapl10n ) - 5 );
+	COM_StripExtension( mapl10n );
+
+	if( mapl10n[0] ) {
+		trap_L10n_LoadLangPOFile( mapl10n );
+	}
 }
 
 /*
@@ -458,50 +469,71 @@ static void CG_RegisterWeaponModels( void )
 static void CG_RegisterModels( void )
 {
 	int i;
-	char *name;
+	const char *name;
 
-	name = cgs.configStrings[CS_WORLDMODEL];
-	if( name[0] )
+	if( cgs.precacheModelsStart == MAX_MODELS )
+		return;
+
+	if( cgs.precacheModelsStart == 0 )
 	{
-		CG_LoadingItemName( name );
-		CG_LoadingString( name );
-		trap_R_RegisterWorldModel( name );
+		name = cgs.configStrings[CS_WORLDMODEL];
+		if( name[0] )
+		{
+			if( !CG_LoadingItemName( name ) )
+				return;
+			CG_LoadingString( name );
+			trap_R_RegisterWorldModel( name );
+		}
+
+		CG_LoadingString( "models" );
+
+		cgs.numWeaponModels = 1;
+		Q_strncpyz( cgs.weaponModels[0], "generic/generic.md3", sizeof( cgs.weaponModels[0] ) );
+
+		cgs.precacheModelsStart = 1;
 	}
 
-	CG_LoadingString( "models" );
-
-	cgs.numWeaponModels = 1;
-	Q_strncpyz( cgs.weaponModels[0], "generic/generic.md3", sizeof( cgs.weaponModels[0] ) );
-
-	for( i = 1; i < MAX_MODELS; i++ )
+	for( i = cgs.precacheModelsStart; i < MAX_MODELS; i++ )
 	{
 		name = cgs.configStrings[CS_MODELS+i];
-		if( !name[0] )
+
+		if( !name[0] ) {
+			cgs.precacheModelsStart = MAX_MODELS;
 			break;
+		}
+
+		cgs.precacheModelsStart = i;
 
 		if( name[0] == '#' )
 		{
 			// special player weapon model
-			if( cgs.numWeaponModels < WEAP_TOTAL )
-			{
-				Q_strncpyz( cgs.weaponModels[cgs.numWeaponModels], name+1, sizeof( cgs.weaponModels[cgs.numWeaponModels] ) );
-				cgs.numWeaponModels++;
-				CG_LoadingItemName( name );
-			}
+			if( cgs.numWeaponModels >= WEAP_TOTAL )
+				continue;
+
+			if( !CG_LoadingItemName( name ) )
+				return;
+
+			Q_strncpyz( cgs.weaponModels[cgs.numWeaponModels], name+1, sizeof( cgs.weaponModels[cgs.numWeaponModels] ) );
+			cgs.numWeaponModels++;
 		}
 		else if( name[0] == '$' )
 		{
+			if( !CG_LoadingItemName( name ) )
+				return;
 			// indexed pmodel
 			cgs.pModelsIndex[i] = CG_RegisterPlayerModel( name+1 );
-			CG_LoadingItemName( name );
 		}
 		else
 		{
-			CG_LoadingItemName( name );
+			if( !CG_LoadingItemName( name ) )
+				return;
 			cgs.modelDraw[i] = CG_RegisterModel( name );
 		}
 	}
 
+	if( cgs.precacheModelsStart != MAX_MODELS )
+		return;
+	
 	CG_RegisterMediaModels();
 	CG_RegisterBasePModel(); // never before registering the weapon models
 	CG_RegisterWeaponModels();
@@ -521,22 +553,37 @@ static void CG_RegisterModels( void )
 static void CG_RegisterSounds( void )
 {
 	int i;
-	char *name;
+	const char *name;
 
-	CG_LoadingString( "sounds" );
+	if( cgs.precacheSoundsStart == MAX_SOUNDS )
+		return;
 
-	for( i = 1; i < MAX_SOUNDS; i++ )
+	if( !cgs.precacheSoundsStart ) {
+		CG_LoadingString( "sounds" );
+
+		cgs.precacheSoundsStart = 1;
+	}
+
+	for( i = cgs.precacheSoundsStart; i < MAX_SOUNDS; i++ )
 	{
 		name = cgs.configStrings[CS_SOUNDS+i];
-		if( !name[0] )
+		if( !name[0] ) {
+			cgs.precacheSoundsStart = MAX_SOUNDS;
 			break;
+		}
+		
+		cgs.precacheSoundsStart = i;
 
 		if( name[0] != '*' )
 		{
-			CG_LoadingItemName( name );
+			if( !CG_LoadingItemName( name ) )
+				return;
 			cgs.soundPrecache[i] = trap_S_RegisterSound( name );
 		}
 	}
+
+	if( cgs.precacheSoundsStart != MAX_SOUNDS )
+		return;
 
 	CG_RegisterMediaSounds();
 }
@@ -547,19 +594,35 @@ static void CG_RegisterSounds( void )
 static void CG_RegisterShaders( void )
 {
 	int i;
-	char *name;
+	const char *name;
 
-	CG_LoadingString( "shaders" );
+	if( cgs.precacheShadersStart == MAX_IMAGES )
+		return;
 
-	for( i = 1; i < MAX_IMAGES; i++ )
+	if( !cgs.precacheShadersStart ) {
+		CG_LoadingString( "shaders" );
+
+		cgs.precacheShadersStart = 1;
+	}
+
+	for( i = cgs.precacheShadersStart; i < MAX_IMAGES; i++ )
 	{
 		name = cgs.configStrings[CS_IMAGES+i];
-		if( !name[0] )
+		if( !name[0] ) {
+			cgs.precacheShadersStart = MAX_IMAGES;
 			break;
+		}
 
-		CG_LoadingItemName( name );
+		cgs.precacheShadersStart = i;
+
+		if( !CG_LoadingItemName( name ) )
+			return;
+
 		cgs.imagePrecache[i] = trap_R_RegisterPic( name );
 	}
+
+	if( cgs.precacheShadersStart != MAX_IMAGES )
+		return;
 
 	CG_RegisterMediaShaders();
 }
@@ -570,19 +633,34 @@ static void CG_RegisterShaders( void )
 static void CG_RegisterSkinFiles( void )
 {
 	int i;
-	char *name;
+	const char *name;
 
-	CG_LoadingString( "skins" );
+	if( cgs.precacheSkinsStart == MAX_SKINFILES )
+		return;
 
-	for( i = 1; i < MAX_SKINFILES; i++ )
+	if( !cgs.precacheSkinsStart ) {
+		CG_LoadingString( "skins" );
+
+		cgs.precacheSkinsStart = 1;
+	}
+
+	for( i = cgs.precacheSkinsStart; i < MAX_SKINFILES; i++ )
 	{
 		name = cgs.configStrings[CS_SKINFILES+i];
-		if( !name[0] )
+		if( !name[0] ) {
+			cgs.precacheSkinsStart = MAX_SKINFILES;
 			break;
+		}
 
-		CG_LoadingItemName( name );
+		cgs.precacheSkinsStart = i; 
+
+		if( !CG_LoadingItemName( name ) )
+			return;
+
 		cgs.skinPrecache[i] = trap_R_RegisterSkinFile( name );
 	}
+
+	cgs.precacheSkinsStart = MAX_SKINFILES;
 }
 
 /*
@@ -591,19 +669,28 @@ static void CG_RegisterSkinFiles( void )
 static void CG_RegisterClients( void )
 {
 	int i;
-	char *name;
+	const char *name;
 
-	CG_LoadingString( "clients" );
+	if( cgs.precacheClientsStart == MAX_CLIENTS )
+		return;
 
-	for( i = 0; i < gs.maxclients; i++ )
+	if( !cgs.precacheClientsStart )
+		CG_LoadingString( "clients" );
+
+	for( i = cgs.precacheClientsStart; i < MAX_CLIENTS; i++ )
 	{
 		name = cgs.configStrings[CS_PLAYERINFOS+i];
+		cgs.precacheClientsStart = i;
+
 		if( !name[0] )
 			continue;
+		if( !CG_LoadingItemName( name ) )
+			return;
 
-		CG_LoadingItemName( name );
 		CG_LoadClientInfo( &cgs.clientInfo[i], name, i );
 	}
+
+	cgs.precacheClientsStart = MAX_CLIENTS;
 }
 
 /*
@@ -612,9 +699,7 @@ static void CG_RegisterClients( void )
 static void CG_RegisterLightStyles( void )
 {
 	int i;
-	char *name;
-
-	CG_LoadingString( "lightstyles" );
+	const char *name;
 
 	for( i = 0; i < MAX_LIGHTSTYLES; i++ )
 	{
@@ -622,7 +707,6 @@ static void CG_RegisterLightStyles( void )
 		if( !name[0] )
 			continue;
 
-		CG_LoadingItemName( name );
 		CG_SetLightStyle( i );
 	}
 }
@@ -656,15 +740,15 @@ static void CG_RegisterVariables( void )
 	cg_debugPlayerModels =	trap_Cvar_Get( "cg_debugPlayerModels", "0", CVAR_CHEAT|CVAR_ARCHIVE );
 	cg_debugWeaponModels =	trap_Cvar_Get( "cg_debugWeaponModels", "0", CVAR_CHEAT|CVAR_ARCHIVE );
 
-	model =		    trap_Cvar_Get( "model", DEFAULT_PLAYERMODEL, CVAR_USERINFO | CVAR_ARCHIVE );
-	skin =		    trap_Cvar_Get( "skin", DEFAULT_PLAYERSKIN, CVAR_USERINFO | CVAR_ARCHIVE );
-	hand =		    trap_Cvar_Get( "hand", "0", CVAR_USERINFO | CVAR_ARCHIVE );
-	handicap =		trap_Cvar_Get( "handicap", "0", CVAR_USERINFO | CVAR_ARCHIVE );
-	clan =		    trap_Cvar_Get( "clan", "", CVAR_USERINFO | CVAR_ARCHIVE );
-	cg_oldMovement =	trap_Cvar_Get( "cg_oldMovement", "0", CVAR_USERINFO | CVAR_ARCHIVE );
+	cg_model =		    trap_Cvar_Get( "model", DEFAULT_PLAYERMODEL, CVAR_USERINFO | CVAR_ARCHIVE );
+	cg_skin =		    trap_Cvar_Get( "skin", DEFAULT_PLAYERSKIN, CVAR_USERINFO | CVAR_ARCHIVE );
+	cg_hand =		    trap_Cvar_Get( "hand", "0", CVAR_USERINFO | CVAR_ARCHIVE );
+	cg_handicap =		trap_Cvar_Get( "handicap", "0", CVAR_USERINFO | CVAR_ARCHIVE );
+	cg_clan =		    trap_Cvar_Get( "clan", "", CVAR_USERINFO | CVAR_ARCHIVE );
+	cg_movementStyle =	trap_Cvar_Get( "cg_movementStyle", "0", CVAR_USERINFO | CVAR_ARCHIVE );
 	cg_noAutohop =	trap_Cvar_Get( "cg_noAutohop", "0", CVAR_USERINFO | CVAR_ARCHIVE );
-	cg_fov =	    trap_Cvar_Get( "fov", "100", CVAR_USERINFO | CVAR_ARCHIVE );
-	cg_zoomSens =	    trap_Cvar_Get( "zoomsens", "0", CVAR_ARCHIVE );
+	cg_fov =	    trap_Cvar_Get( "fov", "100", CVAR_ARCHIVE );
+	cg_zoomfov =	trap_Cvar_Get( "zoomfov", "30", CVAR_ARCHIVE );
 
 	cg_addDecals =	    trap_Cvar_Get( "cg_decals", "1", CVAR_ARCHIVE );
 	//cg_footSteps =	    trap_Cvar_Get( "cg_footSteps", "1", 0 );
@@ -673,7 +757,8 @@ static void CG_RegisterVariables( void )
 	cg_thirdPersonAngle =	trap_Cvar_Get( "cg_thirdPersonAngle", "0", 0 );
 	cg_thirdPersonRange =	trap_Cvar_Get( "cg_thirdPersonRange", "90", 0 );
 
-	//skelmod
+	cg_colorCorrection = trap_Cvar_Get( "cg_colorCorrection", "1", CVAR_ARCHIVE );
+
 	cg_gun =		trap_Cvar_Get( "cg_gun", "1", CVAR_ARCHIVE );
 	cg_gunx =		trap_Cvar_Get( "cg_gunx", "0", CVAR_ARCHIVE );
 	cg_guny =		trap_Cvar_Get( "cg_guny", "0", CVAR_ARCHIVE );
@@ -691,14 +776,11 @@ static void CG_RegisterVariables( void )
 	cg_volume_hitsound =	trap_Cvar_Get( "cg_volume_hitsound", "1.0", CVAR_ARCHIVE );
 	cg_volume_voicechats =	trap_Cvar_Get( "cg_volume_voicechats", "1.0", CVAR_ARCHIVE );
 	cg_handOffset =		trap_Cvar_Get( "cg_handOffset", "5", CVAR_ARCHIVE );
-	cg_rocketTrail =	trap_Cvar_Get( "cg_rocketTrail", "40", CVAR_ARCHIVE );
-	cg_rocketFireTrail =	trap_Cvar_Get( "cg_rocketFireTrail", "90", CVAR_ARCHIVE );
-	cg_grenadeTrail =	trap_Cvar_Get( "cg_grenadeTrail", "20", CVAR_ARCHIVE );
+	cg_projectileTrail =	trap_Cvar_Get( "cg_projectileTrail", "60", CVAR_ARCHIVE );
+	cg_projectileFireTrail =	trap_Cvar_Get( "cg_projectileFireTrail", "90", CVAR_ARCHIVE );
 	cg_bloodTrail =		trap_Cvar_Get( "cg_bloodTrail", "10", CVAR_ARCHIVE );
 	cg_showBloodTrail =	trap_Cvar_Get( "cg_showBloodTrail", "1", CVAR_ARCHIVE );
-	cg_rocketTrailAlpha =	trap_Cvar_Get( "cg_rocketTrailAlpha", "0.35", CVAR_ARCHIVE );
-	cg_rocketFireTrailAlpha =	trap_Cvar_Get( "cg_rocketFireTrailAlpha", "0.45", CVAR_ARCHIVE );
-	cg_grenadeTrailAlpha =	trap_Cvar_Get( "cg_grenadeTrailAlpha", "0.5", CVAR_ARCHIVE );
+	cg_projectileFireTrailAlpha =	trap_Cvar_Get( "cg_projectileFireTrailAlpha", "0.45", CVAR_ARCHIVE );
 	cg_bloodTrailAlpha =	trap_Cvar_Get( "cg_bloodTrailAlpha", "1.0", CVAR_ARCHIVE );
 	cg_explosionsRing =	trap_Cvar_Get( "cg_explosionsRing", "0", CVAR_ARCHIVE );
 	cg_explosionsDust =    trap_Cvar_Get( "cg_explosionsDust", "0", CVAR_ARCHIVE );
@@ -713,7 +795,7 @@ static void CG_RegisterVariables( void )
 	cg_autoaction_stats =	trap_Cvar_Get( "cg_autoaction_stats", "0", CVAR_ARCHIVE );
 	cg_autoaction_spectator = trap_Cvar_Get( "cg_autoaction_spectator", "0", CVAR_ARCHIVE );
 	cg_simpleItems =	trap_Cvar_Get( "cg_simpleItems", "0", CVAR_ARCHIVE );
-	cg_simpleItemsSize =	trap_Cvar_Get( "cg_simpleItemsSize", "12", CVAR_ARCHIVE );
+	cg_simpleItemsSize =	trap_Cvar_Get( "cg_simpleItemsSize", "16", CVAR_ARCHIVE );
 	cg_particles =		trap_Cvar_Get( "cg_particles", "1", CVAR_ARCHIVE );
 	cg_showhelp =		trap_Cvar_Get( "cg_showhelp", "1", CVAR_ARCHIVE );
 	cg_predictLaserBeam =	trap_Cvar_Get( "cg_predictLaserBeam", "1", CVAR_ARCHIVE );
@@ -722,9 +804,8 @@ static void CG_RegisterVariables( void )
 	cg_cartoonEffects =		trap_Cvar_Get( "cg_cartoonEffects", "7", CVAR_ARCHIVE );
 	cg_cartoonHitEffect =	trap_Cvar_Get( "cg_cartoonHitEffect", "0", CVAR_ARCHIVE );
 
-	cg_damage_kick =	trap_Cvar_Get( "cg_damage_kick", "0", CVAR_ARCHIVE );
 	cg_damage_indicator =	trap_Cvar_Get( "cg_damage_indicator", "1", CVAR_ARCHIVE );
-	cg_damage_indicator_time =	trap_Cvar_Get( "cg_damage_indicator_time", "50", CVAR_ARCHIVE );
+	cg_damage_indicator_time =	trap_Cvar_Get( "cg_damage_indicator_time", "25", CVAR_ARCHIVE );
 	cg_pickup_flash =	trap_Cvar_Get( "cg_pickup_flash", "0", CVAR_ARCHIVE );
 
 	cg_weaponAutoSwitch =	trap_Cvar_Get( "cg_weaponAutoSwitch", "2", CVAR_ARCHIVE );
@@ -742,45 +823,50 @@ static void CG_RegisterVariables( void )
 	cg_chatFilter =		trap_Cvar_Get( "cg_chatFilter", "0", CVAR_ARCHIVE );
 	cg_chatFilterTV =	trap_Cvar_Get( "cg_chatFilterTV", "2", CVAR_ARCHIVE );
 
-	cg_scoreboardStats =	trap_Cvar_Get( "cg_scoreboardStats", "1", CVAR_ARCHIVE );
-
 	// developer cvars
 	developer =		trap_Cvar_Get( "developer", "0", CVAR_CHEAT );
 	cg_showClamp =		trap_Cvar_Get( "cg_showClamp", "0", CVAR_DEVELOPER );
 
 	//team models
-	cg_teamPLAYERSmodel =	trap_Cvar_Get( "cg_teamPLAYERSmodel", "", CVAR_ARCHIVE );
-	cg_teamPLAYERSskin =	trap_Cvar_Get( "cg_teamPLAYERSskin", "default", CVAR_ARCHIVE );
-	cg_teamPLAYERScolor =	trap_Cvar_Get( "cg_teamPLAYERScolor", "", CVAR_ARCHIVE );
-	cg_teamPLAYERSmodel->modified = qtrue;
-	cg_teamPLAYERSskin->modified = qtrue;
-	cg_teamPLAYERScolor->modified = qtrue;
+	cg_teamPLAYERSmodel = trap_Cvar_Get( "cg_teamPLAYERSmodel", DEFAULT_PLAYERMODEL, CVAR_ARCHIVE );
+	cg_teamPLAYERSmodelForce = trap_Cvar_Get( "cg_teamPLAYERSmodelForce", "0", CVAR_ARCHIVE );
+	cg_teamPLAYERSskin = trap_Cvar_Get( "cg_teamPLAYERSskin", DEFAULT_PLAYERSKIN, CVAR_ARCHIVE );
+	cg_teamPLAYERScolor = trap_Cvar_Get( "cg_teamPLAYERScolor", DEFAULT_TEAMBETA_COLOR, CVAR_ARCHIVE );
+	cg_teamPLAYERScolorForce = trap_Cvar_Get( "cg_teamPLAYERScolorForce", "0", CVAR_ARCHIVE );
+	cg_teamPLAYERSmodel->modified = true;
+	cg_teamPLAYERSmodelForce->modified = true;
+	cg_teamPLAYERSskin->modified = true;
+	cg_teamPLAYERScolor->modified = true;
+	cg_teamPLAYERScolorForce->modified = true;
 
-	cg_teamALPHAmodel =	trap_Cvar_Get( "cg_teamALPHAmodel", "", CVAR_ARCHIVE );
-	cg_teamALPHAskin =	trap_Cvar_Get( "cg_teamALPHAskin", "default", CVAR_ARCHIVE );
-	cg_teamALPHAcolor =	trap_Cvar_Get( "cg_teamALPHAcolor", DEFAULT_TEAMALPHA_COLOR, CVAR_ARCHIVE );
-	cg_teamALPHAmodel->modified = qtrue;
-	cg_teamALPHAskin->modified = qtrue;
-	cg_teamALPHAcolor->modified = qtrue;
+	cg_teamALPHAmodel = trap_Cvar_Get( "cg_teamALPHAmodel", "bigvic", CVAR_ARCHIVE );
+	cg_teamALPHAmodelForce = trap_Cvar_Get( "cg_teamALPHAmodelForce", "1", CVAR_ARCHIVE );
+	cg_teamALPHAskin = trap_Cvar_Get( "cg_teamALPHAskin", DEFAULT_PLAYERSKIN, CVAR_ARCHIVE );
+	cg_teamALPHAcolor = trap_Cvar_Get( "cg_teamALPHAcolor", DEFAULT_TEAMALPHA_COLOR, CVAR_ARCHIVE );
+	cg_teamALPHAmodel->modified = true;
+	cg_teamALPHAmodelForce->modified = true;
+	cg_teamALPHAskin->modified = true;
+	cg_teamALPHAcolor->modified = true;
 
-	cg_teamBETAmodel =	trap_Cvar_Get( "cg_teamBETAmodel", "", CVAR_ARCHIVE );
-	cg_teamBETAskin =	trap_Cvar_Get( "cg_teamBETAskin", "default", CVAR_ARCHIVE );
-	cg_teamBETAcolor =	trap_Cvar_Get( "cg_teamBETAcolor", DEFAULT_TEAMBETA_COLOR, CVAR_ARCHIVE );
-	cg_teamBETAmodel->modified = qtrue;
-	cg_teamBETAskin->modified = qtrue;
-	cg_teamBETAcolor->modified = qtrue;
+	cg_teamBETAmodel = trap_Cvar_Get( "cg_teamBETAmodel", "padpork", CVAR_ARCHIVE );
+	cg_teamBETAmodelForce = trap_Cvar_Get( "cg_teamBETAmodelForce", "1", CVAR_ARCHIVE );
+	cg_teamBETAskin = trap_Cvar_Get( "cg_teamBETAskin", DEFAULT_PLAYERSKIN, CVAR_ARCHIVE );
+	cg_teamBETAcolor = trap_Cvar_Get( "cg_teamBETAcolor", DEFAULT_TEAMBETA_COLOR, CVAR_ARCHIVE );
+	cg_teamBETAmodel->modified = true;
+	cg_teamBETAmodelForce->modified = true;
+	cg_teamBETAskin->modified = true;
+	cg_teamBETAcolor->modified = true;
 
-	cg_forceMyTeamAlpha =		trap_Cvar_Get( "cg_forceMyTeamAlpha", "0", CVAR_ARCHIVE );
-	cg_forceTeamPlayersTeamBeta =	trap_Cvar_Get( "cg_forceTeamPlayersTeamBeta", "0", CVAR_ARCHIVE );
+	cg_forceMyTeamAlpha = trap_Cvar_Get( "cg_forceMyTeamAlpha", "0", CVAR_ARCHIVE );
 
 	// dmh - learn0more's team colored beams
-	cg_teamColoredBeams = trap_Cvar_Get( "cg_teamColoredBeams", "1", CVAR_ARCHIVE );
+	cg_teamColoredBeams = trap_Cvar_Get( "cg_teamColoredBeams", "0", CVAR_ARCHIVE );
+	cg_teamColoredInstaBeams = trap_Cvar_Get( "cg_teamColoredInstaBeams", "1", CVAR_ARCHIVE );
 
 	cg_ebbeam_old = trap_Cvar_Get( "cg_ebbeam_old", "0", CVAR_ARCHIVE );
 	cg_ebbeam_width = trap_Cvar_Get( "cg_ebbeam_width", "64", CVAR_ARCHIVE );
 	cg_ebbeam_alpha = trap_Cvar_Get( "cg_ebbeam_alpha", "0.4", CVAR_ARCHIVE );
 	cg_ebbeam_time = trap_Cvar_Get( "cg_ebbeam_time", "0.6", CVAR_ARCHIVE );
-	cg_lgbeam_old = trap_Cvar_Get( "cg_lgbeam_old", "0", CVAR_ARCHIVE );
 
 	cg_instabeam_width = trap_Cvar_Get( "cg_instabeam_width", "7", CVAR_ARCHIVE );
 	cg_instabeam_alpha = trap_Cvar_Get( "cg_instabeam_alpha", "0.4", CVAR_ARCHIVE );
@@ -790,11 +876,32 @@ static void CG_RegisterVariables( void )
 	cg_showitemtimers = trap_Cvar_Get( "cg_showItemTimers", "3", CVAR_ARCHIVE );
 	cg_placebo =  trap_Cvar_Get( "cg_placebo", "0", CVAR_ARCHIVE );
 	cg_strafeHUD = trap_Cvar_Get( "cg_strafeHUD", "0", CVAR_ARCHIVE );
+	cg_touch_flip = trap_Cvar_Get( "cg_touch_flip", "0", CVAR_ARCHIVE );
+	cg_touch_scale = trap_Cvar_Get( "cg_touch_scale", "100", CVAR_ARCHIVE );
+	cg_touch_showMoveDir = trap_Cvar_Get( "cg_touch_showMoveDir", "1", CVAR_ARCHIVE );
+	cg_touch_zoomThres = trap_Cvar_Get( "cg_touch_zoomThres", "20", CVAR_ARCHIVE );
+	cg_touch_zoomTime = trap_Cvar_Get( "cg_touch_zoomTime", "250", CVAR_ARCHIVE );
 
 	cg_playList = trap_Cvar_Get( "cg_playList", S_PLAYLIST_MATCH, CVAR_ARCHIVE );
 	cg_playListShuffle = trap_Cvar_Get( "cg_playListShuffle", "1", CVAR_ARCHIVE );
 
 	cg_flashWindowCount = trap_Cvar_Get( "cg_flashWindowCount", "4", CVAR_ARCHIVE );
+
+	cg_viewBob = trap_Cvar_Get( "cg_viewBob", "1", CVAR_ARCHIVE );
+
+	cg_gamepad_moveThres = trap_Cvar_Get( "cg_gamepad_moveThres", "0.239", CVAR_ARCHIVE );
+	cg_gamepad_runThres = trap_Cvar_Get( "cg_gamepad_runThres", "0.75", CVAR_ARCHIVE );
+	cg_gamepad_strafeThres = trap_Cvar_Get( "cg_gamepad_strafeThres", "0.239", CVAR_ARCHIVE );
+	cg_gamepad_strafeRunThres = trap_Cvar_Get( "cg_gamepad_strafeRunThres", "0.45", CVAR_ARCHIVE );
+	cg_gamepad_pitchThres = trap_Cvar_Get( "cg_gamepad_pitchThres", "0.265", CVAR_ARCHIVE );
+	cg_gamepad_yawThres = trap_Cvar_Get( "cg_gamepad_yawThres", "0.265", CVAR_ARCHIVE );
+	cg_gamepad_pitchSpeed = trap_Cvar_Get( "cg_gamepad_pitchSpeed", "260", CVAR_ARCHIVE );
+	cg_gamepad_yawSpeed = trap_Cvar_Get( "cg_gamepad_yawSpeed", "280", CVAR_ARCHIVE );
+	cg_gamepad_pitchInvert = trap_Cvar_Get( "cg_gamepad_pitchInvert", "0", CVAR_ARCHIVE );
+	cg_gamepad_accelMax = trap_Cvar_Get( "cg_gamepad_accelMax", "2", CVAR_ARCHIVE );
+	cg_gamepad_accelSpeed = trap_Cvar_Get( "cg_gamepad_accelSpeed", "3", CVAR_ARCHIVE );
+	cg_gamepad_accelThres = trap_Cvar_Get( "cg_gamepad_accelThres", "0.9", CVAR_ARCHIVE );
+	cg_gamepad_swapSticks = trap_Cvar_Get( "cg_gamepad_swapSticks", "0", CVAR_ARCHIVE );
 }
 
 /*
@@ -850,7 +957,7 @@ void CG_OverrideWeapondef( int index, const char *cstring )
 		&firedef->speed,
 		&firedef->spread,
 		&firedef->v_spread
-		);
+	);
 
 	if( i != 10 )
 		CG_Error( "CG_OverrideWeapondef: Bad configstring: %s \"%s\" (%i)\n", weapondef->name, cstring, i );
@@ -862,24 +969,55 @@ void CG_OverrideWeapondef( int index, const char *cstring )
 static void CG_ValidateItemList( void )
 {
 	int i;
+	int cs;
 
-	for( i = CS_ITEMS; i < CS_ITEMS+MAX_ITEMS; i++ )
+	for( i = 0; i < MAX_ITEMS; i++ )
 	{
-		if( cgs.configStrings[i][0] )
-		{
-			CG_LoadingItemName( cgs.configStrings[i] );
-			CG_ValidateItemDef( i - CS_ITEMS, cgs.configStrings[i] );
-		}
+		cs = CS_ITEMS + i;
+		if( cgs.configStrings[cs][0] )
+			CG_ValidateItemDef( i, cgs.configStrings[cs] );
 	}
 
-	for( i = CS_WEAPONDEFS; i < CS_WEAPONDEFS + MAX_WEAPONDEFS; i++ )
+	for( i = 0; i < MAX_WEAPONDEFS; i++ )
 	{
-		if( cgs.configStrings[i][0] )
-		{
-			CG_LoadingItemName( cgs.configStrings[i] );
-			CG_OverrideWeapondef( i - CS_WEAPONDEFS, cgs.configStrings[i] );
-		}
+		cs = CS_WEAPONDEFS + i;
+		if( cgs.configStrings[cs][0] )
+			CG_OverrideWeapondef( i, cgs.configStrings[cs] );
 	}
+}
+
+/*
+* CG_Precache
+*/
+void CG_Precache( void )
+{
+	if( cgs.precacheDone )
+		return;
+
+	cgs.precacheStart = cgs.precacheCount;
+	cgs.precacheStartMsec = trap_Milliseconds();
+
+	CG_RegisterModels();
+	if( cgs.precacheModelsStart < MAX_MODELS )
+		return;
+
+	CG_RegisterSounds();
+	if( cgs.precacheSoundsStart < MAX_SOUNDS )
+		return;
+
+	CG_RegisterShaders();
+	if( cgs.precacheShadersStart < MAX_IMAGES )
+		return;
+
+	CG_RegisterSkinFiles();
+	if( cgs.precacheSkinsStart < MAX_SKINFILES )
+		return;
+
+	CG_RegisterClients();
+	if( cgs.precacheClientsStart < MAX_CLIENTS )
+		return;
+
+	cgs.precacheDone = true;
 }
 
 /*
@@ -906,9 +1044,9 @@ static void CG_RegisterConfigStrings( void )
 	int i;
 	const char *cs;
 
-	cg.precacheCount = cg.precacheTotal = 0;
+	cgs.precacheCount = cgs.precacheTotal = 0;
 
-	for( i = 0; i < CS_GENERAL; i++ )
+	for( i = 0; i < MAX_CONFIGSTRINGS; i++ )
 	{
 		trap_GetConfigString( i, cgs.configStrings[i], MAX_CONFIGSTRING_CHARS );
 
@@ -918,19 +1056,17 @@ static void CG_RegisterConfigStrings( void )
 		}
 
 		if( i == CS_WORLDMODEL )
-		{
-			cg.precacheTotal++;
-		}
-		else if( i >= CS_MODELS )
-		{
-			if( i >= CS_LOCATIONS && i < CS_LOCATIONS + MAX_LOCATIONS )
-				continue;
-
-			if( ( i >= CS_SOUNDS && i < CS_SOUNDS + MAX_SOUNDS ) && ( cs[0] == '*' ) )
-				continue;
-
-			cg.precacheTotal++;
-		}
+			cgs.precacheTotal++;
+		else if( i >= CS_MODELS && i < CS_MODELS + MAX_MODELS )
+			cgs.precacheTotal++;
+		else if( i >= CS_SOUNDS && i < CS_SOUNDS + MAX_SOUNDS )
+			cgs.precacheTotal++;
+		else if( i >= CS_IMAGES && i < CS_IMAGES + MAX_IMAGES )
+			cgs.precacheTotal++;
+		else if( i >= CS_SKINFILES && i < CS_SKINFILES + MAX_SKINFILES )
+			cgs.precacheTotal++;
+		else if( i >= CS_PLAYERINFOS && i < CS_PLAYERINFOS + MAX_CLIENTS )
+			cgs.precacheTotal++;
 	}
 
 	// if we got the server settings configstring, update our local copy of the data
@@ -956,9 +1092,9 @@ void CG_StartBackgroundTrack( void )
 	Q_strncpyz( loop, COM_Parse( &string ), sizeof( loop ) );
 
 	if( intro[0] )
-		trap_S_StartBackgroundTrack( intro, loop );
+		trap_S_StartBackgroundTrack( intro, loop, 0 );
 	else if( cg_playList->string[0] )
-		trap_S_StartBackgroundTrack( cg_playList->string, cg_playListShuffle->integer ? "1" : "0" );
+		trap_S_StartBackgroundTrack( cg_playList->string, NULL, cg_playListShuffle->integer ? 1 : 0 );
 }
 
 /*
@@ -973,18 +1109,22 @@ void CG_Reset( void )
 	CG_ResetDamageIndicator();
 	CG_ResetItemTimers();
 
+	CG_SC_ResetObituaries();
+
 	CG_ClearDecals();
 	CG_ClearPolys();
 	CG_ClearEffects();
 	CG_ClearLocalEntities();
 
-	CG_DemocamReset();
-
 	// start up announcer events queue from clean
 	CG_ClearAnnouncerEvents();
 
+	CG_ClearInputState();
+
 	cg.time = 0;
 	cg.realTime = 0;
+
+	chaseCam.cmd_mode_delay = 0; // cg.time
 
 	// reset prediction optimization
 	cg.predictFrom = 0;
@@ -995,9 +1135,11 @@ void CG_Reset( void )
 /*
 * CG_Init
 */
-void CG_Init( const char *serverName, unsigned int playerNum, int vidWidth, int vidHeight, 
-			 qboolean demoplaying, const char *demoName, qboolean pure, 
-			 unsigned int snapFrameTime, int protocol, int sharedSeed )
+void CG_Init( const char *serverName, unsigned int playerNum,
+			 int vidWidth, int vidHeight, float pixelRatio,
+			 bool demoplaying, const char *demoName, bool pure, 
+			 unsigned int snapFrameTime, int protocol, const char *demoExtension,
+			 int sharedSeed, bool gameStart )
 {
 	CG_InitGameShared();
 
@@ -1009,6 +1151,8 @@ void CG_Init( const char *serverName, unsigned int playerNum, int vidWidth, int 
 	CG_Printf( S_COLOR_MAGENTA"Hi, I'm an unpure bitch 7\n" );
 #endif
 
+	srand( time( NULL ) );
+
 	// save server name
 	cgs.serverName = CG_CopyString( serverName );
 
@@ -1018,13 +1162,15 @@ void CG_Init( const char *serverName, unsigned int playerNum, int vidWidth, int 
 	// save current width and height
 	cgs.vidWidth = vidWidth;
 	cgs.vidHeight = vidHeight;
+	cgs.pixelRatio = pixelRatio;
 
 	// demo
-	cgs.demoPlaying = demoplaying == qtrue;
+	cgs.demoPlaying = demoplaying == true;
 	cgs.demoName = demoName;
+	Q_strncpyz( cgs.demoExtension, demoExtension, sizeof( cgs.demoExtension ) );
 
 	// whether to only allow pure files
-	cgs.pure = pure == qtrue;
+	cgs.pure = pure == true;
 
 	// whether we are connected to a tv-server
 	cgs.tv = false;
@@ -1034,16 +1180,20 @@ void CG_Init( const char *serverName, unsigned int playerNum, int vidWidth, int 
 	cgs.gameProtocol = protocol;
 	cgs.snapFrameTime = snapFrameTime;
 
-	cgs.initialSharedSeed = sharedSeed;
-	cg.sharedSeed = cgs.initialSharedSeed;
-
 	cgs.hasGametypeMenu = false; // this will update as soon as we receive configstrings
+	cgs.gameMenuRequested = !gameStart;
+
+	CG_RefreshQuickMenu();
 
 	CG_RegisterVariables();
 	CG_InitTemporaryBoneposesCache();
 	CG_PModelsInit();
 
 	CG_ScreenInit();
+
+	CG_ClearLightStyles();
+
+	CG_ClearLocalEntities();
 
 	// get configstrings
 	CG_RegisterConfigStrings();
@@ -1062,13 +1212,8 @@ void CG_Init( const char *serverName, unsigned int playerNum, int vidWidth, int 
 
 	CG_RegisterLevelMinimap();
 
-	CG_RegisterModels();
-	CG_RegisterSounds();
-	CG_RegisterShaders();
-	CG_RegisterSkinFiles();
-	CG_RegisterClients();
-
 	CG_RegisterCGameCommands();
+	CG_RegisterLightStyles();
 
 	CG_ValidateItemList();
 
@@ -1079,16 +1224,11 @@ void CG_Init( const char *serverName, unsigned int playerNum, int vidWidth, int 
 	CG_ClearDecals();
 	CG_ClearPolys();
 	CG_ClearEffects();
-	CG_ClearLocalEntities();
 
 	CG_InitChat( &cg.chat );
 
-	CG_RegisterLightStyles();
-
 	// start up announcer events queue from clean
 	CG_ClearAnnouncerEvents();
-
-	cgs.precacheDone = true;
 
 	cgs.demoTutorial = cgs.demoPlaying && (strstr( cgs.demoName, "tutorials/" ) != NULL);
 
@@ -1107,10 +1247,12 @@ void CG_Init( const char *serverName, unsigned int playerNum, int vidWidth, int 
 */
 void CG_Shutdown( void )
 {
+	CG_FreeLocalEntities();
 	CG_ChatShutdown(); // racesow
 	CG_DemocamShutdown();
 	CG_ScreenShutdown();
 	CG_UnregisterCGameCommands();
+	CG_FreeTemporaryBoneposesCache();
 }
 
 //======================================================================

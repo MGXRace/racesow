@@ -9,6 +9,7 @@
 #include <Rocket/Controls.h>
 #include <Rocket/Controls/ElementTabSet.h>
 #include <Rocket/Controls/ElementFormControlDataSelect.h>
+#include "widgets/ui_image.h"
 
 // macro to addref a return object (rocket element)
 #define _RETREF(a)	if( (a) ) { (a)->AddReference(); } return (a);
@@ -21,8 +22,11 @@ namespace ASUI {
 
 // dummy class since ASBIND only can only bind unique classes 
 // and AngelScript arrays are more like composite classes
-typedef CScriptArrayInterface ASElementsArray;
+class ASElementsArray : public CScriptArrayInterface {};
 static asIObjectType *elementsArrayType;
+
+class ASStringsArray : public CScriptArrayInterface {};
+static asIObjectType *stringsArrayType;
 
 typedef Rocket::Controls::ElementForm ElementForm;
 typedef Rocket::Controls::ElementFormControl ElementFormControl;
@@ -32,6 +36,8 @@ typedef Rocket::Controls::ElementDataGrid ElementDataGrid;
 typedef Rocket::Controls::ElementDataGridRow ElementDataGridRow;
 
 typedef Rocket::Controls::ElementTabSet ElementTabSet;
+
+typedef WSWUI::ElementImage ElementImage;
 
 }
 
@@ -46,8 +52,11 @@ ASBIND_TYPE( Rocket::Controls::ElementDataGridRow, ElementDataGridRow );
 
 ASBIND_TYPE( Rocket::Controls::ElementTabSet, ElementTabSet );
 
+ASBIND_TYPE( WSWUI::ElementImage, ElementImage );
+
 // array of Element handlers
 ASBIND_ARRAY_TYPE( ASUI::ASElementsArray, Element @ );
+ASBIND_ARRAY_TYPE( ASUI::ASStringsArray, String @ );
 
 //==============================================================
 
@@ -71,10 +80,30 @@ static asstring_t *Event_GetType( Event *self ) {
 	return ASSTR( self->GetType() );
 }
 
-static asstring_t *Event_GetParameter( Event *self, const asstring_t &a, const asstring_t &b ) {
+static asstring_t *Event_GetParameterS( Event *self, const asstring_t &a, const asstring_t &b ) {
 	Rocket::Core::String name = ASSTR(a);
 	Rocket::Core::String default_value = ASSTR(b);
 	return ASSTR( self->GetParameter( name, default_value ) );
+}
+
+static int Event_GetParameterI( Event *self, const asstring_t &a, const int default_value ) {
+	Rocket::Core::String name = ASSTR(a);
+	return self->GetParameter( name, default_value );
+}
+
+static unsigned Event_GetParameterU( Event *self, const asstring_t &a, const unsigned default_value ) {
+	Rocket::Core::String name = ASSTR(a);
+	return self->GetParameter( name, default_value );
+}
+
+static float Event_GetParameterF( Event *self, const asstring_t &a, const float default_value ) {
+	Rocket::Core::String name = ASSTR(a);
+	return self->GetParameter( name, default_value );
+}
+
+static bool Event_GetParameterB( Event *self, const asstring_t &a, const bool default_value ) {
+	Rocket::Core::String name = ASSTR(a);
+	return self->GetParameter( name, default_value );
 }
 
 static CScriptDictionaryInterface *Event_GetParameters( Event *self ) {
@@ -110,13 +139,31 @@ void BindEvent( ASInterface *as )
 		( "EVENT_PHASE_BUBBLE", Event::PHASE_BUBBLE )
 		;
 
+	ASBind::Enum( as->getEngine(), "eInputKey" )
+		( "KI_ESCAPE", Input::KI_ESCAPE )
+		( "KI_0", Input::KI_0 )
+		( "KI_1", Input::KI_1 )
+		( "KI_2", Input::KI_2 )
+		( "KI_3", Input::KI_3 )
+		( "KI_4", Input::KI_4 )
+		( "KI_5", Input::KI_5 )
+		( "KI_6", Input::KI_6 )
+		( "KI_7", Input::KI_7 )
+		( "KI_8", Input::KI_8 )
+		( "KI_9", Input::KI_9 )
+	;
+
 	// reference (without factory)
 	ASBind::GetClass<Rocket::Core::Event>( as->getEngine() )
 		.refs( &Event::AddReference, &Event::RemoveReference )
 
 		.method( &Event_GetType, "getType", true )
 		.method( &Event_GetTargetElement, "getTarget", true )
-		.method( &Event_GetParameter, "getParameter", true )
+		.method( &Event_GetParameterS, "getParameter", true )
+		.method( &Event_GetParameterI, "getParameter", true )
+		.method( &Event_GetParameterU, "getParameter", true )
+		.method( &Event_GetParameterF, "getParameter", true )
+		.method( &Event_GetParameterB, "getParameter", true )
 		.method( &Event_GetParameters, "getParameters", true )
 		.method( &Event_GetPhase, "getPhase", true )
 		.method( &Event_StopPropagation, "stopPropagation", true )
@@ -152,6 +199,25 @@ void PrebindEventListener( ASInterface *as )
 // dummy funcdef
 static void Element_EventListenerCallback( Element *elem, Event *event )
 {
+}
+
+
+static Element *Element_Factory( void ) {
+	Element *e = dynamic_cast<Element *>(Factory::InstanceElement( NULL, "#text#", "#text", XMLAttributes()));
+	return e;
+}
+
+static Element *Element_Factory2( Element *parent ) {
+	Element *e = dynamic_cast<Element *>(Factory::InstanceElement( parent, "#text#", "#text", XMLAttributes()));
+	return e;
+}
+
+static Element *Element_FactoryRML( Element *parent, const asstring_t &rml ) {
+	Element *e = dynamic_cast<Element *>(Factory::InstanceElement( parent, "#text#", "#text", XMLAttributes()));
+	if( e ) {
+		e->SetInnerRML( ASSTR(rml) );
+	}
+	return e;
 }
 
 static EventListener *Element_AddEventListener( Element *elem, const asstring_t &event, asIScriptFunction *func ) {
@@ -194,8 +260,9 @@ static Element *Element_SetCSS(Element *self, const asstring_t &prop, const asst
 	_RETREF(self);
 }
 
-static asstring_t *Element_GetCSS(Element *self, const asstring_t &prop) {
-	return ASSTR( self->GetProperty<String>( ASSTR(prop) ) );
+static asstring_t *Element_GetCSS(Element *self, const asstring_t &name) {
+	const Property* prop = self->GetProperty( ASSTR( name ) );
+	return ASSTR( prop ? prop->ToString() : "" );
 }
 
 // NODES
@@ -229,25 +296,34 @@ static Element *Element_GetChild(Element *self, unsigned int index) {
 	_RETREF(e);
 }
 
-static void Element_AppendChild(Element *self, Element *child) {
-	self->AppendChild(child);
-	_DECREF(child);
+static void Element_AppendChild(Element *self, Element *child, bool dom_element) {
+	if( child ) {
+		self->AppendChild(child, dom_element);
+		_DECREF(child);
+	}
 }
 
 static void Element_InsertBefore(Element *self, Element *a, Element *b) {
-	self->InsertBefore(a,b);
-	_DECREF(a);
-	_DECREF(b);
+	if( a && b ) {
+		self->InsertBefore(a,b);
+		_DECREF(a);
+		_DECREF(b);
+	}
 }
 
 static void Element_RemoveChild(Element *self, Element *a) {
-	self->RemoveChild(a);
-	_DECREF(a);
+	if( a ) {
+		self->RemoveChild(a);
+		_DECREF(a);
+	}
 }
 
 static Element *Element_Clone(Element *self) {
-	Element *e = self->Clone();
-	_RETREF(e);
+	if( self ) {
+		Element *e = self->Clone();
+		_RETREF(e);
+	}
+	return NULL;
 }
 
 // CONTENTS
@@ -274,7 +350,10 @@ static ASElementsArray *Element_GetElementsByTagName( Element *elem, const asstr
 
 	elem->GetElementsByTagName( elements, ASSTR( tag ) );
 
-	ASElementsArray *arr = UI_Main::Get()->getAS()->createArray( elements.size(), elementsArrayType );
+	CScriptArrayInterface *arr = UI_Main::Get()->getAS()->createArray( elements.size(), elementsArrayType );
+	if( !arr ) {
+		return NULL;
+	}
 
 	unsigned int n = 0;
 	for( ElementList::iterator it = elements.begin(); it != elements.end(); ++it ) {
@@ -283,7 +362,7 @@ static ASElementsArray *Element_GetElementsByTagName( Element *elem, const asstr
 		*((Element **)arr->At(n++)) = child;
 	}
 
-	return arr;
+	return static_cast<ASElementsArray *>(arr);
 }
 
 static ASElementsArray *Element_GetElementsByClassName( Element *elem, const asstring_t &tag )
@@ -292,7 +371,10 @@ static ASElementsArray *Element_GetElementsByClassName( Element *elem, const ass
 
 	elem->GetElementsByClassName( elements, ASSTR( tag ) );
 
-	ASElementsArray *arr = UI_Main::Get()->getAS()->createArray( elements.size(), elementsArrayType );
+	CScriptArrayInterface *arr = UI_Main::Get()->getAS()->createArray( elements.size(), elementsArrayType );
+	if( !arr ) {
+		return NULL;
+	}
 
 	unsigned int n = 0;
 	for( ElementList::iterator it = elements.begin(); it != elements.end(); ++it ) {
@@ -301,7 +383,7 @@ static ASElementsArray *Element_GetElementsByClassName( Element *elem, const ass
 		*((Element **)arr->At(n++)) = child;
 	}
 
-	return arr;
+	return static_cast<ASElementsArray *>(arr);
 }
 
 static ElementDocument *Element_GetOwnerDocument( Element *elem ) {
@@ -319,6 +401,10 @@ static bool Element_SetProperty( Element *elem, const asstring_t &a, const asstr
 
 static asstring_t *Element_GetProperty( Element *elem, const asstring_t &a ) {
 	return ASSTR( elem->GetProperty<String>( ASSTR(a) ) );
+}
+
+static float Element_ResolveProperty( Element *elem, const asstring_t &a, float b ) {
+	return elem->ResolveProperty( ASSTR(a), b );
 }
 
 static void Element_RemoveProperty( Element *elem, const asstring_t &a ) {
@@ -349,13 +435,35 @@ static bool Element_IsPseudoClassSet( Element *elem, const asstring_t &a ) {
 	return elem->IsPseudoClassSet( ASSTR(a) );
 }
 
-static Element *Element_SetAttribute( Element *elem, const asstring_t &a, const asstring_t &b ) {
+static Element *Element_SetAttributeS( Element *elem, const asstring_t &a, const asstring_t &b ) {
 	elem->SetAttribute( ASSTR(a), ASSTR(b) );
 	_RETREF(elem);
 }
 
-static asstring_t *Element_GetAttribute( Element *elem, const asstring_t &a, const asstring_t &b ) {
+static Element *Element_SetAttributeI( Element *elem, const asstring_t &a, const int b ) {
+	elem->SetAttribute( ASSTR(a), b );
+	_RETREF(elem);
+}
+
+static Element *Element_SetAttributeF( Element *elem, const asstring_t &a, const float b ) {
+	elem->SetAttribute( ASSTR(a), b );
+	_RETREF(elem);
+}
+
+static asstring_t *Element_GetAttributeS( Element *elem, const asstring_t &a, const asstring_t &b ) {
 	return ASSTR( elem->GetAttribute<String>( ASSTR(a), ASSTR(b) ) );
+}
+
+static int Element_GetAttributeI( Element *elem, const asstring_t &a, const int b ) {
+	return elem->GetAttribute<int>( ASSTR(a), b );
+}
+
+static int Element_GetAttributeU( Element *elem, const asstring_t &a, const unsigned b ) {
+	return elem->GetAttribute<unsigned>( ASSTR(a), b );
+}
+
+static int Element_GetAttributeF( Element *elem, const asstring_t &a, const float b ) {
+	return elem->GetAttribute<float>( ASSTR(a), b );
 }
 
 static bool Element_HasAttribute( Element *elem, const asstring_t &a ) {
@@ -588,7 +696,7 @@ static void ElementFormControl_SetName( ElementFormControl *self, const asstring
 	self->SetName( ASSTR( name ) );
 }
 
-static asstring_t *ElementFormControl_GetValue( ElementFormControl *self) {
+static asstring_t *ElementFormControl_GetValue( ElementFormControl *self ) {
 	return ASSTR( self->GetValue() );
 }
 
@@ -664,6 +772,41 @@ static void ElementFormControlDataSelect_SetDataSource( ElementFormControlDataSe
 	self->SetDataSource( ASSTR( source ) );
 }
 
+static void ElementFormControlDataSelect_SetSelection( ElementFormControlDataSelect *self, int selection ) {
+	self->SetSelection( selection );
+}
+
+static int ElementFormControlDataSelect_GetSelection( ElementFormControlDataSelect *self ) {
+	return self->GetSelection();
+}
+
+static int ElementFormControlDataSelect_GetNumOptions( ElementFormControlDataSelect *self ) {
+	return self->GetNumOptions();
+}
+
+static int ElementFormControlDataSelect_AddOption( ElementFormControlDataSelect *self, const asstring_t &rml, const asstring_t &value, int before, bool selectable ) {
+	return self->Add( ASSTR( rml ), ASSTR( value ), before, selectable );
+}
+
+static void ElementFormControlDataSelect_RemoveOption( ElementFormControlDataSelect *self, int index ) {
+	self->Remove( index );
+}
+
+static void ElementFormControlDataSelect_RemoveAllOptions( ElementFormControlDataSelect *self ) {
+	self->RemoveAll();
+}
+
+static void ElementFormControlDataSelect_Spin( ElementFormControlDataSelect *self, int dir ) {
+	int sel = self->GetSelection() + dir;
+	if( sel < 0 ) {
+		sel = self->GetNumOptions() - 1;
+	}
+	else if( sel >= self->GetNumOptions() ) {
+		sel = 0;
+	}
+	self->SetSelection( sel );
+}
+
 static void PreBindElementFormControlDataSelect( ASInterface *as )
 {
 	ASBind::Class<ElementFormControlDataSelect, ASBind::class_ref>( as->getEngine() );
@@ -677,6 +820,13 @@ static void BindElementFormControlDataSelect( ASInterface *as )
 		.refs( &ElementFormControlDataSelect::AddReference, &ElementFormControlDataSelect::RemoveReference )
 
 		.method( &ElementFormControlDataSelect_SetDataSource, "setDataSource", true )
+		.method( &ElementFormControlDataSelect_GetSelection, "getSelection", true )
+		.method( &ElementFormControlDataSelect_SetSelection, "setSelection", true )
+		.method( &ElementFormControlDataSelect_GetNumOptions, "getNumOptions", true )
+		.method2( &ElementFormControlDataSelect_AddOption, "void addOption(const String &rml, const String &value, int before = -1, bool selectable = true)", true )
+		.method( &ElementFormControlDataSelect_RemoveOption, "removeOption", true )
+		.method( &ElementFormControlDataSelect_RemoveAllOptions, "removeAllOptions", true )
+		.method( &ElementFormControlDataSelect_Spin, "spin", true )
 
 		.refcast( &FormControlDataSelect_CastToElement, true, true )
 		.refcast( &FormControlDataSelect_CastToFormControl, true, true )
@@ -762,16 +912,35 @@ static unsigned int DataGrid_GetNumRows( ElementDataGrid *self ) {
 	return self->GetNumRows();
 }
 
-static asstring_t *DataGrid_GetColumn( ElementDataGrid *self, int idx ) {
-	// Tricky SOB, build a string from column->fields
+static ASStringsArray *DataGrid_GetFields( ElementDataGrid *self, int idx ) {
 	const ElementDataGrid::Column *column = self->GetColumn( idx );
+
 	if( !column )
-		return ASSTR( "" );
-	String ret;
-	for( StringList::const_iterator it = column->fields.begin(); it != column->fields.end(); ++it) {
-		ret += *it + " ";
+		return NULL;
+
+	CScriptArrayInterface *arr = UI_Main::Get()->getAS()->createArray( column->fields.size(), stringsArrayType );
+	if( !arr ) {
+		return NULL;
 	}
-	return ASSTR( ret.Substring( 0, std::max( 0U, ret.Length() - 1 ) ) );
+
+	unsigned int n = 0;
+	for( StringList::const_iterator it = column->fields.begin(); it != column->fields.end(); ++it ) {
+		*((asstring_t **)arr->At(n++)) = ASSTR( *it );
+	}
+
+	return static_cast<ASStringsArray *>(arr);
+}
+
+static Element *DataGrid_GetColumnHeader( ElementDataGrid *self, int idx ) {
+	const ElementDataGrid::Column *column = self->GetColumn( idx );
+	if ( !column )
+		return NULL;
+	Element *e = column->header->GetChild( idx );
+	_RETREF(e);
+}
+
+static unsigned int DataGrid_GetNumColumns( ElementDataGrid *self ) {
+	return self->GetNumColumns();
 }
 
 static void DataGrid_SetDataSource( ElementDataGrid *self, const asstring_t &source ) {
@@ -791,8 +960,10 @@ static void BindElementDataGrid( ASInterface *as )
 		.refs( &ElementDataGrid::AddReference, &ElementDataGrid::RemoveReference )
 
 		.method( &DataGrid_GetRow, "getRow", true )
-		.method( &DataGrid_GetNumRows, "getNumRows", true )
-		.method( &DataGrid_GetColumn, "getColumn", true )
+		.constmethod( &DataGrid_GetNumRows, "getNumRows", true )
+		.constmethod( &DataGrid_GetFields, "getFields", true )
+		.method( &DataGrid_GetColumnHeader, "getColumnHeader", true )
+		.constmethod( &DataGrid_GetNumColumns, "getNumColumns", true )
 		.method( &DataGrid_SetDataSource, "setDataSource", true )
 		.refcast( &DataGrid_CastToElement, true, true )
 		;
@@ -800,6 +971,57 @@ static void BindElementDataGrid( ASInterface *as )
 	// Cast behavior for the Element class
 	ASBind::GetClass<Element>( engine )
 		.refcast( &Element_CastToDataGrid, true, true )
+		;
+}
+
+//==============================================================
+
+//
+// IMAGE
+
+static ElementImage *Element_CastToElementImage( Element *self ) {
+	ElementImage *f = dynamic_cast<ElementImage *>( self );
+	_RETREF(f);
+}
+
+static Element *ElementImage_CastToElement( ElementImage *self ) {
+	Element *e = dynamic_cast<Element *>( self );
+	_RETREF(e);
+}
+
+static float ElementImage_GetWidth( ElementImage *self ) {
+	Rocket::Core::Vector2f dimensions;
+	self->GetIntrinsicDimensions( dimensions );
+	return dimensions.x;
+}
+
+static float ElementImage_GetHeight( ElementImage *self ) {
+	Rocket::Core::Vector2f dimensions;
+	self->GetIntrinsicDimensions( dimensions );
+	return dimensions.y;
+}
+
+static void PreBindElementImage( ASInterface *as )
+{
+	ASBind::Class<ElementImage, ASBind::class_ref>( as->getEngine() );
+}
+
+static void BindElementImage( ASInterface *as )
+{
+	asIScriptEngine *engine = as->getEngine();
+
+	ASBind::GetClass<ElementImage>( engine )
+		.refs( &ElementImage::AddReference, &ElementImage::RemoveReference )
+
+		.method( ElementImage_GetWidth, "get_width", true )
+		.method( ElementImage_GetHeight, "get_height", true )
+
+		.refcast( &ElementImage_CastToElement, true, true )
+		;
+
+	// Cast behavior for the Element class
+	ASBind::GetClass<Element>( engine )
+		.refcast( &Element_CastToElementImage, true, true )
 		;
 }
 
@@ -826,6 +1048,8 @@ void PrebindElement( ASInterface *as )
 	PreBindElementFormControlDataSelect( as );
 
 	PreBindElementTabSet( as );
+
+	PreBindElementImage( as );
 }
 
 void BindElement( ASInterface *as )
@@ -834,16 +1058,20 @@ void BindElement( ASInterface *as )
 
 	ASBind::Global( as->getEngine() )
 		// setTimeout and setInterval callback funcdefs
-		.funcdef( &Element_EventListenerCallback, "EventListenerCallback" )
+		.funcdef( &Element_EventListenerCallback, "DOMEventListenerCallback" )
 	;
 
-	// Elements are bound as reference types that cant be explicitly constructed
+	// Elements are bound as reference types
 	ASBind::GetClass<Element>( engine )
+		.factory( &Element_Factory )
+		.factory( &Element_Factory2 )
+		.factory( &Element_FactoryRML )
 		.refs( &Element::AddReference, &Element::RemoveReference )
 
 		// css/style
 		.method( &Element_SetProperty, "setProp", true )
 		.method( &Element_GetProperty, "getProp", true )
+		.method( &Element_ResolveProperty, "resolveProp", true )
 		.method( &Element_RemoveProperty, "removeProp", true )
 		// jquery-like
 		.method( &Element_SetCSS, "css", true )		// css('prop', '') removes the property
@@ -863,8 +1091,13 @@ void BindElement( ASInterface *as )
 		.method( &Element_IsPseudoClassSet, "hasPseudo", true )
 
 		// html attributes
-		.method( &Element_SetAttribute, "setAttr", true )
-		.method( &Element_GetAttribute, "getAttr", true )
+		.method( &Element_SetAttributeS, "setAttr", true )
+		.method( &Element_SetAttributeI, "setAttr", true )
+		.method( &Element_SetAttributeF, "setAttr", true )
+		.method( &Element_GetAttributeS, "getAttr", true )
+		.method( &Element_GetAttributeI, "getAttr", true )
+		.method( &Element_GetAttributeU, "getAttr", true )
+		.method( &Element_GetAttributeF, "getAttr", true )
 		.method( &Element_HasAttribute, "hasAttr", true )
 		.method( &Element_RemoveAttribute, "removeAttr", true )
 		.method( &Element::GetNumAttributes, "numAttr" )
@@ -887,7 +1120,7 @@ void BindElement( ASInterface *as )
 		.method( &Element::Focus, "focus" )
 		.method( &Element::Blur, "unfocus" )
 		.method( &Element::Click, "click" )
-		.method( &Element_AppendChild, "addChild", true )
+		.method2( &Element_AppendChild, "void addChild( Element @el, bool dom_element = true )", true )
 		.method( &Element_InsertBefore, "insertChild", true )
 		.method( &Element_RemoveChild, "removeChild", true )
 		.method( &Element::HasChildNodes, "hasChildren" )
@@ -898,7 +1131,7 @@ void BindElement( ASInterface *as )
 		.method( Element_GetElementsByClassName, "getElementsByClassName", true )
 		.method( Element_GetOwnerDocument, "get_ownerDocument", true )
 
-		.method2( Element_AddEventListener, "void addEventListener( const String &event, EventListenerCallback @callback )", true )
+		.method2( Element_AddEventListener, "void addEventListener( const String &event, DOMEventListenerCallback @callback )", true )
 		.method( Element_RemoveEventListener, "removeEventListener", true )
 
 		.method( &Element::GetClientLeft, "clientLeft" )
@@ -925,6 +1158,8 @@ void BindElement( ASInterface *as )
 
 	// cache type id for array<Element @>
 	elementsArrayType = engine->GetObjectTypeById(engine->GetTypeIdByDecl(ASBind::typestr<ASElementsArray>()));
+	// cache type id for array<String @>
+	stringsArrayType = engine->GetObjectTypeById(engine->GetTypeIdByDecl(ASBind::typestr<ASStringsArray>()));
 
 	// ElementDocument
 	BindElementDocument( as );
@@ -946,6 +1181,9 @@ void BindElement( ASInterface *as )
 
 	// ElementTabSet
 	BindElementTabSet( as );
+
+	// ElementImage
+	BindElementImage( as );
 }
 
 }

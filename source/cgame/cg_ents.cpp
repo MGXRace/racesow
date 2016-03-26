@@ -61,47 +61,38 @@ static void CG_FixVolumeCvars( void )
 
 static bool CG_UpdateLinearProjectilePosition( centity_t *cent )
 {
+	vec3_t origin;
 	entity_state_t *state;
-	float flyTime;
+	int moveTime;
 	unsigned int serverTime;
 #define MIN_DRAWDISTANCE_FIRSTPERSON 86
 #define MIN_DRAWDISTANCE_THIRDPERSON 52
 
 	state = &cent->current;
 
-	if( !state->linearProjectile )
+	if( !state->linearMovement )
 		return -1;
 
 	if( GS_MatchPaused() )
 		serverTime = cg.frame.serverTime;
 	else
-		serverTime = cg.time;
+		serverTime = cg.time + cgs.extrapolationTime;
 
-	// add a time offset to counter antilag visualization
-	if( !cgs.demoPlaying && cg_projectileAntilagOffset->value > 0.0f &&
-		!ISVIEWERENTITY( state->ownerNum ) && ( cgs.playerNum + 1 != cg.predictedPlayerState.POVnum ) )
-	{
-		serverTime += state->modelindex2 * cg_projectileAntilagOffset->value;
+	if( state->solid != SOLID_BMODEL ) {
+		// add a time offset to counter antilag visualization
+		if( !cgs.demoPlaying && cg_projectileAntilagOffset->value > 0.0f &&
+			!ISVIEWERENTITY( state->ownerNum ) && ( cgs.playerNum + 1 != cg.predictedPlayerState.POVnum ) )
+		{
+			serverTime += state->modelindex2 * cg_projectileAntilagOffset->value;
+		}
 	}
 
-	if( serverTime > state->linearProjectileTimeStamp )
-		flyTime = (float)( serverTime - state->linearProjectileTimeStamp ) * 0.001f;
-	else if( serverTime < state->linearProjectileTimeStamp )
-		flyTime = (float)( state->linearProjectileTimeStamp - serverTime ) * -0.001f;
-	else
-		flyTime = 0;
+	moveTime = GS_LinearMovement( state, serverTime, origin );
+	VectorCopy( origin, state->origin );
 
-	VectorMA( state->origin2, flyTime, state->linearProjectileVelocity, state->origin );
-#ifdef DRAWFROMWEAPON
-	if( ISVIEWERENTITY( state->ownerNum ) ) // experimental. Draw linear projectiles as if coming from the weapon
-	{
-		VectorMA( cent->linearProjectileViewerSource, flyTime, cent->linearProjectileViewerVelocity, state->origin );
-	}
-#endif
-
-	// when flyTime is negative don't offset it backwards more than PROJECTILE_PRESTEP value
-	if( flyTime < 0 )
-	{
+	if( ( moveTime < 0 ) && ( state->solid != SOLID_BMODEL ) ) {
+		// when flyTime is negative don't offset it backwards more than PROJECTILE_PRESTEP value
+		// FIXME: is this still valid?
 		float maxBackOffset;
 
 		if( ISVIEWERENTITY( state->ownerNum ) )
@@ -141,9 +132,10 @@ static void CG_NewPacketEntityState( entity_state_t *state )
 		VectorClear( cent->velocity );
 		cent->canExtrapolate = false;
 	}
-	else if( state->linearProjectile )
+	else if( state->linearMovement )
 	{
-		if( ( cent->serverFrame != cg.oldFrame.serverFrame ) || state->teleported )
+		if( cent->serverFrame != cg.oldFrame.serverFrame || state->teleported || 
+			state->linearMovement != cent->current.linearMovement || state->linearMovementTimeStamp != cent->current.linearMovementTimeStamp )
 			cent->prev = *state;
 		else
 			cent->prev = cent->current;
@@ -155,7 +147,7 @@ static void CG_NewPacketEntityState( entity_state_t *state )
 		cent->canExtrapolate = false;
 
 #ifdef DRAWFROMWEAPON
-		if( firstTime && ISVIEWERENTITY( state->ownerNum ) ) // experimental. Draw linear projectiles as if coming from the weapon
+		if( firstTime && ISVIEWERENTITY( state->ownerNum ) && ( state->solid != SOLID_BMODEL ) ) // experimental. Draw linear projectiles as if coming from the weapon
 		{
 			orientation_t projection;
 			vec3_t dir, end;
@@ -181,21 +173,21 @@ static void CG_NewPacketEntityState( entity_state_t *state )
 #endif
 		cent->linearProjectileCanDraw = CG_UpdateLinearProjectilePosition( cent );
 
-		VectorCopy( cent->current.linearProjectileVelocity, cent->velocity );
+		VectorCopy( cent->current.linearMovementVelocity, cent->velocity );
 		VectorCopy( cent->current.origin, cent->trailOrigin );
 	}
 	else
 	{
 		// if it moved too much force the teleported bit
-		if(  abs( cent->current.origin[0] - state->origin[0] ) > 512
-			|| abs( cent->current.origin[1] - state->origin[1] ) > 512
-			|| abs( cent->current.origin[2] - state->origin[2] ) > 512 )
+		if(  abs( (int)(cent->current.origin[0] - state->origin[0]) ) > 512
+			|| abs( (int)(cent->current.origin[1] - state->origin[1]) ) > 512
+			|| abs( (int)(cent->current.origin[2] - state->origin[2]) ) > 512 )
 		{
 			cent->serverFrame = -99;
 		}
 
 		// some data changes will force no lerping
-		if( ( state->modelindex != cent->current.modelindex ) || state->teleported )
+		if( ( state->modelindex != cent->current.modelindex ) || state->teleported || state->linearMovement != cent->current.linearMovement )
 			cent->serverFrame = -99;
 
 		if( cent->serverFrame != cg.oldFrame.serverFrame )
@@ -211,7 +203,8 @@ static void CG_NewPacketEntityState( entity_state_t *state )
 				( state->type == ET_GENERIC || state->type == ET_GIB
 				|| state->type == ET_GRENADE || state->type == ET_SPRITE
 				|| state->type == ET_ITEM || state->type == ET_FLAG_BASE
-				|| state->type == ET_DECAL || state->type == ET_PARTICLES ) )
+				|| state->type == ET_DECAL || state->type == ET_PARTICLES
+				|| state->type == ET_RADAR ) )
 			{
 				VectorCopy( state->old_origin, cent->prev.origin );
 			}
@@ -240,14 +233,13 @@ static void CG_NewPacketEntityState( entity_state_t *state )
 			cent->microSmooth = 0;
 
 		cent->current = *state;
-		cent->serverFrame = cg.frame.serverFrame;
 		VectorCopy( state->origin, cent->trailOrigin );
-
 		VectorCopy( cent->velocity, cent->prevVelocity );
 		//VectorCopy( cent->extrapolatedOrigin, cent->prevExtrapolatedOrigin );
 		cent->canExtrapolatePrev = cent->canExtrapolate;
 		cent->canExtrapolate = false;
 		VectorClear( cent->velocity );
+		cent->serverFrame = cg.frame.serverFrame;
 
 		// set up velocities for this entity
 		if( cgs.extrapolationTime && ( state->svflags & SVF_TRANSMITORIGIN2 ) &&
@@ -321,13 +313,6 @@ static void CG_SetFramePlayerState( snapshot_t *frame, int index )
 			frame->playerState.pmove.pm_type = PM_CHASECAM;
 	}
 
-	if( ( cgs.tv || frame->playerState.POVnum != cgs.playerNum + 1 ) &&
-		!frame->playerState.pmove.stats[PM_STAT_ZOOMTIME] )
-	{
-		frame->playerState.fov = cg_fov->integer;
-		clamp( frame->playerState.fov, MIN_FOV, MAX_FOV );
-	}
-
 	if( cgs.tv )
 		frame->playerState.stats[STAT_REALTEAM] = TEAM_SPECTATOR;
 }
@@ -386,20 +371,6 @@ static void CG_UpdatePlayerState( void )
 	else
 		CG_SetFramePlayerState( &cg.oldFrame, index );
 
-	if( cg.frame.playerState.pmove.pm_type == PM_SPECTATOR || // force clear if spectator
-		cg.frame.playerState.pmove.pm_type == PM_CHASECAM )
-	{
-		if( !( cg.oldFrame.playerState.pmove.pm_type == PM_SPECTATOR || cg.oldFrame.playerState.pmove.pm_type == PM_CHASECAM )
-			|| cg.oldFrame.serverFrame == cg.frame.serverFrame )
-			trap_Cvar_ForceSet( "scr_forceclear", "1" );
-	}
-	else
-	{
-		if( ( cg.oldFrame.playerState.pmove.pm_type == PM_SPECTATOR || cg.oldFrame.playerState.pmove.pm_type == PM_CHASECAM )
-			|| cg.oldFrame.serverFrame == cg.frame.serverFrame )
-			trap_Cvar_ForceSet( "scr_forceclear", "0" );
-	}
-
 	cg.predictedPlayerState = cg.frame.playerState;
 }
 
@@ -407,7 +378,7 @@ static void CG_UpdatePlayerState( void )
 * CG_NewFrameSnap
 * a new frame snap has been received from the server
 */
-void CG_NewFrameSnap( snapshot_t *frame, snapshot_t *lerpframe )
+bool CG_NewFrameSnap( snapshot_t *frame, snapshot_t *lerpframe )
 {
 	int i;
 
@@ -435,6 +406,10 @@ void CG_NewFrameSnap( snapshot_t *frame, snapshot_t *lerpframe )
 		cg.oldAreabits = true;
 	else
 		cg.oldAreabits = false;
+	
+	if( !cgs.precacheDone || !cg.frame.valid ) {
+		return false;
+	}
 
 	// request TV-channels if we haven't done so already
 	if( cgs.tv && !cgs.tvRequested )
@@ -478,7 +453,13 @@ void CG_NewFrameSnap( snapshot_t *frame, snapshot_t *lerpframe )
 
 	CG_FireEvents( true );
 
+	if( cg.firstFrame && !cgs.demoPlaying ) {
+		// request updates on our private state
+		trap_Cmd_ExecuteText( EXEC_NOW, "upstate" );
+	}
+
 	cg.firstFrame = false; // not the first frame anymore
+	return true;
 }
 
 
@@ -574,11 +555,12 @@ void CG_DrawEntityBox( centity_t *cent )
 */
 static void CG_EntAddBobEffect( centity_t *cent )
 {
-	static float scale;
-	static float bob;
+	double scale;
+	double bob;
 
-	scale = 0.005f + cent->current.number * 0.00001f;
+	scale = 0.005 + cent->current.number * 0.00001;
 	bob = 4 + cos( ( cg.time + 1000 ) * scale ) * 4;
+
 	cent->ent.origin2[2] += bob;
 	cent->ent.origin[2] += bob;
 	cent->ent.lightingOrigin[2] += bob;
@@ -590,7 +572,7 @@ static void CG_EntAddBobEffect( centity_t *cent )
 static void CG_EntAddTeamColorTransitionEffect( centity_t *cent )
 {
 	float f;
-	qbyte *currentcolor;
+	uint8_t *currentcolor;
 	vec4_t scaledcolor, newcolor;
 	const vec4_t neutralcolor = { 1.0f, 1.0f, 1.0f, 1.0f };
 
@@ -605,9 +587,9 @@ static void CG_EntAddTeamColorTransitionEffect( centity_t *cent )
 	Vector4Scale( currentcolor, 1.0/255.0, scaledcolor );
 	VectorLerp( neutralcolor, f, scaledcolor, newcolor );
 
-	cent->ent.shaderRGBA[0] = (qbyte)( newcolor[0] * 255 );
-	cent->ent.shaderRGBA[1] = (qbyte)( newcolor[1] * 255 );
-	cent->ent.shaderRGBA[2] = (qbyte)( newcolor[2] * 255 );
+	cent->ent.shaderRGBA[0] = (uint8_t)( newcolor[0] * 255 );
+	cent->ent.shaderRGBA[1] = (uint8_t)( newcolor[1] * 255 );
+	cent->ent.shaderRGBA[2] = (uint8_t)( newcolor[2] * 255 );
 }
 
 /*
@@ -620,7 +602,7 @@ static void CG_AddLinkedModel( centity_t *cent )
 	struct model_s *model;
 
 	// linear projectiles can never have a linked model. Modelindex2 is used for a different purpose
-	if( cent->current.linearProjectile )
+	if( cent->current.linearMovement )
 		return;
 
 	model = cgs.modelDraw[cent->current.modelindex2];
@@ -890,9 +872,9 @@ static void CG_AddGenericEnt( centity_t *cent )
 			{
 				vec4_t scolor;
 				Vector4Copy( color_table[ColorIndex( cent->item->color[1] )], scolor );
-				cent->ent.shaderRGBA[0] = ( qbyte )( 255 * scolor[0] );
-				cent->ent.shaderRGBA[1] = ( qbyte )( 255 * scolor[1] );
-				cent->ent.shaderRGBA[2] = ( qbyte )( 255 * scolor[2] );
+				cent->ent.shaderRGBA[0] = ( uint8_t )( 255 * scolor[0] );
+				cent->ent.shaderRGBA[1] = ( uint8_t )( 255 * scolor[1] );
+				cent->ent.shaderRGBA[2] = ( uint8_t )( 255 * scolor[2] );
 			}
 			else  // set white
 				VectorSet( cent->ent.shaderRGBA, 255, 255, 255 );
@@ -990,10 +972,10 @@ void CG_AddFlagModelOnTag( centity_t *cent, byte_vec4_t teamcolor, const char *t
 	flag.renderfx = cent->ent.renderfx;
 	flag.customShader = NULL;
 	flag.customSkin = NULL;
-	flag.shaderRGBA[0] = ( qbyte )teamcolor[0];
-	flag.shaderRGBA[1] = ( qbyte )teamcolor[1];
-	flag.shaderRGBA[2] = ( qbyte )teamcolor[2];
-	flag.shaderRGBA[3] = ( qbyte )teamcolor[3];
+	flag.shaderRGBA[0] = ( uint8_t )teamcolor[0];
+	flag.shaderRGBA[1] = ( uint8_t )teamcolor[1];
+	flag.shaderRGBA[2] = ( uint8_t )teamcolor[2];
+	flag.shaderRGBA[3] = ( uint8_t )teamcolor[3];
 
 	VectorCopy( cent->ent.origin, flag.origin );
 	VectorCopy( cent->ent.origin, flag.origin2 );
@@ -1022,9 +1004,9 @@ void CG_AddFlagModelOnTag( centity_t *cent, byte_vec4_t teamcolor, const char *t
 	}
 
 	CG_AddColoredOutLineEffect( &flag, EF_OUTLINE,
-		(qbyte)( teamcolor[0]*0.3 ),
-		(qbyte)( teamcolor[1]*0.3 ),
-		(qbyte)( teamcolor[2]*0.3 ),
+		(uint8_t)( teamcolor[0]*0.3 ),
+		(uint8_t)( teamcolor[1]*0.3 ),
+		(uint8_t)( teamcolor[2]*0.3 ),
 		255 );
 
 	CG_AddEntityToScene( &flag );
@@ -1042,6 +1024,7 @@ void CG_AddFlagModelOnTag( centity_t *cent, byte_vec4_t teamcolor, const char *t
 		flag.frame = flag.oldframe = 0;
 		flag.radius = 32.0f;
 		flag.customShader = CG_MediaShader( cgs.media.shaderFlagFlare );
+		flag.outlineHeight = 0;
 
 		CG_AddEntityToScene( &flag );
 	}
@@ -1109,9 +1092,7 @@ static void CG_AddFlagBaseEnt( centity_t *cent )
 	}
 
 	// render effects
-	cent->ent.renderfx = cent->renderfx;
-	if( cg_shadows->integer <= 1 )
-		cent->ent.renderfx |= RF_NOSHADOW;
+	cent->ent.renderfx = cent->renderfx|RF_NOSHADOW;
 
 	// let's see: We add first the modelindex 1 (the base)
 
@@ -1139,20 +1120,6 @@ static void CG_AddFlagBaseEnt( centity_t *cent )
 		byte_vec4_t teamcolor;
 
 		CG_AddFlagModelOnTag( cent, CG_TeamColorForEntity( cent->current.number, teamcolor ), "tag_flag1" );
-	}
-	// modelindex2 can add a number from 0 to 9
-	else if( cent->current.modelindex2 > 0 && cent->current.modelindex2 <= 10 )
-	{
-		static entity_t number;
-		number = cent->ent;
-		Vector4Set( number.shaderRGBA, 255, 255, 255, 255 );
-		number.rtype = RT_SPRITE;
-		number.origin[2] += 24;
-		number.origin2[2] += 24;
-		number.model = NULL;
-		number.radius = 12;
-		number.customShader = CG_MediaShader( cgs.media.sbNums[cent->current.modelindex2 - 1] );
-		CG_AddEntityToScene( &number );
 	}
 }
 
@@ -1194,7 +1161,7 @@ static void CG_AddPlayerEnt( centity_t *cent )
 }
 
 //==========================================================================
-//		ET_SPRITE
+//		ET_SPRITE, ET_RADAR
 //==========================================================================
 
 /*
@@ -1651,7 +1618,7 @@ static void CG_AddPortalSurfaceEnt( centity_t *cent )
 */
 static void CG_UpdateVideoSpeakerEnt( void *centp,
 	unsigned int samples, unsigned int rate, 
-	unsigned short width, unsigned short channels, const qbyte *data )
+	unsigned short width, unsigned short channels, const uint8_t *data )
 {
 	centity_t *cent = ( centity_t * )centp;
 
@@ -1932,7 +1899,7 @@ void CG_AddEntities( void )
 	bool canLight;
 
 	// bonus items rotate at a fixed rate
-	VectorSet( autorotate, 0, ( cg.time%3600 )*0.1, 0 );
+	VectorSet( autorotate, 0, ( cg.time%3600 ) * 0.1 * (cg.view.flipped ? -1.0f : 1.0f), 0 );
 	AnglesToAxis( autorotate, cg.autorotateAxis );
 
 	for( pnum = 0; pnum < cg.frame.numEntities; pnum++ )
@@ -1940,13 +1907,13 @@ void CG_AddEntities( void )
 		state = &cg.frame.parsedEntities[pnum & ( MAX_PARSE_ENTITIES-1 )];
 		cent = &cg_entities[state->number];
 
-		if( cent->current.linearProjectile )
+		if( cent->current.linearMovement )
 		{
 			if( !cent->linearProjectileCanDraw )
 				continue;
 		}
 
-		canLight = !state->linearProjectile;
+		canLight = !state->linearMovement;
 
 		switch( cent->type )
 		{
@@ -1960,8 +1927,6 @@ void CG_AddEntities( void )
 			if( cg_gibs->integer )
 			{
 				CG_AddGenericEnt( cent );
-				if( cg_gibs->integer != 1 )
-					CG_NewBloodTrail( cent );
 				CG_EntityLoopSound( state, ATTN_STATIC );
 				canLight = true;
 			}
@@ -1982,14 +1947,14 @@ void CG_AddEntities( void )
 			break;
 		case ET_ROCKET:
 			CG_AddGenericEnt( cent );
-			CG_NewRocketTrail( cent );
+			CG_ProjectileTrail( cent );
 			CG_EntityLoopSound( state, ATTN_NORM );
 			CG_AddLightToScene( cent->ent.origin, 300, 1, 1, 0 );
 			break;
 		case ET_GRENADE:
 			CG_AddGenericEnt( cent );
 			CG_EntityLoopSound( state, ATTN_STATIC );
-			CG_NewGrenadeTrail( cent );
+			CG_ProjectileTrail( cent );
 			canLight = true;
 			break;
 		case ET_PLASMA:
@@ -1998,6 +1963,7 @@ void CG_AddEntities( void )
 			break;
 
 		case ET_SPRITE:
+		case ET_RADAR:
 			CG_AddSpriteEnt( cent );
 			CG_EntityLoopSound( state, ATTN_STATIC );
 			canLight = true;
@@ -2108,8 +2074,13 @@ void CG_LerpEntities( void )
 
 	for( pnum = 0; pnum < cg.frame.numEntities; pnum++ )
 	{
+		int number;
+		bool spatialize;
+		
 		state = &cg.frame.parsedEntities[pnum & ( MAX_PARSE_ENTITIES-1 )];
-		cent = &cg_entities[state->number];
+		number = state->number;
+		cent = &cg_entities[number];
+		spatialize = true;
 
 		switch( cent->type )
 		{
@@ -2124,13 +2095,14 @@ void CG_LerpEntities( void )
 		case ET_PLAYER:
 		case ET_CORPSE:
 		case ET_FLAG_BASE:
-			if( state->linearProjectile )
+			if( state->linearMovement )
 				CG_ExtrapolateLinearProjectile( cent );
 			else
 				CG_LerpGenericEnt( cent );
 			break;
 
 		case ET_SPRITE:
+		case ET_RADAR:
 			CG_LerpSpriteEnt( cent );
 			break;
 
@@ -2174,6 +2146,12 @@ void CG_LerpEntities( void )
 			CG_Error( "CG_LerpEntities: unknown entity type" );
 			break;
 		}
+
+		if( spatialize ) {
+			vec3_t origin, velocity;
+			CG_GetEntitySpatilization( number, origin, velocity );
+			trap_S_SetEntitySpatilization( number, origin, velocity );
+		}
 	}
 }
 
@@ -2210,14 +2188,7 @@ void CG_UpdateEntities( void )
 				CG_UpdateGenericEnt( cent );
 
 				// set the gib model ignoring the modelindex one
-				if( cg_gibs->integer == 1 )
-				{
-					cent->ent.model = CG_MediaModel( cgs.media.modTechyGibs[ 0 ] );
-				}
-				else
-				{
-					cent->ent.model = CG_MediaModel( cgs.media.modMeatyGibs[ 0 ] );
-				}
+				cent->ent.model = CG_MediaModel( cgs.media.modIlluminatiGibs );
 			}
 			break;
 
@@ -2231,6 +2202,8 @@ void CG_UpdateEntities( void )
 			CG_UpdateGenericEnt( cent );
 			break;
 
+		case ET_RADAR:
+			cent->renderfx |= RF_NODEPTHTEST;
 		case ET_SPRITE:
 			cent->renderfx |= ( RF_NOSHADOW|RF_FULLBRIGHT );
 			CG_UpdateSpriteEnt( cent );

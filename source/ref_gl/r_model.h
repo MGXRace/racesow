@@ -56,12 +56,21 @@ typedef struct mfog_s
 	vec3_t			mins, maxs;
 } mfog_t;
 
+typedef struct mshaderref_s
+{
+	char			name[MAX_QPATH];
+	int				flags;
+	int				contents;
+	shader_t		*shaders[NUM_SHADER_TYPES_BSP];
+} mshaderref_t;
+
 typedef struct msurface_s
 {
 	unsigned int	visFrame;			// should be drawn when node is crossed
 	unsigned int	facetype, flags;
 
 	drawSurfaceBSP_t *drawSurf;
+	unsigned int	numVerts, numElems; // cached from mesh
 	unsigned int	firstDrawSurfVert, firstDrawSurfElem;
 
 	shader_t		*shader;
@@ -126,15 +135,16 @@ typedef struct mleaf_s
 
 typedef struct
 {
-	qbyte			ambient[MAX_LIGHTMAPS][3];
-	qbyte			diffuse[MAX_LIGHTMAPS][3];
-	qbyte			styles[MAX_LIGHTMAPS];
-	qbyte			direction[2];
+	uint8_t			ambient[MAX_LIGHTMAPS][3];
+	uint8_t			diffuse[MAX_LIGHTMAPS][3];
+	uint8_t			styles[MAX_LIGHTMAPS];
+	uint8_t			direction[2];
 } mgridlight_t;
 
 typedef struct
 {
 	int				texNum;
+	int				texLayer;
 	float			texMatrix[2][2];
 } mlightmapRect_t;
 
@@ -174,7 +184,7 @@ typedef struct mbrushmodel_s
 	mfog_t			*fogs;
 	mfog_t			*globalfog;
 
-	unsigned int	numareas;
+	/*unsigned*/int	numareas;
 
 	vec3_t			gridSize;
 	vec3_t			gridMins;
@@ -206,7 +216,7 @@ ALIAS MODELS
 typedef struct
 {
 	short			point[3];
-	qbyte			latlong[2];				// use bytes to keep 8-byte alignment
+	uint8_t			latlong[2];				// use bytes to keep 8-byte alignment
 } maliasvertex_t;
 
 typedef struct
@@ -265,6 +275,9 @@ typedef struct maliasmodel_s
 
 	int				numskins;
 	maliasskin_t	*skins;
+
+	int				numverts; // sum of numverts for all meshes
+	int				numtris; // sum of numtris for all meshes
 } maliasmodel_t;
 
 /*
@@ -291,16 +304,16 @@ typedef struct
 
 typedef struct
 {
-	qbyte			indices[SKM_MAX_WEIGHTS];
-	qbyte			weights[SKM_MAX_WEIGHTS];
+	uint8_t			indices[SKM_MAX_WEIGHTS];
+	uint8_t			weights[SKM_MAX_WEIGHTS];
 } mskblend_t;
 
 typedef struct mskmesh_s
 {
 	char			*name;
 
-	qbyte			*blendIndices;
-	qbyte			*blendWeights;
+	uint8_t			*blendIndices;
+	uint8_t			*blendWeights;
 
 	unsigned int	numverts;
 	vec4_t			*xyzArray;
@@ -352,8 +365,8 @@ typedef struct mskmodel_s
 	vec4_t			*normalsArray;
 	vec2_t			*stArray;
 	vec4_t			*sVectorsArray;
-	qbyte			*blendIndices;
-	qbyte			*blendWeights;
+	uint8_t			*blendIndices;
+	uint8_t			*blendWeights;
 
 	unsigned int	numblends;
 	mskblend_t		*blends;
@@ -404,6 +417,8 @@ typedef struct model_s
 
 //============================================================================
 
+extern model_t *r_prevworldmodel;
+
 void		R_InitModels( void );
 void		R_ShutdownModels( void );
 void		R_FreeUnusedModels( void );
@@ -413,16 +428,19 @@ void		R_ModelFrameBounds( const struct model_s *model, int frame, vec3_t mins, v
 void		R_RegisterWorldModel( const char *model, const dvis_t *pvsData );
 struct model_s *R_RegisterModel( const char *name );
 
+void R_GetTransformBufferForMesh( mesh_t *mesh, bool positions, bool normals, bool sVectors );
+
 void		Mod_ClearAll( void );
-model_t		*Mod_ForName( const char *name, qboolean crash );
+model_t		*Mod_ForName( const char *name, bool crash );
 mleaf_t		*Mod_PointInLeaf( float *p, model_t *model );
-qbyte		*Mod_ClusterPVS( int cluster, model_t *model );
+uint8_t		*Mod_ClusterPVS( int cluster, model_t *model );
 
 unsigned int Mod_Handle( const model_t *mod );
 model_t		*Mod_ForHandle( unsigned int elem );
 
 // force 16-bytes alignment for all memory chunks allocated for model data
 #define		Mod_Malloc( mod, size ) ri.Mem_AllocExt( ( mod )->mempool, size, 16, 1, __FILE__, __LINE__ )
+#define		Mod_Realloc( data, size ) ri.Mem_Realloc( data, size, __FILE__, __LINE__ )
 #define		Mod_MemFree( data ) ri.Mem_Free( data, __FILE__, __LINE__ )
 
 void		Mod_StripLODSuffix( char *name );

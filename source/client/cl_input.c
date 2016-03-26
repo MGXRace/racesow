@@ -31,8 +31,7 @@ cvar_t *cl_ucmdTimeNudge;
 extern cvar_t *cl_maxfps;
 
 extern unsigned	sys_frame_time;
-unsigned keys_frame_time;
-unsigned old_keys_frame_time;
+static unsigned ucmd_frame_time;
 
 /*
 ===============================================================================
@@ -147,15 +146,15 @@ static void CL_MouseExtrapolate( int mx, int my, float *extra_x, float *extra_y 
 
 	static unsigned int frameNo = 0;
 	static float sub_x = 0, sub_y = 0;
-	static qint64 lastMicros = 0;
-	static qint64 avgMicros = 0;
+	static int64_t lastMicros = 0;
+	static int64_t avgMicros = 0;
 
 	float add_x = 0.0, add_y = 0.0;
 	float decay = 1.0;
 	float decaySum = buf_size > 1 ? 0.0 : decay;
 	unsigned int i;
 
-	qint64 micros;
+	int64_t micros;
 	if( !lastMicros )
 		lastMicros = Sys_Microseconds() - 10000;    // start at 100 FPS
 	micros = Sys_Microseconds();                        // get current time in us
@@ -303,7 +302,7 @@ void CL_MouseMove( usercmd_t *cmd, int mx, int my )
 		}
 	}
 
-	accelSensitivity *= CL_GameModule_SetSensitivityScale( sensitivity->value );
+	accelSensitivity *= CL_GameModule_GetSensitivityScale( sensitivity->value, zoomsens->value );
 
 	mouse_x *= accelSensitivity;
 	mouse_y *= accelSensitivity;
@@ -312,8 +311,20 @@ void CL_MouseMove( usercmd_t *cmd, int mx, int my )
 		return;
 
 	// add mouse X/Y movement to cmd
-	cl.viewangles[YAW] -= ( m_yaw->value * mouse_x );
+	cl.viewangles[YAW] -= ( m_yaw->value * mouse_x ) * (cl_flip->integer ? -1.0 : 1.0);
 	cl.viewangles[PITCH] += ( m_pitch->value * mouse_y );
+}
+
+/*
+* CL_MouseSet
+*
+* Mouse input for systems with basic mouse support (without centering
+* and possibly without toggleable cursor).
+*/
+void CL_MouseSet( int mx, int my, bool showCursor )
+{
+	if( cls.key_dest == key_menu )
+		CL_UIModule_MouseSet( mx, my, showCursor );
 }
 
 /*
@@ -335,7 +346,7 @@ state bit 1 is edge triggered on the up to down transition
 state bit 2 is edge triggered on the down to up transition
 
 
-Key_Event (int key, qboolean down, unsigned time);
+Key_Event (int key, bool down, unsigned time);
 
 ===============================================================================
 */
@@ -486,9 +497,57 @@ static float CL_KeyState( kbutton_t *key )
 		key->downtime = sys_frame_time;
 	}
 
-	val = (float) msec / (float)keys_frame_time;
+	val = (float) msec / (float)ucmd_frame_time;
 
 	return bound( 0, val, 1 );
+}
+
+/*
+===============================================================================
+
+TOUCHSCREEN
+
+===============================================================================
+*/
+
+/*
+* CL_TouchEvent
+*/
+void CL_TouchEvent( int id, touchevent_t type, int x, int y, unsigned int time )
+{
+	switch( cls.key_dest )
+	{
+		case key_game:
+			{
+				bool toQuickMenu = false;
+
+				if( SCR_IsQuickMenuShown() && !CL_GameModule_IsTouchDown( id ) )
+				{
+					if( CL_UIModule_IsTouchDownQuick( id ) )
+						toQuickMenu = true;
+
+					// if the quick menu has consumed the touch event, don't send the event to the game
+					toQuickMenu |= CL_UIModule_TouchEventQuick( id, type, x, y );
+				}
+
+				if( !toQuickMenu )
+					CL_GameModule_TouchEvent( id, type, x, y, time );
+			}
+			break;
+
+		case key_console:
+		case key_message:
+			if( id == 0 )
+				Con_TouchEvent( ( type != TOUCH_UP ) ? true : false, x, y );
+			break;
+		
+		case key_menu:
+			CL_UIModule_TouchEvent( id, type, x, y );
+			break;
+
+		default:
+			break;
+	}
 }
 
 //==========================================================================
@@ -501,7 +560,7 @@ cvar_t *cl_anglespeedkey;
 /*
 * CL_AddButtonBits
 */
-static void CL_AddButtonBits( qbyte *buttons )
+static void CL_AddButtonBits( uint8_t *buttons )
 {
 	// figure button bits
 
@@ -531,6 +590,9 @@ static void CL_AddButtonBits( qbyte *buttons )
 	if( in_zoom.state & 3 )
 		*buttons |= BUTTON_ZOOM;
 	in_zoom.state &= ~2;
+
+	if( cls.key_dest == key_game )
+		*buttons |= CL_GameModule_GetButtonBits();
 }
 
 /*
@@ -539,9 +601,6 @@ static void CL_AddButtonBits( qbyte *buttons )
 static void CL_AddAnglesFromKeys( int frametime )
 {
 	float speed;
-
-	if( !frametime )
-		return;
 
 	if( in_speed.state & 1 )
 		speed = ( (float)frametime * 0.001f ) * cl_anglespeedkey->value;
@@ -566,27 +625,24 @@ static void CL_AddAnglesFromKeys( int frametime )
 /*
 * CL_AddMovementFromKeys
 */
-static void CL_AddMovementFromKeys( short *forwardmove, short *sidemove, short *upmove, int frametime )
+static void CL_AddMovementFromKeys( vec3_t movement )
 {
-	if( !frametime )
-		return;
-
 	if( in_strafe.state & 1 )
 	{
-		*sidemove += frametime * CL_KeyState( &in_right );
-		*sidemove -= frametime * CL_KeyState( &in_left );
+		movement[0] += ( float )CL_KeyState( &in_right );
+		movement[0] -= ( float )CL_KeyState( &in_left );
 	}
 
-	*sidemove += frametime * CL_KeyState( &in_moveright );
-	*sidemove -= frametime * CL_KeyState( &in_moveleft );
+	movement[0] += ( float )CL_KeyState( &in_moveright );
+	movement[0] -= ( float )CL_KeyState( &in_moveleft );
 
-	*upmove += frametime * CL_KeyState( &in_up );
-	*upmove -= frametime * CL_KeyState( &in_down );
+	movement[2] += ( float )CL_KeyState( &in_up );
+	movement[2] -= ( float )CL_KeyState( &in_down );
 
 	if( !( in_klook.state & 1 ) )
 	{
-		*forwardmove += frametime * CL_KeyState( &in_forward );
-		*forwardmove -= frametime * CL_KeyState( &in_back );
+		movement[1] += ( float )CL_KeyState( &in_forward );
+		movement[1] -= ( float )CL_KeyState( &in_back );
 	}
 }
 
@@ -595,39 +651,48 @@ static void CL_AddMovementFromKeys( short *forwardmove, short *sidemove, short *
 */
 void CL_UpdateCommandInput( void )
 {
+	static unsigned old_ucmd_frame_time;
 	usercmd_t *cmd = &cl.cmds[cls.ucmdHead & CMD_MASK];
 
 	if( cl.inputRefreshed )
 		return;
 
-	keys_frame_time = ( sys_frame_time - old_keys_frame_time ) & 255;
+	ucmd_frame_time = sys_frame_time - old_ucmd_frame_time;
 
 	// always let the mouse refresh cl.viewangles
 	IN_MouseMove( cmd );
 	CL_AddButtonBits( &cmd->buttons );
+	if( cls.key_dest == key_game )
+		CL_GameModule_AddViewAngles( cl.viewangles, cls.realframetime, cl_flip->integer != 0 );
 
-	if( keys_frame_time )
+	if( ucmd_frame_time )
 	{
-		cmd->msec += keys_frame_time;
-
-		CL_AddAnglesFromKeys( keys_frame_time );
-		CL_AddMovementFromKeys( &cmd->forwardmove, &cmd->sidemove, &cmd->upmove, keys_frame_time );
-		IN_JoyMove( cmd );
-		old_keys_frame_time = sys_frame_time;
+		cmd->msec += ucmd_frame_time;
+		CL_AddAnglesFromKeys( ucmd_frame_time );
+		old_ucmd_frame_time = sys_frame_time;
 	}
 
 	if( cmd->msec )
 	{
-		cmd->forwardfrac = ( (float)cmd->forwardmove/(float)cmd->msec );
-		cmd->sidefrac = ( (float)cmd->sidemove/(float)cmd->msec );
-		cmd->upfrac = ( (float)cmd->upmove/(float)cmd->msec );
+		vec3_t movement;
+
+		VectorSet( movement, 0.0f, 0.0f, 0.0f );
+
+		if( ucmd_frame_time )
+			CL_AddMovementFromKeys( movement );
+		if( cls.key_dest == key_game )
+			CL_GameModule_AddMovement( movement );
+
+		cmd->sidemove = bound( -1.0f, movement[0], 1.0f ) * ( cl_flip->integer ? -1.0f : 1.0f );
+		cmd->forwardmove = bound( -1.0f, movement[1], 1.0f );
+		cmd->upmove = bound( -1.0f, movement[2], 1.0f );
 	}
 
 	cmd->angles[0] = ANGLE2SHORT( cl.viewangles[0] );
 	cmd->angles[1] = ANGLE2SHORT( cl.viewangles[1] );
 	cmd->angles[2] = ANGLE2SHORT( cl.viewangles[2] );
 
-	cl.inputRefreshed = qtrue;
+	cl.inputRefreshed = true;
 }
 
 /*
@@ -643,7 +708,32 @@ void IN_CenterView( void )
 	}
 }
 
-static qboolean in_initialized = qfalse;
+/*
+* IN_ClearState
+*/
+void IN_ClearState( void )
+{
+	IN_ShowSoftKeyboard( false );
+
+	Key_ClearStates();
+
+	switch( cls.key_dest )
+	{
+		case key_game:
+			CL_GameModule_ClearInputState();
+			break;
+		case key_console:
+		case key_message:
+			Con_TouchEvent( false, -1, -1 );
+			break;
+		case key_menu:
+			CL_UIModule_CancelTouches();
+		default:
+			break;
+	}
+}
+
+static bool in_initialized = false;
 
 /*
 * CL_InitInput
@@ -708,7 +798,7 @@ void CL_InitInput( void )
 	}
 #endif
 
-	in_initialized = qtrue;
+	in_initialized = true;
 }
 
 /*
@@ -716,8 +806,8 @@ void CL_InitInput( void )
 */
 void CL_InitInputDynvars( void )
 {
-	Dynvar_Create( "m_filterBufferSize", qtrue, CL_MouseFilterBufferSizeGet_f, CL_MouseFilterBufferSizeSet_f );
-	Dynvar_Create( "m_filterBufferDecay", qtrue, CL_MouseFilterBufferDecayGet_f, CL_MouseFilterBufferDecaySet_f );
+	Dynvar_Create( "m_filterBufferSize", true, CL_MouseFilterBufferSizeGet_f, CL_MouseFilterBufferSizeSet_f );
+	Dynvar_Create( "m_filterBufferDecay", true, CL_MouseFilterBufferDecayGet_f, CL_MouseFilterBufferDecaySet_f );
 	// we could simply call Dynvar_SetValue(m_filterBufferSize, "5") here, but then the user would get a warning in the console if m_filter was != M_FILTER_EXTRAPOLATE
 	buf_size = DEFAULT_BUF_SIZE;
 	buf_x = (float *) Mem_ZoneMalloc( sizeof( float ) * buf_size );
@@ -779,7 +869,7 @@ void CL_ShutdownInput( void )
 	Mem_ZoneFree( buf_x );
 	Mem_ZoneFree( buf_y );
 
-	in_initialized = qtrue;
+	in_initialized = true;
 }
 
 //===============================================================================
@@ -868,7 +958,7 @@ void CL_WriteUcmdsToMessage( msg_t *msg )
 
 	// write the id number of first ucmd to be sent, and the count
 	MSG_WriteLong( msg, ucmdHead );
-	MSG_WriteByte( msg, (qbyte)( ucmdHead - ucmdFirst ) );
+	MSG_WriteByte( msg, (uint8_t)( ucmdHead - ucmdFirst ) );
 
 	// write the ucmds
 	for( i = ucmdFirst; i < ucmdHead; i++ )
@@ -893,7 +983,7 @@ void CL_WriteUcmdsToMessage( msg_t *msg )
 /*
 * CL_NextUserCommandTimeReached
 */
-static qboolean CL_NextUserCommandTimeReached( int realmsec )
+static bool CL_NextUserCommandTimeReached( int realmsec )
 {
 	static int minMsec = 1, allMsec = 0, extraMsec = 0;
 	static float roundingMsec = 0.0f;
@@ -929,7 +1019,7 @@ static qboolean CL_NextUserCommandTimeReached( int realmsec )
 	{
 		//if( !cls.netchan.unsentFragments ) {
 		//	NET_Sleep( minMsec - allMsec );
-		return qfalse;
+		return false;
 	}
 
 	extraMsec = allMsec - minMsec;
@@ -939,7 +1029,7 @@ static qboolean CL_NextUserCommandTimeReached( int realmsec )
 	allMsec = 0;
 
 	// send a new user command message to the server
-	return qtrue;
+	return true;
 }
 
 /*
@@ -961,9 +1051,9 @@ void CL_NewUserCommand( int realmsec )
 	cl.cmd_time[cl.cmdNum & CMD_MASK] = cls.realtime;
 
 	// snap push fracs so client and server version match
-	ucmd->forwardfrac = ( (int)( UCMD_PUSHFRAC_SNAPSIZE * ucmd->forwardfrac ) ) / UCMD_PUSHFRAC_SNAPSIZE;
-	ucmd->sidefrac = ( (int)( UCMD_PUSHFRAC_SNAPSIZE * ucmd->sidefrac ) ) / UCMD_PUSHFRAC_SNAPSIZE;
-	ucmd->upfrac = ( (int)( UCMD_PUSHFRAC_SNAPSIZE * ucmd->upfrac ) ) / UCMD_PUSHFRAC_SNAPSIZE;
+	ucmd->forwardmove = ( (int)( UCMD_PUSHFRAC_SNAPSIZE * ucmd->forwardmove ) ) / UCMD_PUSHFRAC_SNAPSIZE;
+	ucmd->sidemove = ( (int)( UCMD_PUSHFRAC_SNAPSIZE * ucmd->sidemove ) ) / UCMD_PUSHFRAC_SNAPSIZE;
+	ucmd->upmove = ( (int)( UCMD_PUSHFRAC_SNAPSIZE * ucmd->upmove ) ) / UCMD_PUSHFRAC_SNAPSIZE;
 
 	if( cl.cmdNum > 0 )
 		ucmd->msec = ucmd->serverTimeStamp - cl.cmds[( cl.cmdNum-1 ) & CMD_MASK].serverTimeStamp;

@@ -21,11 +21,20 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef __UI_PUBLIC_H__
 #define __UI_PUBLIC_H__
 
-#define	UI_API_VERSION	    43
+#define	UI_API_VERSION	    62
 
 typedef size_t (*ui_async_stream_read_cb_t)(const void *buf, size_t numb, float percentage, 
 	int status, const char *contentType, void *privatep);
 typedef void (*ui_async_stream_done_cb_t)(int status, const char *contentType, void *privatep);
+
+typedef void ( *fdrawchar_t )( int x, int y, int w, int h, float s1, float t1, float s2, float t2, const vec4_t color, const struct shader_s *shader );
+
+enum {
+	UI_CONTEXT_QUICK,
+	UI_CONTEXT_MAIN,
+
+	UI_NUM_CONTEXTS
+};
 
 #include "../cgame/ref.h"
 
@@ -43,7 +52,7 @@ typedef struct
 	void ( *Print )( const char *str );
 
 	// dynvars
-	dynvar_t *( *Dynvar_Create )( const char *name, qboolean console, dynvar_getter_f getter, dynvar_setter_f setter );
+	dynvar_t *( *Dynvar_Create )( const char *name, bool console, dynvar_getter_f getter, dynvar_setter_f setter );
 	void ( *Dynvar_Destroy )( dynvar_t *dynvar );
 	dynvar_t *( *Dynvar_Lookup )( const char *name );
 	const char *( *Dynvar_GetName )( dynvar_t *dynvar );
@@ -82,16 +91,17 @@ typedef struct
 	struct model_s *( *R_RegisterModel )( const char *name );
 	struct shader_s *( *R_RegisterSkin )( const char *name );
 	struct shader_s *( *R_RegisterPic )( const char *name );
-	struct shader_s *( *R_RegisterRawPic )( const char *name, int width, int height, qbyte *data );
-	struct shader_s *( *R_RegisterLevelshot )( const char *name, struct shader_s *defaultPic, qboolean *matchesDefault );
+	struct shader_s *( *R_RegisterRawPic )( const char *name, int width, int height, uint8_t *data, int samples );
+	struct shader_s *( *R_RegisterLevelshot )( const char *name, struct shader_s *defaultPic, bool *matchesDefault );
 	struct skinfile_s *( *R_RegisterSkinFile )( const char *name );
 	struct shader_s *( *R_RegisterVideo )( const char *name );
-	qboolean ( *R_LerpTag )( orientation_t *orient, const struct model_s *mod, int oldframe, int frame, float lerpfrac, const char *name );
+	bool ( *R_LerpTag )( orientation_t *orient, const struct model_s *mod, int oldframe, int frame, float lerpfrac, const char *name );
 	void ( *R_DrawStretchPic )( int x, int y, int w, int h, float s1, float t1, float s2, float t2, const vec4_t color, const struct shader_s *shader );
 	void ( *R_DrawStretchPoly )( const struct poly_s *poly, float x_offset, float y_offset );
 	void ( *R_DrawRotatedStretchPic )( int x, int y, int w, int h, float s1, float t1, float s2, float t2, float angle, const vec4_t color, const struct shader_s *shader );
 	void ( *R_Scissor )( int x, int y, int w, int h );
 	void ( *R_GetScissor )( int *x, int *y, int *w, int *h );
+	void ( *R_ResetScissor )( void );
 	void ( *R_GetShaderDimensions )( const struct shader_s *shader, int *width, int *height );
 	void ( *R_TransformVectorToScreen )( const refdef_t *rd, vec3_t const in, vec2_t out );
 	int ( *R_SkeletalGetNumBones )( const struct model_s *mod, int *numFrames );
@@ -101,40 +111,49 @@ typedef struct
 
 	struct sfx_s *( *S_RegisterSound )( const char *name );
 	void ( *S_StartLocalSound )( const char *s );
-	void ( *S_StartBackgroundTrack )( const char *intro, const char *loop );
+	void ( *S_StartBackgroundTrack )( const char *intro, const char *loop, int mode );
 	void ( *S_StopBackgroundTrack )( void );
 
 	// fonts
 	struct qfontface_s *( *SCR_RegisterFont )( const char *name, int style, unsigned int size );
-	void ( *SCR_DrawString )( int x, int y, int align, const char *str, struct qfontface_s *font, vec4_t color );
-	size_t ( *SCR_DrawStringWidth )( int x, int y, int align, const char *str, size_t maxwidth, struct qfontface_s *font, vec4_t color );
-	void ( *SCR_DrawClampString )( int x, int y, const char *str, int xmin, int ymin, int xmax, int ymax, struct qfontface_s *font, vec4_t color );
-	size_t ( *SCR_strHeight )( struct qfontface_s *font );
-	size_t ( *SCR_strWidth )( const char *str, struct qfontface_s *font, size_t maxlen );
-	size_t ( *SCR_StrlenForWidth )( const char *str, struct qfontface_s *font, size_t maxwidth );
+	int ( *SCR_DrawString )( int x, int y, int align, const char *str, struct qfontface_s *font, vec4_t color, int flags );
+	size_t ( *SCR_DrawStringWidth )( int x, int y, int align, const char *str, size_t maxwidth, struct qfontface_s *font, vec4_t color, int flags );
+	void ( *SCR_DrawClampString )( int x, int y, const char *str, int xmin, int ymin, int xmax, int ymax, struct qfontface_s *font, vec4_t color, int flags );
+	size_t ( *SCR_FontSize )( struct qfontface_s *font );
+	size_t ( *SCR_FontHeight )( struct qfontface_s *font );
+	int ( *SCR_FontUnderline )( struct qfontface_s *font, int *thickness );
+	size_t ( *SCR_FontAdvance )( struct qfontface_s *font );
+	size_t ( *SCR_FontXHeight )( struct qfontface_s *font );
+	size_t ( *SCR_strWidth )( const char *str, struct qfontface_s *font, size_t maxlen, int flags );
+	size_t ( *SCR_StrlenForWidth )( const char *str, struct qfontface_s *font, size_t maxwidth, int flags );
+	fdrawchar_t ( *SCR_SetDrawCharIntercept )( fdrawchar_t intercept );
 
 	void ( *CL_Quit )( void );
 	void ( *CL_SetKeyDest )( int key_dest );
 	void ( *CL_ResetServerCount )( void );
-	char *( *CL_GetClipboardData )( qboolean primary );
+	char *( *CL_GetClipboardData )( bool primary );
 	void ( *CL_FreeClipboardData )( char *data );
+	bool ( *CL_IsBrowserAvailable )( void );
 	void ( *CL_OpenURLInBrowser )( const char *url );
 	size_t ( *CL_ReadDemoMetaData )( const char *demopath, char *meta_data, size_t meta_data_size );
 	int ( *CL_PlayerNum )( void );
 
 	const char *( *Key_GetBindingBuf )( int binding );
-	void ( *Key_ClearStates )( void );
 	const char *( *Key_KeynumToString )( int keynum );
 	int ( *Key_StringToKeynum )( const char* s );
 	void ( *Key_SetBinding )( int keynum, const char *binding );
-	qboolean ( *Key_IsDown )( int keynum );
+	bool ( *Key_IsDown )( int keynum );
 
-	qboolean ( *VID_GetModeInfo )( int *width, int *height, qboolean *wideScreen, int mode );
+	void ( *IN_GetThumbsticks )( vec4_t sticks );
+	void ( *IN_ShowSoftKeyboard )( bool show );
+	unsigned int ( *IN_SupportedDevices )( void );
+
+	bool ( *VID_GetModeInfo )( int *width, int *height, unsigned mode );
 	void ( *VID_FlashWindow )( int count );
 
 	void ( *GetConfigString )( int i, char *str, int size );
 	unsigned int ( *Milliseconds )( void );
-	quint64 ( *Microseconds )( void );
+	uint64_t ( *Microseconds )( void );
 
 	// files will be memory mapped read only
 	// the returned buffer may be part of a larger pak file,
@@ -152,14 +171,15 @@ typedef struct
 	int ( *FS_Eof )( int file );
 	int ( *FS_Flush )( int file );
 	void ( *FS_FCloseFile )( int file );
-	qboolean ( *FS_RemoveFile )( const char *filename );
+	bool ( *FS_RemoveFile )( const char *filename );
 	int ( *FS_GetFileList )( const char *dir, const char *extension, char *buf, size_t bufsize, int start, int end );
 	int ( *FS_GetGameDirectoryList )( char *buf, size_t bufsize );
 	const char *( *FS_FirstExtension )( const char *filename, const char *extensions[], int num_extensions );
-	qboolean ( *FS_MoveFile )( const char *src, const char *dst );
-	qboolean ( *FS_IsUrl )( const char *url );
+	bool ( *FS_MoveFile )( const char *src, const char *dst );
+	bool ( *FS_MoveCacheFile )( const char *src, const char *dst );
+	bool ( *FS_IsUrl )( const char *url );
 	time_t ( *FS_FileMTime )( const char *filename );
-	qboolean ( *FS_RemoveDirectory )( const char *dirname );
+	bool ( *FS_RemoveDirectory )( const char *dirname );
 
 	// maplist
 	const char *( *ML_GetFilename )( const char *fullname );
@@ -167,11 +187,11 @@ typedef struct
 	size_t ( *ML_GetMapByNum )( int num, char *out, size_t size );
 
 	// MatchMaker
-	qboolean ( *MM_Login )( const char *user, const char *password );
-	qboolean ( *MM_Logout)( qboolean force );
+	bool ( *MM_Login )( const char *user, const char *password );
+	bool ( *MM_Logout)( bool force );
 	int ( *MM_GetLoginState )( void );
 	size_t ( *MM_GetLastErrorMessage )( char *buffer, size_t buffer_size );
-	size_t ( *MM_GetProfileURL )( char *buffer, size_t buffer_size, qboolean rml );
+	size_t ( *MM_GetProfileURL )( char *buffer, size_t buffer_size, bool rml );
 	size_t ( *MM_GetBaseWebURL )( char *buffer, size_t buffer_size );
 
 	void *( *Mem_Alloc )( size_t size, const char *filename, int fileline );
@@ -200,32 +220,41 @@ typedef struct
 	void ( *L10n_ClearDomain )( void );
 	void ( *L10n_LoadLangPOFile )( const char *filepath );
 	const char *( *L10n_TranslateString )( const char *string );
+	const char *( *L10n_GetUserLanguage )( void );
 } ui_import_t;
 
 typedef struct
 {
 	// if API is different, the dll cannot be used
 	int ( *API )( void );
-	void ( *Init )( int vidWidth, int vidHeight, int protocol, const char *demoExtension );
+	void ( *Init )( int vidWidth, int vidHeight, float pixelRatio,
+			int protocol, const char *demoExtension, const char *basePath );
 	void ( *Shutdown )( void );
 
 	void ( *TouchAllAssets )( void );
 
 	void ( *Refresh )( unsigned int time, int clientState, int serverState, 
-		qboolean demoPlaying, const char *demoName, qboolean demoPaused, unsigned int demoTime, 
-		qboolean backGround, qboolean showCursor );
+		bool demoPlaying, const char *demoName, bool demoPaused, unsigned int demoTime, 
+		bool backGround, bool showCursor );
 
 	void ( *UpdateConnectScreen )( const char *serverName, const char *rejectmessage, 
 		int downloadType, const char *downloadfilename, float downloadPercent, int downloadSpeed, 
-		int connectCount, qboolean backGround );
+		int connectCount, bool backGround );
 
-	void ( *Keydown )( int key );
-	void ( *Keyup )( int key );
-	void ( *CharEvent )( qwchar key );
+	void ( *Keydown )( int context, int key );
+	void ( *Keyup )( int context, int key );
+	void ( *CharEvent )( int context, wchar_t key );
 
-	void ( *MouseMove )( int dx, int dy );
+	void ( *MouseMove )( int context, int dx, int dy );
+	void ( *MouseSet )( int context, int mx, int my, bool showCursor );
+
+	bool ( *TouchEvent )( int context, int id, touchevent_t type, int x, int y );
+	bool ( *IsTouchDown )( int context, int id );
+	void ( *CancelTouches )( int context );
 
 	void ( *ForceMenuOff )( void );
+	bool ( *HaveQuickMenu )( void );
+	void ( *ShowQuickMenu )( bool show );
 	void ( *AddToServerList )( const char *adr, const char *info );
 } ui_export_t;
 

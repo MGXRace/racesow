@@ -42,8 +42,11 @@ typedef struct
 	drawSurfaceType_t type;
 
 	unsigned int visFrame;			// should be drawn when node is crossed
+	void *listSurf;					// only valid if visFrame == rf.frameCount
 
 	struct mesh_vbo_s *vbo;
+	unsigned int firstVboVert, firstVboElem;
+
 	struct superLightStyle_s *superLightStyle;
 
 	unsigned int shadowBits;
@@ -54,6 +57,9 @@ typedef struct
 
 	unsigned int numInstances;
 	instancePoint_t *instances;
+
+	unsigned int numVerts;
+	unsigned int numElems;
 } drawSurfaceBSP_t;
 
 typedef struct
@@ -83,6 +89,8 @@ typedef struct
 	vec4_t *normalsArray;
 	vec2_t *stArray;
 	byte_vec4_t *colorsArray;
+	int numElems;
+	elem_t *elems;
 	struct shader_s	*shader;
 	int fogNum;
 } drawSurfacePoly_t;

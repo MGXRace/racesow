@@ -58,42 +58,18 @@ void CG_StackChatString( cg_gamechat_t *chat, const char *str )
 	chat->nextMsg = (chat->nextMsg + 1) % GAMECHAT_STACK_SIZE;
 }
 
-#define WHITEPSACE_CHAR(c) ((c) == ' ' || (c) == '\t' || (c) == '\n')
-
-/*
-** CG_ColorStrLastColor
-*
-* Copied from console.c
-*/
-static void CG_ColorStrLastColor( int *lastcolor, const char *s, int byteofs )
-{
-	char c;
-	int colorindex;
-	const char *end = s + byteofs;
-
-	while( s < end )
-	{
-		int gc = Q_GrabCharFromColorString( &s, &c, &colorindex );
-		if( gc == GRABCHAR_CHAR )
-			;
-		else if( gc == GRABCHAR_COLOR )
-			*lastcolor = colorindex;
-		else if( gc == GRABCHAR_END )
-			break;
-		else
-			assert( 0 );
-	}
-}
-
 /*
 ** CG_SetChatCvars
 */
-static void CG_SetChatCvars( int x, int y, char *fontName, int font_height, int width, int height, int padding_x, int padding_y )
+static void CG_SetChatCvars( int x, int y, char *fontName, int fontSize, int font_height, int width, int height, int padding_x, int padding_y )
 {
 	char tstr[32];
 
 	trap_Cvar_ForceSet( "con_chatCGame", "1" );
-	trap_Cvar_ForceSet( "con_chatFont",  fontName );
+
+	trap_Cvar_ForceSet( "con_chatFontFamily",  fontName );
+	Q_snprintfz( tstr, sizeof( tstr ), "%i", fontSize );
+	trap_Cvar_ForceSet( "con_chatFontSize",  tstr );
 
 	Q_snprintfz( tstr, sizeof( tstr ), "%i", x + padding_x );
 	trap_Cvar_ForceSet( "con_chatX",  tstr );
@@ -114,14 +90,14 @@ static void CG_SetChatCvars( int x, int y, char *fontName, int font_height, int 
 /*
 ** CG_DrawChat
 */
-void CG_DrawChat( cg_gamechat_t *chat, int x, int y, char *fontName, struct qfontface_s *font, 
+void CG_DrawChat( cg_gamechat_t *chat, int x, int y, char *fontName, struct qfontface_s *font, int fontSize,
 				 int width, int height, int padding_x, int padding_y, vec4_t backColor, struct shader_s *backShader )
 {
 	int i, j;
 	int s, e, w;
+	int utf_len;
 	int l, total_lines, lines;
 	int x_offset, y_offset;
-	int str_width;
 	int font_height;
 	int pass;
 	int lastcolor;
@@ -133,8 +109,11 @@ void CG_DrawChat( cg_gamechat_t *chat, int x, int y, char *fontName, struct qfon
 	vec4_t fontColor;
 	bool chat_active = false;
 	bool background_drawn = false;
+	int corner_radius = 12 * cgs.vidHeight / 600;
+	int background_y;
+	int first_candidate;
 
-	font_height = trap_SCR_strHeight( font );
+	font_height = trap_SCR_FontHeight( font );
 	message_mode = (int)trap_Cvar_Value( "con_messageMode" );
 	chat_active = ( chat->lastMsgTime + GAMECHAT_WAIT_IN_TIME + GAMECHAT_FADE_IN_TIME > cg.realTime || message_mode );
 	lines = 0;
@@ -180,7 +159,7 @@ void CG_DrawChat( cg_gamechat_t *chat, int x, int y, char *fontName, struct qfon
 		backColor[3] *= (1.0 - chat->activeFrac);
 
 	// let the engine know where the input line should be drawn
-	CG_SetChatCvars( x, y, fontName, font_height, width, height, padding_x, padding_y );
+	CG_SetChatCvars( x, y, fontName, fontSize, font_height, width, height, padding_x, padding_y );
 
 	for( i = 0; i < GAMECHAT_STACK_SIZE; i++ )
 	{
@@ -204,7 +183,25 @@ void CG_DrawChat( cg_gamechat_t *chat, int x, int y, char *fontName, struct qfon
 					break;
 			}
 
-			trap_R_DrawStretchPic( x, y, width, height, 0, 0, 1, 1, backColor, backShader );
+			background_y = y;
+			trap_R_DrawStretchPic( x, background_y, width, height - corner_radius,
+				0.0f, 0.0f, 1.0f, 0.5f, backColor, backShader );
+			background_y += height - corner_radius;
+
+			if( trap_IN_IME_GetCandidates( NULL, 0, 10, NULL, &first_candidate ) )
+			{
+				int candidates_height = ( first_candidate ? 3 : 5 ) * font_height;
+				trap_R_DrawStretchPic( x, background_y, width, candidates_height,
+					0.0f, 0.5f, 1.0f, 0.5f, backColor, backShader );
+				background_y += candidates_height;
+			}
+
+			trap_R_DrawStretchPic( x, background_y, corner_radius, corner_radius,
+				0.0f, 0.5f, 0.5f, 1.0f, backColor, backShader );
+			trap_R_DrawStretchPic( x + corner_radius, background_y, width - corner_radius * 2, corner_radius,
+				0.5f, 0.5f, 0.5f, 1.0f, backColor, backShader );
+			trap_R_DrawStretchPic( x + width - corner_radius, background_y, corner_radius, corner_radius,
+				0.5f, 0.5f, 1.0f, 1.0f, backColor, backShader );
 
 			background_drawn = true;
 		}
@@ -222,26 +219,29 @@ parse_string:
 		s = e = 0;
 		while( 1 )
 		{
+			int len;
+
 			memset( tstr, 0, sizeof( tstr ) );
 
 			// skip whitespaces at start
-			for( ; WHITEPSACE_CHAR( text[s] ); s++ );
+			for( ; text[s] == '\n' || Q_IsBreakingSpace( text + s ); s = Q_Utf8SyncPos( text, s + 1, UTF8SYNC_RIGHT ) );
 
 			// empty string
 			if( !text[s] )
 				break;
 
 			w = -1;
-			j = s; // start
-			for( ; text[j] != '\0'; j++ )
+			len = trap_SCR_StrlenForWidth( text + s, font, width - padding_x * 2 );
+			clamp_low( len, 1 );
+
+			for( j = s; ( j < ( s + len ) ) && text[j] != '\0'; j += utf_len )
 			{
-				tstr[j-s] = text[j];
-				str_width = trap_SCR_strWidth( tstr, font, 0 );
+				utf_len = Q_Utf8SyncPos( text + j, 1, UTF8SYNC_RIGHT );
+				memcpy( tstr + j - s, text + j, utf_len );
 
-				if( WHITEPSACE_CHAR( text[j] ) )
+				if( text[j] == '\n' || Q_IsBreakingSpace( text + j ) )
 					w = j; // last whitespace
-
-				if( text[j] == '\n' || str_width > width - padding_x )
+				if( text[j] == '\n' )
 					break;
 			}
 			e = j; // end
@@ -263,7 +263,7 @@ parse_string:
 				// now actually render the line
 				x_offset = padding_x;
 				y_offset = height - padding_y - font_height - (total_lines + lines - l) * (font_height + 2);
-				if( y_offset <= -font_height )
+				if( y_offset < padding_y )
 					break;
 
 				trap_SCR_DrawClampString( x + x_offset, y + y_offset, tstr,
@@ -284,7 +284,7 @@ parse_string:
 				{
 					x_offset = padding_x;
 					y_offset = height - font_height - total_lines * (font_height + 2);
-					if( y_offset <= -font_height )
+					if( y_offset < padding_y )
 						break;
 
 					trap_SCR_DrawClampString( x + x_offset, y + y_offset, tstr,
@@ -299,7 +299,7 @@ parse_string:
 			if( pass )
 			{
 				// grab the last color token to carry it over to the next line
-				CG_ColorStrLastColor( &lastcolor, tstr, j - s );
+				lastcolor = Q_ColorStrLastColor( lastcolor, tstr, j - s );
 			}
 
 			s = j;

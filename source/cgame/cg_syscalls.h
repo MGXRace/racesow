@@ -38,7 +38,7 @@ static inline void trap_Error( const char *msg )
 // dynvars
 static inline dynvar_t *trap_Dynvar_Create( const char *name, bool console, dynvar_getter_f getter, dynvar_setter_f setter )
 {
-	return CGAME_IMPORT.Dynvar_Create( name, console == true ? qtrue : qfalse, getter, setter );
+	return CGAME_IMPORT.Dynvar_Create( name, console == true ? true : false, getter, setter );
 }
 
 static inline void trap_Dynvar_Destroy( dynvar_t *dynvar )
@@ -199,7 +199,7 @@ static inline void trap_FS_FCloseFile( int file )
 
 static inline bool trap_FS_RemoveFile( const char *filename )
 {
-	return CGAME_IMPORT.FS_RemoveFile( filename ) == qtrue;
+	return CGAME_IMPORT.FS_RemoveFile( filename ) == true;
 }
 
 static inline int trap_FS_GetFileList( const char *dir, const char *extension, char *buf, size_t bufsize, int start, int end )
@@ -214,12 +214,12 @@ static inline const char *trap_FS_FirstExtension( const char *filename, const ch
 
 static inline bool trap_FS_IsPureFile( const char *filename )
 {
-	return CGAME_IMPORT.FS_IsPureFile( filename ) == qtrue;
+	return CGAME_IMPORT.FS_IsPureFile( filename ) == true;
 }
 
 static inline bool trap_FS_MoveFile( const char *src, const char *dst )
 {
-	return CGAME_IMPORT.FS_MoveFile( src, dst ) == qtrue;
+	return CGAME_IMPORT.FS_MoveFile( src, dst ) == true;
 }
 
 static inline const char *trap_Key_GetBindingBuf( int binding )
@@ -244,7 +244,7 @@ static inline unsigned int trap_Milliseconds( void )
 
 static inline bool trap_DownloadRequest( const char *filename, bool requestpak )
 {
-	return CGAME_IMPORT.DownloadRequest( filename, requestpak == true ? qtrue : qfalse ) == qtrue;
+	return CGAME_IMPORT.DownloadRequest( filename, requestpak == true ? true : false ) == true;
 }
 
 static inline void trap_NET_GetUserCmd( int frame, usercmd_t *cmd )
@@ -347,16 +347,16 @@ static inline struct shader_s *trap_R_RegisterPic( const char *name )
 	return CGAME_IMPORT.R_RegisterPic( name );
 }
 
-static inline struct shader_s *trap_R_RegisterRawPic( const char *name, int width, int height, qbyte *data )
+static inline struct shader_s *trap_R_RegisterRawPic( const char *name, int width, int height, uint8_t *data, int samples )
 {
-	return CGAME_IMPORT.R_RegisterRawPic( name, width, height, data );
+	return CGAME_IMPORT.R_RegisterRawPic( name, width, height, data, samples );
 }
 
 static inline struct shader_s *trap_R_RegisterLevelshot( const char *name, struct shader_s *defaultPic, bool *matchesDefault )
 {
-	qboolean matchesDefault_;
+	bool matchesDefault_;
 	struct shader_s *s = CGAME_IMPORT.R_RegisterLevelshot( name, defaultPic, &matchesDefault_ );
-	*matchesDefault = matchesDefault_ == qtrue ? true : false;
+	*matchesDefault = matchesDefault_ == true ? true : false;
 	return s;
 }
 
@@ -377,7 +377,7 @@ static inline struct shader_s *trap_R_RegisterVideo( const char *name )
 
 static inline bool trap_R_LerpTag( orientation_t *orient, const struct model_s *mod, int oldframe, int frame, float lerpfrac, const char *name )
 {
-	return CGAME_IMPORT.R_LerpTag( orient, mod, oldframe, frame, lerpfrac, name ) == qtrue;
+	return CGAME_IMPORT.R_LerpTag( orient, mod, oldframe, frame, lerpfrac, name ) == true;
 }
 
 static inline void trap_R_SetCustomColor( int num, int r, int g, int b )
@@ -418,6 +418,11 @@ static inline void trap_R_Scissor( int x, int y, int w, int h )
 static inline void trap_R_GetScissor( int *x, int *y, int *w, int *h )
 {
 	CGAME_IMPORT.R_GetScissor( x, y, w, h );
+}
+
+static inline void trap_R_ResetScissor( void )
+{
+	CGAME_IMPORT.R_ResetScissor();
 }
 
 static inline void trap_R_GetShaderDimensions( const struct shader_s *shader, int *width, int *height )
@@ -485,6 +490,11 @@ static inline void trap_CM_InlineModelBounds( struct cmodel_s *cmodel, vec3_t mi
 	CGAME_IMPORT.CM_InlineModelBounds( cmodel, mins, maxs );
 }
 
+static inline bool trap_CM_InPVS( const vec3_t p1, const vec3_t p2 )
+{
+	return CGAME_IMPORT.CM_InPVS( p1, p2 );
+}
+
 static inline struct sfx_s *trap_S_RegisterSound( const char *name )
 {
 	return CGAME_IMPORT.S_RegisterSound( name );
@@ -515,9 +525,9 @@ static inline void trap_S_AddLoopSound( struct sfx_s *sfx, int entnum, float fvo
 	CGAME_IMPORT.S_AddLoopSound( sfx, entnum, fvol, attenuation );
 }
 
-static inline void trap_S_StartBackgroundTrack( const char *intro, const char *loop )
+static inline void trap_S_StartBackgroundTrack( const char *intro, const char *loop, int mode )
 {
-	CGAME_IMPORT.S_StartBackgroundTrack( intro, loop );
+	CGAME_IMPORT.S_StartBackgroundTrack( intro, loop, mode );
 }
 
 static inline void trap_S_StopBackgroundTrack( void )
@@ -526,14 +536,14 @@ static inline void trap_S_StopBackgroundTrack( void )
 }
 
 static inline void trap_S_RawSamples( unsigned int samples, unsigned int rate, 
-	unsigned short width, unsigned short channels, const qbyte *data )
+	unsigned short width, unsigned short channels, const uint8_t *data )
 {
 	CGAME_IMPORT.S_RawSamples( samples, rate, width, channels, data );
 }
 
 static inline void trap_S_PositionedRawSamples( int entnum, float fvol, float attenuation, 
 		unsigned int samples, unsigned int rate, unsigned short width, 
-		unsigned short channels, const qbyte *data )
+		unsigned short channels, const uint8_t *data )
 {
 	CGAME_IMPORT.S_PositionedRawSamples( entnum, fvol, attenuation, samples, rate, width, channels, data );
 }
@@ -548,6 +558,11 @@ static inline unsigned int trap_S_GetPositionedRawSamplesLength( int entnum )
 	return CGAME_IMPORT.S_GetPositionedRawSamplesLength( entnum );
 }
 
+static inline void trap_S_SetEntitySpatilization( int entNum, vec3_t origin, vec3_t velocity )
+{
+	return CGAME_IMPORT.S_SetEntitySpatilization( entNum, origin, velocity );
+}
+
 static inline struct qfontface_s *trap_SCR_RegisterFont( const char *family, int style, unsigned int size )
 {
 	return CGAME_IMPORT.SCR_RegisterFont( family, style, size );
@@ -558,34 +573,64 @@ static inline struct qfontface_s *trap_SCR_RegisterSpecialFont( const char *fami
 	return CGAME_IMPORT.SCR_RegisterSpecialFont( family, style, size );
 }
 
-static inline void trap_SCR_DrawString( int x, int y, int align, const char *str, struct qfontface_s *font, vec4_t color )
+static inline int trap_SCR_DrawString( int x, int y, int align, const char *str, struct qfontface_s *font, vec4_t color )
 {
-	CGAME_IMPORT.SCR_DrawString( x, y, align, str, font, color );
+	return CGAME_IMPORT.SCR_DrawString( x, y, align, str, font, color, 0 );
 }
 
 static inline size_t trap_SCR_DrawStringWidth( int x, int y, int align, const char *str, size_t maxwidth, struct qfontface_s *font, vec4_t color )
 {
-	return CGAME_IMPORT.SCR_DrawStringWidth( x, y, align, str, maxwidth, font, color );
+	return CGAME_IMPORT.SCR_DrawStringWidth( x, y, align, str, maxwidth, font, color, 0 );
 }
 
 static inline void trap_SCR_DrawClampString( int x, int y, const char *str, int xmin, int ymin, int xmax, int ymax, struct qfontface_s *font, vec4_t color )
 {
-	CGAME_IMPORT.SCR_DrawClampString( x, y, str, xmin, ymin, xmax, ymax, font, color );
+	CGAME_IMPORT.SCR_DrawClampString( x, y, str, xmin, ymin, xmax, ymax, font, color, 0 );
 }
 
-static inline size_t trap_SCR_strHeight( struct qfontface_s *font )
+static inline int trap_SCR_DrawMultilineString( int x, int y, const char *str, int halign, int maxwidth, int maxlines, struct qfontface_s *font, vec4_t color )
 {
-	return CGAME_IMPORT.SCR_strHeight( font );
+	return CGAME_IMPORT.SCR_DrawMultilineString( x, y, str, halign, maxwidth, maxlines, font, color, 0 );
+}
+
+static inline void trap_SCR_DrawRawChar( int x, int y, wchar_t num, struct qfontface_s *font, vec4_t color )
+{
+	CGAME_IMPORT.SCR_DrawRawChar( x, y, num, font, color );
+}
+
+static inline void trap_SCR_DrawClampChar( int x, int y, wchar_t num, int xmin, int ymin, int xmax, int ymax, struct qfontface_s *font, vec4_t color )
+{
+	CGAME_IMPORT.SCR_DrawClampChar( x, y, num, xmin, ymin, xmax, ymax, font, color );
+}
+
+static inline int trap_SCR_FontHeight( struct qfontface_s *font )
+{
+	return CGAME_IMPORT.SCR_FontHeight( font );
 }
 
 static inline size_t trap_SCR_strWidth( const char *str, struct qfontface_s *font, int maxlen )
 {
-	return CGAME_IMPORT.SCR_strWidth( str, font, maxlen );
+	return CGAME_IMPORT.SCR_strWidth( str, font, maxlen, 0 );
 }
 
 static inline size_t trap_SCR_StrlenForWidth( const char *str, struct qfontface_s *font, size_t maxwidth )
 {
-	return CGAME_IMPORT.SCR_StrlenForWidth( str, font, maxwidth );
+	return CGAME_IMPORT.SCR_StrlenForWidth( str, font, maxwidth, 0 );
+}
+
+static inline void trap_SCR_EnableQuickMenu( bool enable )
+{
+	CGAME_IMPORT.SCR_EnableQuickMenu( enable );
+}
+
+static inline bool trap_SCR_HaveQuickMenu( void )
+{
+	return CGAME_IMPORT.SCR_HaveQuickMenu();
+}
+
+static inline bool trap_SCR_IsQuickMenuShown( void )
+{
+	return CGAME_IMPORT.SCR_IsQuickMenuShown();
 }
 
 static inline void *trap_MemAlloc( size_t size, const char *filename, int fileline )
@@ -634,8 +679,24 @@ static inline const char *trap_L10n_TranslateString( const char *string )
 	return CGAME_IMPORT.L10n_TranslateString( string );
 }
 
-static inline qboolean trap_CIN_AddRawSamplesListener( struct cinematics_s *cin, 
+static inline bool trap_CIN_AddRawSamplesListener( struct cinematics_s *cin, 
 	void *listener, cg_raw_samples_cb_t rs,cg_get_raw_samples_cb_t grs )
 {
 	return CGAME_IMPORT.CIN_AddRawSamplesListener( cin, listener, rs, grs );
+}
+
+static inline void trap_IN_GetThumbsticks( vec4_t sticks )
+{
+	return CGAME_IMPORT.IN_GetThumbsticks( sticks );
+}
+
+static inline unsigned int trap_IN_IME_GetCandidates( char * const *cands, size_t candSize, unsigned int maxCands,
+	int *selected, int *firstKey )
+{
+	return CGAME_IMPORT.IN_IME_GetCandidates( cands, candSize, maxCands, selected, firstKey );
+}
+
+static inline unsigned int trap_IN_SupportedDevices( void )
+{
+	return CGAME_IMPORT.IN_SupportedDevices();
 }

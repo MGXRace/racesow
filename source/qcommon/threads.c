@@ -21,8 +21,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "qcommon.h"
 #include "sys_threads.h"
 
-qmutex_t *global_mutex;
-
 /*
 * QMutex_Create
 */
@@ -33,7 +31,7 @@ qmutex_t *QMutex_Create( void )
 
 	ret = Sys_Mutex_Create( &mutex );
 	if( ret != 0 ) {
-		return NULL;
+		Sys_Error( "QMutex_Create: failed with code %i", ret );
 	}
 	return mutex;
 }
@@ -69,6 +67,49 @@ void QMutex_Unlock( qmutex_t *mutex )
 }
 
 /*
+* QCondVar_Create
+*/
+qcondvar_t *QCondVar_Create( void )
+{
+	int ret;
+	qcondvar_t *cond;
+
+	ret = Sys_CondVar_Create( &cond );
+	if( ret != 0 ) {
+		Sys_Error( "QCondVar_Create: failed with code %i", ret );
+	}
+	return cond;
+}
+
+/*
+* QCondVar_Destroy
+*/
+void QCondVar_Destroy( qcondvar_t **pcond )
+{
+	assert( pcond != NULL );
+	if( pcond && *pcond ) {
+		Sys_CondVar_Destroy( *pcond );
+		*pcond = NULL;
+	}
+}
+
+/*
+* QCondVar_Wait
+*/
+bool QCondVar_Wait( qcondvar_t *cond, qmutex_t *mutex, unsigned int timeout_msec )
+{
+	return Sys_CondVar_Wait( cond, mutex, timeout_msec );
+}
+
+/*
+* QCondVar_Wake
+*/
+void QCondVar_Wake( qcondvar_t *cond )
+{
+	Sys_CondVar_Wake( cond );
+}
+
+/*
 * QThread_Create
 */
 qthread_t *QThread_Create( void *(*routine) (void*), void *param )
@@ -78,13 +119,13 @@ qthread_t *QThread_Create( void *(*routine) (void*), void *param )
 
 	ret = Sys_Thread_Create( &thread, routine, param );
 	if( ret != 0 ) {
-		return NULL;
+		Sys_Error( "QThread_Create: failed with code %i", ret );
 	}
 	return thread;
 }
 
 /*
-* QThread_Create
+* QThread_Join
 */
 void QThread_Join( qthread_t *thread )
 {
@@ -92,18 +133,18 @@ void QThread_Join( qthread_t *thread )
 }
 
 /*
+* QThread_Yield
+*/
+void QThread_Yield( void )
+{
+	Sys_Thread_Yield();
+}
+
+/*
 * QThreads_Init
 */
 void QThreads_Init( void )
 {
-	int ret;
-
-	global_mutex = NULL;
-
-	ret = Sys_Mutex_Create( &global_mutex );
-	if( ret != 0 ) { 
-		return;
-	}
 }
 
 /*
@@ -111,15 +152,11 @@ void QThreads_Init( void )
 */
 void QThreads_Shutdown( void )
 {
-	if( global_mutex != NULL ) {
-		Sys_Mutex_Destroy( global_mutex );
-		global_mutex = NULL;
-	}
 }
 
 // ============================================================================
 
-typedef struct qbufQueue_s
+typedef struct qbufPipe_s
 {
 	int blockWrite;
 	volatile int terminated;
@@ -128,75 +165,94 @@ typedef struct qbufQueue_s
 	volatile int cmdbuf_len;
 	qmutex_t *cmdbuf_mutex;
 	size_t bufSize;
+	qcondvar_t *nonempty_condvar;
+	qmutex_t *nonempty_mutex;
 	char *buf;
-} qbufQueue_t;
+} qbufPipe_t;
 
 /*
-* Sys_BufQueue_Create
+* QBufPipe_Create
 */
-qbufQueue_t *Sys_BufQueue_Create( size_t bufSize, int flags )
+qbufPipe_t *QBufPipe_Create( size_t bufSize, int flags )
 {
-	qbufQueue_t *queue = malloc( sizeof( *queue ) + bufSize );
-	memset( queue, 0, sizeof( *queue ) );
-	queue->blockWrite = flags & 1;
-	queue->buf = (char *)(queue + 1);
-	queue->bufSize = bufSize;
-	Sys_Mutex_Create( &queue->cmdbuf_mutex );
-	return queue;
+	qbufPipe_t *pipe = malloc( sizeof( *pipe ) + bufSize );
+	memset( pipe, 0, sizeof( *pipe ) );
+	pipe->blockWrite = flags & 1;
+	pipe->buf = (char *)(pipe + 1);
+	pipe->bufSize = bufSize;
+	pipe->cmdbuf_mutex = QMutex_Create();
+	pipe->nonempty_condvar = QCondVar_Create();
+	pipe->nonempty_mutex = QMutex_Create();
+	return pipe;
 }
 
 /*
-* Sys_BufQueue_Destroy
+* QBufPipe_Destroy
 */
-void Sys_BufQueue_Destroy( qbufQueue_t **pqueue )
+void QBufPipe_Destroy( qbufPipe_t **ppipe )
 {
-	qbufQueue_t *queue;
+	qbufPipe_t *pipe;
 
-	assert( pqueue != NULL );
-	if( !pqueue ) {
+	assert( ppipe != NULL );
+	if( !ppipe ) {
 		return;
 	}
 
-	queue = *pqueue;
-	*pqueue = NULL;
+	pipe = *ppipe;
+	*ppipe = NULL;
 
-	Sys_Mutex_Destroy( queue->cmdbuf_mutex );
-	free( queue );
+	QMutex_Destroy( &pipe->cmdbuf_mutex );
+	QMutex_Destroy( &pipe->nonempty_mutex );
+	QCondVar_Destroy( &pipe->nonempty_condvar );
+	free( pipe );
 }
 
 /*
-* Sys_BufQueue_Finish
+* QBufPipe_Wake
+*
+* Signals the waiting thread to wake up.
+*/
+static void QBufPipe_Wake( qbufPipe_t *pipe )
+{
+	QCondVar_Wake( pipe->nonempty_condvar );
+}
+
+/*
+* QBufPipe_Finish
 *
 * Blocks until the reader thread handles all commands
 * or terminates with an error.
 */
-void Sys_BufQueue_Finish( qbufQueue_t *queue )
+void QBufPipe_Finish( qbufPipe_t *pipe )
 {
-	while( queue->cmdbuf_len > 0 && !queue->terminated ) {
-		Sys_Thread_Yield();
+	while( Sys_Atomic_CAS( &pipe->cmdbuf_len, 0, 0, pipe->cmdbuf_mutex ) == false && !pipe->terminated ) {
+		QMutex_Lock( pipe->nonempty_mutex );
+		QBufPipe_Wake( pipe );
+		QMutex_Unlock( pipe->nonempty_mutex );
+		QThread_Yield();
 	}
 }
 
 /*
-* Sys_BufQueue_AllocCmd
+* QBufPipe_AllocCmd
 */
-static void *Sys_BufQueue_AllocCmd( qbufQueue_t *queue, unsigned cmd_size )
+static void *QBufPipe_AllocCmd( qbufPipe_t *pipe, unsigned cmd_size )
 {
-	void *buf = &queue->buf[queue->write_pos];
-	queue->write_pos += cmd_size;
+	void *buf = &pipe->buf[pipe->write_pos];
+	pipe->write_pos += cmd_size;
 	return buf;
 }
 
 /*
-* Sys_BufQueue_BufLenAdd
+* QBufPipe_BufLenAdd
 */
-static void Sys_BufQueue_BufLenAdd( qbufQueue_t *queue, int val )
+static void QBufPipe_BufLenAdd( qbufPipe_t *pipe, int val )
 {
-	Sys_Atomic_Add( &queue->cmdbuf_len, val, queue->cmdbuf_mutex );
+	Sys_Atomic_Add( &pipe->cmdbuf_len, val, pipe->cmdbuf_mutex );
 }
 
 /*
-* Sys_BufQueue_EnqueueCmd
+* QBufPipe_WriteCmd
 *
 * Add new command to buffer. Never allow the distance between the reader
 * and the writer to grow beyond the size of the buffer.
@@ -204,125 +260,165 @@ static void Sys_BufQueue_BufLenAdd( qbufQueue_t *queue, int val )
 * Note that there are race conditions here but in the worst case we're going
 * to erroneously drop cmd's instead of stepping on the reader's toes.
 */
-void Sys_BufQueue_EnqueueCmd( qbufQueue_t *queue, const void *cmd, unsigned cmd_size )
+void QBufPipe_WriteCmd( qbufPipe_t *pipe, const void *cmd, unsigned cmd_size )
 {
 	void *buf;
 	unsigned write_remains;
+	bool was_empty;
 	
-	if( !queue ) {
+	if( !pipe ) {
 		return;
 	}
-	if( queue->terminated ) {
+	if( pipe->terminated ) {
 		return;
 	}
 
-	assert( queue->bufSize >= queue->write_pos );
-	if( queue->bufSize < queue->write_pos ) {
-		queue->write_pos = 0;
+	assert( pipe->bufSize >= pipe->write_pos );
+	if( pipe->bufSize < pipe->write_pos ) {
+		pipe->write_pos = 0;
 	}
 
-	write_remains = queue->bufSize - queue->write_pos;
+	was_empty = Sys_Atomic_CAS( &pipe->cmdbuf_len, 0, 0, pipe->cmdbuf_mutex ) == true;
+	write_remains = pipe->bufSize - pipe->write_pos;
 
 	if( sizeof( int ) > write_remains ) {
-		while( queue->cmdbuf_len + cmd_size + write_remains > queue->bufSize ) {
-			if( queue->blockWrite ) {
-				Sys_Thread_Yield();
+		while( pipe->cmdbuf_len + cmd_size + write_remains > pipe->bufSize ) {
+			if( pipe->blockWrite ) {
+				QThread_Yield();
 				continue;
 			}
 			return;
 		}
 
-		// not enough space to enqueue even the reset cmd, rewind
-		Sys_BufQueue_BufLenAdd( queue, write_remains ); // atomic
-		queue->write_pos = 0;
+		// not enough space to enpipe even the reset cmd, rewind
+		QBufPipe_BufLenAdd( pipe, write_remains ); // atomic
+		pipe->write_pos = 0;
 	} else if( cmd_size > write_remains ) {
 		int *cmd;
 
-		while( queue->cmdbuf_len + sizeof( int ) + cmd_size + write_remains > queue->bufSize ) {
-			if( queue->blockWrite ) {
-				Sys_Thread_Yield();
+		while( pipe->cmdbuf_len + sizeof( int ) + cmd_size + write_remains > pipe->bufSize ) {
+			if( pipe->blockWrite ) {
+				QThread_Yield();
 				continue;
 			}
 			return;
 		}
 
 		// explicit pointer reset cmd
-		cmd = Sys_BufQueue_AllocCmd( queue, sizeof( int ) );
+		cmd = QBufPipe_AllocCmd( pipe, sizeof( int ) );
 		*cmd = -1;
 
-		Sys_BufQueue_BufLenAdd( queue, sizeof( *cmd ) + write_remains ); // atomic
-		queue->write_pos = 0;
+		QBufPipe_BufLenAdd( pipe, sizeof( *cmd ) + write_remains ); // atomic
+		pipe->write_pos = 0;
 	}
 	else
 	{
-		while( queue->cmdbuf_len + cmd_size > queue->bufSize ) {
-			if( queue->blockWrite ) {
-				Sys_Thread_Yield();
+		while( pipe->cmdbuf_len + cmd_size > pipe->bufSize ) {
+			if( pipe->blockWrite ) {
+				QThread_Yield();
 				continue;
 			}
 			return;
 		}
 	}
 
-	buf = Sys_BufQueue_AllocCmd( queue, cmd_size );
+	buf = QBufPipe_AllocCmd( pipe, cmd_size );
 	memcpy( buf, cmd, cmd_size );
-	Sys_BufQueue_BufLenAdd( queue, cmd_size ); // atomic
+	QBufPipe_BufLenAdd( pipe, cmd_size ); // atomic
+
+	// wake the other thread waiting for signal
+	if( was_empty ) {
+		QMutex_Lock( pipe->nonempty_mutex );
+		QBufPipe_Wake( pipe );
+		QMutex_Unlock( pipe->nonempty_mutex );
+	}
 }
 
 /*
-* Sys_BufQueue_ReadCmds
+* QBufPipe_ReadCmds
 */
-int Sys_BufQueue_ReadCmds( qbufQueue_t *queue, unsigned (**cmdHandlers)( const void * ) )
+int QBufPipe_ReadCmds( qbufPipe_t *pipe, unsigned (**cmdHandlers)( const void * ) )
 {
 	int read = 0;
 
-	if( !queue ) {
+	if( !pipe ) {
 		return -1;
 	}
 
-	while( queue->cmdbuf_len > 0 && !queue->terminated ) {
+	while( Sys_Atomic_CAS( &pipe->cmdbuf_len, 0, 0, pipe->cmdbuf_mutex ) == false && !pipe->terminated ) {
 		int cmd;
 		int cmd_size;
 		int read_remains;
 	
-		assert( queue->bufSize >= queue->read_pos );
-		if( queue->bufSize < queue->read_pos ) {
-			queue->read_pos = 0;
+		assert( pipe->bufSize >= pipe->read_pos );
+		if( pipe->bufSize < pipe->read_pos ) {
+			pipe->read_pos = 0;
 		}
 
-		read_remains = queue->bufSize - queue->read_pos;
+		read_remains = pipe->bufSize - pipe->read_pos;
 
 		if( sizeof( int ) > read_remains ) {
 			// implicit reset
-			queue->read_pos = 0;
-			Sys_BufQueue_BufLenAdd( queue, -read_remains );
+			pipe->read_pos = 0;
+			QBufPipe_BufLenAdd( pipe, -read_remains );
 		}
 
-		cmd = *((int *)(queue->buf + queue->read_pos));
+		cmd = *((int *)(pipe->buf + pipe->read_pos));
 		if( cmd == -1 ) {
 			// this cmd is special
-			queue->read_pos = 0;
-			Sys_BufQueue_BufLenAdd( queue, -((int)(sizeof(int) + read_remains)) ); // atomic
+			pipe->read_pos = 0;
+			QBufPipe_BufLenAdd( pipe, -((int)(sizeof(int) + read_remains)) ); // atomic
 			continue;
 		}
 
-		cmd_size = cmdHandlers[cmd](queue->buf + queue->read_pos);
+		cmd_size = cmdHandlers[cmd](pipe->buf + pipe->read_pos);
 		read++;
 
 		if( !cmd_size ) {
-			queue->terminated = 1;
+			pipe->terminated = 1;
 			return -1;
 		}
 		
-		if( cmd_size > queue->cmdbuf_len ) {
+		if( cmd_size > pipe->cmdbuf_len ) {
 			assert( 0 );
-			queue->terminated = 1;
+			pipe->terminated = 1;
 			return -1;
 		}
 
-		queue->read_pos += cmd_size;
-		Sys_BufQueue_BufLenAdd( queue, -cmd_size ); // atomic
+		pipe->read_pos += cmd_size;
+		QBufPipe_BufLenAdd( pipe, -cmd_size ); // atomic
+		break;
 	}
 
 	return read;
+}
+
+/*
+* QBufPipe_Wait
+*/
+void QBufPipe_Wait( qbufPipe_t *pipe, int (*read)( qbufPipe_t *, unsigned( ** )(const void *), bool ), 
+	unsigned (**cmdHandlers)( const void * ), unsigned timeout_msec )
+{
+	while( !pipe->terminated ) {
+		int res;
+		bool result = false;
+
+		while( Sys_Atomic_CAS( &pipe->cmdbuf_len, 0, 0, pipe->cmdbuf_mutex ) == true ) {
+			QMutex_Lock( pipe->nonempty_mutex );
+
+			result = QCondVar_Wait( pipe->nonempty_condvar, pipe->nonempty_mutex, timeout_msec );
+
+			// don't hold the mutex, changes to cmdbuf_len are atomic anyway
+			QMutex_Unlock( pipe->nonempty_mutex );
+			break;
+		}
+
+		// we're guaranteed at this point that either cmdbuf_len is > 0
+		// or that waiting on the condition variable has timed out
+		res = read( pipe, cmdHandlers, result );
+		if( res < 0 ) {
+			// done
+			return;
+		}
+	}
 }

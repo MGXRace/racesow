@@ -33,16 +33,14 @@ BaseEventListener::~BaseEventListener()
 
 void BaseEventListener::ProcessEvent( Event &event )
 {
-	Element *target = event.GetTargetElement();
-
 	if( event.GetPhase() != Rocket::Core::Event::PHASE_TARGET ) {
 		return;
 	}
 
+	Element *target = event.GetTargetElement();
+
 	/* ch : CSS sound properties are handled here */
-	if( event.GetType() == "keydown" ) {
-	}
-	else if( event.GetType() == "mouseover" ) {
+	if( event.GetType() == "mouseover" ) {
 		StartTargetPropertySound( target, SOUND_HOVER );
 	}
 	else if( event.GetType() == "click" ) {
@@ -75,7 +73,11 @@ void BaseEventListener::StartTargetPropertySound( Element *target, const String 
 
 Rocket::Core::EventListener * GetBaseEventListener( void )
 {
-	return __new__(BaseEventListener)();
+	static BaseEventListener *listener = nullptr;
+	if( listener == nullptr ) {
+		listener = __new__(BaseEventListener)();
+	}
+	return listener;
 }
 
 //===================================================
@@ -96,23 +98,24 @@ public:
 			( event.GetPhase() == Rocket::Core::Event::PHASE_TARGET || event.GetPhase() == Rocket::Core::Event::PHASE_BUBBLE ) )
 		{
 			int key = event.GetParameter<int>( "key_identifier", 0 );
+			ElementDocument *document = event.GetTargetElement()->GetOwnerDocument();
+			WSWUI::Document *ui_document = static_cast<WSWUI::Document *>(document->GetScriptObject());
+			WSWUI::NavigationStack *stack = ui_document ? ui_document->getStack() : NULL;
 
 			if( key == Input::KI_ESCAPE ) {
-				NavigationStack *stack = UI_Main::Get()->getNavigator();
-
-				if( stack->isTopModal() ) {
-					// pop the top document
-					stack->popDocument();
-				}
-				else {
-					// hide all documents
-					UI_Main::Get()->showUI( false );
+				if( stack ) {
+					if( stack->isTopModal() ) {
+						// pop the top document
+						stack->popDocument();
+					}
+					else if( stack->getContextId() == UI_CONTEXT_MAIN ) {
+						// hide all documents
+						UI_Main::Get()->showUI( false );
+					}
 				}
 				event.StopPropagation();
 			}
 			else if( key == Rocket::Core::Input::KI_BROWSER_BACK || key == Rocket::Core::Input::KI_BACK ) {
-				NavigationStack *stack = UI_Main::Get()->getNavigator();
-
 				// act as history.back()
 				if( stack && stack->hasAtLeastTwoDocuments() ) {
 					stack->popDocument();
@@ -124,7 +127,7 @@ public:
 			bool linebreak = event.GetParameter<int>( "linebreak", 0 ) != 0;
 			if( linebreak ) {
 				// form submission
-				String inpuType;
+				String inputType;
 				Element *target = event.GetTargetElement();
 				Rocket::Controls::ElementFormControl *input = dynamic_cast<Rocket::Controls::ElementFormControl *>(target);
 
@@ -144,8 +147,8 @@ public:
 					return;
 				}
 
-				inpuType = input->GetAttribute<String>( "type", "text" );
-				if( inpuType != "text" && inpuType != "password" ) {
+				inputType = input->GetAttribute<String>( "type", "" );
+				if( inputType != "text" && inputType != "password" ) {
 					// not a text field
 					return;
 				}
@@ -210,11 +213,43 @@ public:
 	}
 };
 
-UI_MainListener ui_mainlistener;
+static UI_MainListener ui_mainListener;
 
-EventListener * UI_GetMainListener( void )
+EventListener *UI_GetMainListener( void )
 {
-	return &ui_mainlistener;
+	return &ui_mainListener;
+}
+
+//===================================================
+
+class UI_SoftKeyboardListener : public EventListener
+{
+public:
+	virtual void ProcessEvent( Event &event )
+	{
+		if( event.GetPhase() != Rocket::Core::Event::PHASE_TARGET )
+			return;
+
+		Rocket::Controls::ElementFormControl *input =
+			dynamic_cast< Rocket::Controls::ElementFormControl * >( event.GetTargetElement() );
+		if( !input || input->IsDisabled() )
+			return;
+
+		String inputType = input->GetAttribute< String >( "type", "" );
+		if( ( inputType != "text" ) && ( inputType != "password" ) &&
+			!dynamic_cast< Rocket::Controls::ElementFormControlTextArea * >( input ) )
+			return;
+
+		trap::IN_ShowSoftKeyboard( ( event.GetType() == "click" ) ? true : false );
+	}
+};
+
+
+static UI_SoftKeyboardListener ui_softKeyboardListener;
+
+EventListener *UI_GetSoftKeyboardListener( void )
+{
+	return &ui_softKeyboardListener;
 }
 
 }

@@ -90,7 +90,7 @@ static int G_Chase_FindFollowPOV( edict_t *ent )
 	}
 
 	// find what players have what
-	score_best = -999999999;
+	score_best = 999999999; // racesow: changed from -999999999 to find lowest score (fastest time)
 	if( level.gametype.inverseScore )
 		score_best *= -1;
 	quad = warshell = regen = scorelead = -1;
@@ -131,8 +131,11 @@ static int G_Chase_FindFollowPOV( edict_t *ent )
 		}
 
 		// find the scoring leader
-		if( ( !level.gametype.inverseScore && target->r.client->ps.stats[STAT_SCORE] > score_best )
-				|| ( level.gametype.inverseScore && target->r.client->ps.stats[STAT_SCORE] < score_best ) )
+		if( ( !level.gametype.inverseScore && target->r.client->ps.stats[STAT_SCORE] // racesow: find lowest non-zero score (fastest time)
+				&& target->r.client->ps.stats[STAT_SCORE] < score_best )
+			|| ( level.gametype.inverseScore && target->r.client->ps.stats[STAT_SCORE] // racesow: find highest non-zero score (slowest time)
+				&& target->r.client->ps.stats[STAT_SCORE] > score_best )
+			)
 		{
 			score_best = target->r.client->ps.stats[STAT_SCORE];
 			scorelead = ENTNUM( target );
@@ -285,6 +288,7 @@ static void G_EndFrame_UpdateChaseCam( edict_t *ent )
 	ent->r.client->ps.stats[STAT_LAYOUTS] &= ~STAT_LAYOUT_CHALLENGER;
 	ent->r.client->ps.stats[STAT_LAYOUTS] &= ~STAT_LAYOUT_READY;
 	ent->r.client->ps.stats[STAT_LAYOUTS] &= ~STAT_LAYOUT_SPECTEAMONLY;
+	ent->r.client->ps.stats[STAT_LAYOUTS] &= ~STAT_LAYOUT_INSTANTRESPAWN;
 
 	if( ent->r.client->resp.chase.teamonly )
 	{
@@ -301,10 +305,6 @@ static void G_EndFrame_UpdateChaseCam( edict_t *ent )
 
 	if( GS_MatchState() <= MATCH_STATE_WARMUP && level.ready[PLAYERNUM( ent )] )
 		ent->r.client->ps.stats[STAT_LAYOUTS] |= STAT_LAYOUT_READY;
-
-
-	// cgame will override the fov if not zooming
-	ent->r.client->ps.fov = targ->r.client->zoomfov;
 
 	// chasecam uses PM_CHASECAM
 	ent->r.client->ps.pmove.pm_type = PM_CHASECAM;
@@ -468,7 +468,7 @@ void G_ChasePlayer( edict_t *ent, const char *name, bool teamonly, int followmod
 void G_ChaseStep( edict_t *ent, int step )
 {
 	int i, j, team;
-	qboolean player_found;
+	bool player_found;
 	int actual;
 	int start;
 	edict_t *newtarget = NULL;
@@ -480,13 +480,13 @@ void G_ChaseStep( edict_t *ent, int step )
 
 	start = ent->r.client->resp.chase.target;
 	i = -1;
-	player_found = qfalse; // needed to prevent an infinite loop if there are no players
+	player_found = false; // needed to prevent an infinite loop if there are no players
 	// find the team of the previously chased player and his index in the sorted teamlist
 	for( team = TEAM_PLAYERS; team < GS_MAX_TEAMS; team++ )
 	{
 		for( j = 0; j < teamlist[team].numplayers; j++ )
 		{
-			player_found = qtrue;
+			player_found = true;
 			if( teamlist[team].playerIndices[j] == start )
 			{
 				i = j;
@@ -558,7 +558,11 @@ void Cmd_ChaseCam_f( edict_t *ent )
 
 	if( ent->s.team != TEAM_SPECTATOR && !ent->r.client->teamstate.is_coach )
 	{
-		G_Teams_JoinTeam( ent, TEAM_SPECTATOR );
+		// racesow - changed from G_Teams_JoinTeam( ent, TEAM_SPECTATOR ) as this makes
+		// a second G_ChasePlayer call with followmode 0, thereby overriding the chasecam mode set here
+		ent->r.client->team = TEAM_SPECTATOR;
+		G_ClientRespawn( ent, true );
+		// !racesow
 		if( !CheckFlood( ent, false )) { // prevent 'joined spectators' spam
 			G_PrintMsg( NULL, "%s%s joined the %s%s team.\n", ent->r.client->netname,
 				S_COLOR_WHITE, GS_TeamName( ent->s.team ), S_COLOR_WHITE );

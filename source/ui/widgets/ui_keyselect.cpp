@@ -40,7 +40,6 @@ using namespace Rocket::Core;
 		this->boundKey[1] = 0;
 		this->mouse_x = 0;
 		this->mouse_y = 0;
-		this->firstMousedown = true;
 		this->instancer = instancer;
 
 		InitializeBinds();
@@ -131,6 +130,20 @@ using namespace Rocket::Core;
 		}
 	}
 
+	// Get the name of a keycode that is visible to the user.
+	std::string UI_KeySelect::KeynumToString( int keynum ) const
+	{
+		if( ( keynum >= 'a' ) && ( keynum <= 'z' ) )
+		{
+			char upper[2];
+			upper[0] = keynum - 'a' + 'A';
+			upper[1] = '\0';
+			return upper;
+		}
+
+		return trap::Key_KeynumToString( keynum );
+	}
+
 	// Initialize the text inside the widget
 	// i.e. if "r" and "b" keys are bound, the text inside the widget
 	//      will look like: "R OR B".
@@ -150,7 +163,7 @@ using namespace Rocket::Core;
 
 			if( FirstKeyIsBound() )
 			{
-				std::string b0 = trap::Key_KeynumToString( boundKey[0] );
+				std::string b0 = KeynumToString( boundKey[0] );
 				if( focusMode ) {
 					text = va( or_l10n, b0.c_str(), "???" );
 				}
@@ -160,8 +173,8 @@ using namespace Rocket::Core;
 			}
 			else if( KeysAreBound() )
 			{
-				std::string b0 = trap::Key_KeynumToString( boundKey[0] );
-				std::string b1 = trap::Key_KeynumToString( boundKey[1] );
+				std::string b0 = KeynumToString( boundKey[0] );
+				std::string b1 = KeynumToString( boundKey[1] );
 				text += va( or_l10n, b0.c_str(), b1.c_str() );
 			}
 		}
@@ -173,7 +186,7 @@ using namespace Rocket::Core;
 	{
 		int index;
 
-		if( key == K_ESCAPE )
+		if( !key || ( key == K_ESCAPE ) )
 			return;
 
 		// koochi: moved into the focus event
@@ -181,7 +194,7 @@ using namespace Rocket::Core;
 		//	ReleaseKeys();
 
 		// we don't need to rebind the same key
-		if( key && (key == boundKey[0] || key == boundKey[1]) )
+		if( ( key == boundKey[0] ) || ( key == boundKey[1] ) )
 		{
 			this->Blur();
 			return;
@@ -206,17 +219,19 @@ using namespace Rocket::Core;
 	/// @param[in] event The event to process.
 	void UI_KeySelect::ProcessEvent( Event& event )
 	{
+		RocketModule *rocketModule = GetRocketModule();
+		int contextId = rocketModule->idForContext( GetContext() );
+
 		if( event == "blur" )
 		{
 			focusMode = false;
-			GetRocketModule()->showCursor();
+			rocketModule->hideCursor( contextId, 0, RocketModule::HIDECURSOR_ELEMENT );
 			WriteText();
 		}
 		else if( event == "focus" )
 		{
 			focusMode = true;
-			GetRocketModule()->hideCursor();
-			firstMousedown = true;
+			rocketModule->hideCursor( contextId, RocketModule::HIDECURSOR_ELEMENT, 0 );
 
 			// old C ui functionality
 			if( KeysAreBound() )
@@ -230,13 +245,11 @@ using namespace Rocket::Core;
 		{
 			int key = 0;
 
-			if( event == "keydown" )
+			if( event == "keyselect" )
 			{
-				key = GetKeyboardKey( event );
-				if( key != K_ESCAPE ) {
-					this->SetKeybind( key );
-					event.StopPropagation();
-				}
+				key = event.GetParameter< int >( "key", 0 );
+				this->SetKeybind( key );
+				event.StopPropagation();
 				return;
 			}
 			else if( event == "textinput" )
@@ -245,31 +258,14 @@ using namespace Rocket::Core;
 			}
 			else if( event == "mousedown" )
 			{
-				if( firstMousedown )
-				{
-					firstMousedown = false;
-
-					// fix mouse position inside the widget
-					mouse_x = event.GetParameter<int>( "mouse_x", 0 );
-					mouse_y = event.GetParameter<int>( "mouse_y", 0 );
-					return;
-				}
-
-				key = GetMouseKey( event );
-				this->SetKeybind( key );
-				event.StopPropagation();
-				return;
-			}
-			else if( event == "mousescroll" )
-			{
-				key = GetWheelKey( event );
-				this->SetKeybind( key );
-				event.StopPropagation();
+				// fix mouse position inside the widget
+				mouse_x = event.GetParameter<int>( "mouse_x", 0 );
+				mouse_y = event.GetParameter<int>( "mouse_y", 0 );
 				return;
 			}
 			else if( event == "mousemove" || event == "mouseout" )
 			{
-				GetRocketModule()->mouseMove( mouse_x, mouse_y );
+				rocketModule->mouseMove( contextId, mouse_x, mouse_y );
 				event.StopPropagation();
 				return;
 			}

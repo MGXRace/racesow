@@ -43,7 +43,13 @@ public:
 			idiv->ReadFromFile( fileName );
 		}
 		else {
-			UI_Main::Get()->getNavigator()->pushDocument( fileName );
+			ElementDocument *document = element->GetOwnerDocument();
+			WSWUI::Document *ui_document = static_cast<WSWUI::Document *>(document->GetScriptObject());
+			if( ui_document ) {
+				WSWUI::NavigationStack *stack = ui_document->getStack();
+				if( stack )
+					stack->pushDocument( fileName );
+			}
 		}
 
 		element->RemoveReference();
@@ -79,6 +85,7 @@ public:
 			if( urlProtocol == gameProtocol.ToLower() || urlProtocol == gameProtocolSchema.ToLower() ) {
 				// connect to game server
 				trap::Cmd_ExecuteText( EXEC_APPEND, va( "connect \"%s\"\n", href.CString() ) );
+				return;
 			}
 			else if( trap::FS_IsUrl( href.CString() ) ) {
 				String target = GetAttribute<String>("target", "");
@@ -98,7 +105,10 @@ public:
 				return;
 			}
 
-			UI_Main::Get()->getNavigator()->pushDocument( href.CString() );
+			WSWUI::Document *ui_document = static_cast<WSWUI::Document *>(GetOwnerDocument()->GetScriptObject());
+			if( ui_document ) {
+				ui_document->getStack()->pushDocument( href.CString() );
+			}
 		}
 		else
 		{

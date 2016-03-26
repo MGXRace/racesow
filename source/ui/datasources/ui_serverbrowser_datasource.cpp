@@ -16,6 +16,8 @@ namespace WSWUI {
 #define TABLE_NAME_RACE		"race"
 #define TABLE_NAME_FAVORITES "favorites"
 
+#define TABLE_SUFFIX_SUGGESTIONS "_suggestions"
+
 //=====================================
 
 namespace {
@@ -111,7 +113,7 @@ void ServerInfo::fromInfo( const char *info )
 				hostname = value;
 
 				// hostname with color sequences stripped
-				cleanname = COM_RemoveColorTokensExt( value.c_str(), qfalse );
+				cleanname = COM_RemoveColorTokensExt( value.c_str(), false );
 
 				// lowercase stripped version of non-colored name, used for sorting
 				locleanname = cleanname;
@@ -243,11 +245,6 @@ void ServerInfo::fromInfo( const char *info )
 			it--;
 		}
 	}
-
-	// subtract bots from users
-	if( has_changed ) {
-		curuser = std::max( 0, curuser - bots );
-	}
 }
 
 // TODO: remove, redundant cause we have tokenize
@@ -276,32 +273,34 @@ void ServerInfo::tokenizeInfo( const char *info, __stl_vector(__stl_string) &tok
 
 // TODO: do this as a DataFormatter
 // html encode single string inplace
-void ServerInfo::htmlEncode( std::string &s )
+void ServerInfo::fixString( std::string &s )
 {
 	// &<>"
 	std::string::size_type pos = s.find( '&' );
 	while( pos != std::string::npos ) {
 		s.replace( pos, 1, "&amp;" );
-		pos = s.find( '&', pos+1 );
+		pos = s.find( '&', pos+5 );
 	}
 	pos = s.find( '<' );
 	while( pos != std::string::npos ) {
 		s.replace( pos, 1, "&lt;" );
-		pos = s.find( '<', pos+1 );
+		pos = s.find( '<', pos+4 );
 	}
 	pos = s.find( '>' );
 	while( pos != std::string::npos ) {
 		s.replace( pos, 1, "&gt;" );
-		pos = s.find( '>', pos+1 );
+		pos = s.find( '>', pos+4 );
 	}
-	// rocket knows no &quot;
-	/*
 	pos = s.find( '"' );
 	while( pos != std::string::npos ) {
 		s.replace( pos, 1, "&quot;" );
-		pos = s.find( '"', pos+1 );
+		pos = s.find( '"', pos+6 );
 	}
-	*/
+	pos = s.find( '\n' );
+	while( pos != std::string::npos ) {
+		s.erase( pos, 1 );
+		pos = s.find( '\n', pos );
+	}
 }
 
 // html encode all string fields, fix color tags and
@@ -309,23 +308,23 @@ void ServerInfo::htmlEncode( std::string &s )
 // with libFocket
 void ServerInfo::fixStrings()
 {
-	htmlEncode( hostname );
+	fixString( hostname );
 	if( !hostname.length() )
 		hostname = "&nbsp;";
 
-	htmlEncode( cleanname );
+	fixString( cleanname );
 	if( !cleanname.length() )
 		cleanname = "&nbsp;";
 
-	htmlEncode( map );
+	fixString( map );
 	if( !map.length() )
 		map = "&nbsp;";
 
-	htmlEncode( gametype );
+	fixString( gametype );
 	if( !gametype.length() )
 		gametype = "&nbsp;";
 
-	htmlEncode( modname );
+	fixString( modname );
 	if( !modname.length() )
 		modname = "&nbsp;";
 }
@@ -336,6 +335,9 @@ void ServerInfo::fixStrings()
 // 3) hostname ASC
 bool ServerInfo::DefaultCompareBinary( const ServerInfo *lhs, const ServerInfo *rhs )
 {
+	if( lhs->mm > rhs->mm ) return true;
+	if( lhs->mm < rhs->mm ) return false;
+
 	if( lhs->curuser > rhs->curuser ) return true;
 	if( lhs->curuser < rhs->curuser ) return false;
 
@@ -352,14 +354,6 @@ bool ServerInfo::DefaultCompareBinary( const ServerInfo *lhs, const ServerInfo *
 // add a query to the waiting line
 void ServerInfoFetcher::addQuery( const char *adr )
 {
-//	Com_Printf("addQuery %s\n", adr );
-//	if( numQueries() < MAX_QUERIES )
-//	{
-//		startQuery( adr );
-//		return;
-//	}
-
-	// else
 	serverQueue.push( adr );
 }
 
@@ -372,9 +366,6 @@ void ServerInfoFetcher::queryDone( const char *adr )
 
 	if( it != activeQueries.end() )
 		activeQueries.erase( it );
-
-	// this slot will be filled in update
-	// Com_Printf("queryDone %s\n", adr );
 }
 
 // stop the whole process
@@ -426,8 +417,6 @@ void ServerInfoFetcher::startQuery( const std::string &adr )
 
 	// execute command to initiate the query
 	trap::Cmd_ExecuteText( EXEC_APPEND, va( "pingserver %s\n", adr.c_str() ) );
-
-//	Com_Printf("startQuery: %s\n", adr.c_str() );
 }
 
 //=====================================
@@ -437,14 +426,13 @@ void ServerInfoFetcher::startQuery( const std::string &adr )
 ServerBrowserDataSource::ServerBrowserDataSource() :
 		Rocket::Controls::DataSource("serverbrowser_source"),
 		serverList(),
-		fetcher(this), active(false),
+		fetcher(), active(false), updateId(0), lastActiveTime(0),
 		lastUpdateTime(0)
 {
 	// default sorting function
 	// hostname
 	sortCompare = lastSortCompare = &ServerInfo::DefaultCompareBinary;
 	sortDirection = -1;
-	active = false;
 
 	referenceListMap.clear();
 
@@ -460,9 +448,6 @@ ServerBrowserDataSource::~ServerBrowserDataSource()
 // override rocket methods
 void ServerBrowserDataSource::GetRow( StringList &row, const String &table, int row_index, const StringList &columns )
 {
-	// DEBUG
-	// Com_Printf("ServerBrowserDataSource::GetRow %s %d ..\n", table.CString(), row_index );
-
 	if( referenceListMap.find( table ) == referenceListMap.end() ) 
 		return;
 
@@ -510,6 +495,13 @@ void ServerBrowserDataSource::GetRow( StringList &row, const String &table, int 
 			row.push_back( info.tv ? "yes" : "no" );
 		else if( *it == "favorite" )
 			row.push_back( info.favorite ? "yes" : "no" );
+		else if( *it == "flags" ) {
+			char flags[4] = { 0 };
+			flags[0] = info.password ? 'P' : 'p';
+			flags[1] = ' ';
+			flags[2] = info.favorite ? 'F' : 'f';
+			row.push_back( flags );
+		}
 		else if( *it == "mod" )
 			row.push_back( info.modname.c_str() );
 		else
@@ -542,13 +534,13 @@ void ServerBrowserDataSource::tableNameForServerInfo( const ServerInfo &info, St
 	}
 }
 
-void ServerBrowserDataSource::addServerToTable( ServerInfo &info, String tableName )
+void ServerBrowserDataSource::addServerToTable( ServerInfo &info, const String &tableName )
 {
 	ReferenceList &referenceList = referenceListMap[tableName];
 
 	// Show/sort with referenceList
 	ReferenceList::iterator it = find_if( referenceList,
-							ServerInfo::EqualUnary<quint64, &ServerInfo::iaddress>( info.iaddress ) );
+							ServerInfo::EqualUnary<uint64_t, &ServerInfo::iaddress>( info.iaddress ) );
 
 	if( it == referenceList.end() ) {
 		// server isnt in the list, use insertion sort to put it in
@@ -568,13 +560,13 @@ void ServerBrowserDataSource::addServerToTable( ServerInfo &info, String tableNa
 	}
 }
 
-void ServerBrowserDataSource::removeServerFromTable( ServerInfo &info, String tableName )
+void ServerBrowserDataSource::removeServerFromTable( ServerInfo &info, const String &tableName )
 {
 	ReferenceList &referenceList = referenceListMap[tableName];
 
 	// notify rocket + remove from referenceList
 	ReferenceList::iterator it = find_if( referenceList,
-							ServerInfo::EqualUnary<quint64, &ServerInfo::iaddress>( info.iaddress ) );
+							ServerInfo::EqualUnary<uint64_t, &ServerInfo::iaddress>( info.iaddress ) );
 
 	if( it != referenceList.end() ) {
 		int index = std::distance( referenceList.begin(), it );
@@ -618,13 +610,12 @@ void ServerBrowserDataSource::updateFrame()
 			}
 		}
 		lastUpdateTime = trap::Milliseconds();
-	}
 
-	//if( numNotifies )
-	//	Com_Printf("ServerBrowser::updateFrame %d notifies\n", numNotifies );
-
-	if( active && fetcher.numActive() == 0 && fetcher.numWaiting() == 0 && fetcher.numIssued() > 0 && !referenceListMap.empty() ) {
-		active = false;
+		if( active && fetcher.numActive() == 0 && fetcher.numWaiting() == 0 && fetcher.numIssued() > 0 ) {
+			active = false;
+			lastActiveTime = trap::Milliseconds();
+			compileSuggestionsList();
+		}
 	}
 }
 
@@ -635,14 +626,26 @@ void ServerBrowserDataSource::startFullUpdate( void )
 	std::string gameName = trap::Cvar_String( "gamename" );
 
 	active = true;
+	updateId++;
 
 	// formulate the query and execute
 	// basic prototype:
 	// 		requestservers global dpmaster.deathmask.net Warsow full empty
 	// TODO: implement proper use of filters...
 	
-	// might not want to do this?
+
+	for( ReferenceListMap::iterator it = referenceListMap.begin(); it != referenceListMap.end(); ++it ) {
+		ReferenceList &referenceList = it->second;
+
+		size_t size = referenceList.size();
+		if( size > 0 ) {
+			referenceList.clear();
+			NotifyRowRemove( it->first, 0, size );
+		}
+	}
+
 	serverList.clear();
+	referenceQueue.clear();
 
 	std::vector<std::string> masterServers;
 	tokenize( trap::Cvar_String("masterservers"), ' ', masterServers );
@@ -655,16 +658,6 @@ void ServerBrowserDataSource::startFullUpdate( void )
 
 	// query for LAN servers too
 	trap::Cmd_ExecuteText( EXEC_APPEND, "requestservers local full empty\n" );
-
-	for( ReferenceListMap::iterator it = referenceListMap.begin(); it != referenceListMap.end(); ++it ) {
-		size_t size = it->second.size();
-		if( size > 0 ) {
-			it->second.clear();
-			NotifyRowRemove( it->first, 0, size );
-		}
-	}
-
-	referenceListMap.clear();
 }
 
 // callback from client propagates to here
@@ -673,7 +666,7 @@ void ServerBrowserDataSource::addToServerList( const char *adr, const char *info
 	// check if user has canceled the update
 	if( !active ) {
 		return;
-	}	
+	}
 
 	// TODO: hint for the address. If previous address matches this address
 	// use that previous iterator as a hint for the insert function!
@@ -708,8 +701,6 @@ void ServerBrowserDataSource::addToServerList( const char *adr, const char *info
 				removeServerFromTable( serverInfo, TABLE_NAME_FAVORITES );
 			}
 
-			// and finally from the main list
-			serverList.erase( it_inserted.first );
 			return;
 		}
 		else
@@ -731,9 +722,6 @@ void ServerBrowserDataSource::addToServerList( const char *adr, const char *info
 
 		// process the string fields
 		serverInfo.fixStrings();
-
-		// Com_Printf( it_inserted.second ? "Inserting " : "Changing " );
-		// DEBUG_PRINT_SERVERINFO( serverInfo );
 
 		FavoritesList::const_iterator it = favorites.find( serverInfo.iaddress );
 		if( it != favorites.end() ) {
@@ -761,18 +749,92 @@ void ServerBrowserDataSource::startRefresh( void )
 // and stop current update/refresh
 void ServerBrowserDataSource::stopUpdate( void )
 {
+	if (active) {
+		lastActiveTime = trap::Milliseconds();
+	}
 	active = false;
 	fetcher.clearQueries();
+	compileSuggestionsList();
+}
+
+void ServerBrowserDataSource::compileSuggestionsList( void )
+{
+	std::map<String, ReferenceListMap> suggestedServers;
+
+	// for each table, compile the list of suggested servers,
+	// ignoring full and passworded servers
+	// one server per unique gametype
+	for( ReferenceListMap::iterator it = referenceListMap.begin(); it != referenceListMap.end(); ++it ) {
+		ReferenceListMap gtServers;
+
+		ReferenceList &referenceList = it->second;
+		for( ReferenceList::iterator it_ = referenceList.begin(); it_ != referenceList.end(); ++it_ ) {
+			ServerInfo *info = *it_;
+			String gametype = info->gametype.c_str();
+
+			if( info->password ) {
+				continue;
+			}
+			if( info->curuser == info->maxuser ) {
+				continue;
+			}
+			if( gametype == "error" ) {
+				continue;
+			}
+			if( info->ping > 120 ) {
+				continue;
+			}
+			if( info->ping_retries >= MAX_RETRIES ) {
+				continue;
+			}
+
+			bool insertInfo = false;
+			ReferenceListMap::iterator gtBest = gtServers.find( gametype );
+			if( gtBest == gtServers.end() || gtBest->second.empty() ) {
+				insertInfo = true;
+			}
+			else {
+				ServerInfo *gtBestInfo = *(gtBest->second).begin();
+				if( gtBestInfo->curuser < info->curuser || int(gtBestInfo->mm) < int(info->mm) ) {
+					insertInfo = true;
+				}
+			}
+
+			if( insertInfo ) {
+				gtServers[gametype].clear();
+				gtServers[gametype].push_front( info );
+			}
+		}
+
+		suggestedServers[it->first + TABLE_SUFFIX_SUGGESTIONS] = gtServers;
+	}
+
+	// compile the final list sorted by player count in descending order
+	for( std::map<String, ReferenceListMap>::iterator it = suggestedServers.begin(); it != suggestedServers.end(); ++it ) {
+		ReferenceListMap &gtServers = it->second;
+
+		if( gtServers.empty() ) {
+			continue;
+		}
+
+		for( ReferenceListMap::iterator it_ = gtServers.begin(); it_ != gtServers.end(); ++it_ ) {
+			ServerInfo *gtBestInfo = *(it_->second).begin();
+			ReferenceList &referenceList = referenceListMap[it->first];
+			referenceList.insert( lower_bound( referenceList, gtBestInfo, ServerInfo::DefaultCompareBinary ), gtBestInfo );
+		}
+
+		NotifyRowChange( it->first );
+	}
 }
 
 // called to re-sort the data
-void ServerBrowserDataSource::sortByColumn( const char *_column )
+void ServerBrowserDataSource::sortByField( const char *field )
 {
 	// do a full re-sorting of the data by given column name (lookup from COLUMN_NAMES)
 	// (for visibleServers only)
 
 	// set the sorting function
-	std::string column( _column );
+	std::string column( field );
 	if( column == "address" )
 		sortCompare = ServerInfo::LessPtrBinary<std::string, &ServerInfo::address>;
 	else if( column == "hostname" )
@@ -801,9 +863,11 @@ void ServerBrowserDataSource::sortByColumn( const char *_column )
 		sortCompare = ServerInfo::LessPtrBinary<bool, &ServerInfo::mm>;
 	else if( column == "ping" )
 		sortCompare = ServerInfo::LessPtrBinary<unsigned int, &ServerInfo::ping>;
+	else if( column.empty() )
+		sortCompare = &ServerInfo::DefaultCompareBinary;
 	else
 	{
-		Com_Printf("Serverbrowser sort: unknown column %s\n", _column );
+		Com_Printf("Serverbrowser sort: unknown field %s\n", field );
 		return;
 	}
 
@@ -838,11 +902,11 @@ void ServerBrowserDataSource::filtersUpdated(void)
 
 }
 
-void ServerBrowserDataSource::notifyOfFavoriteChange( quint64 iaddr, bool add )
+void ServerBrowserDataSource::notifyOfFavoriteChange( uint64_t iaddr, bool add )
 {
 	// lets see if the server is already in our serverlist
 	ServerInfoList::iterator it_s = find_if( serverList,
-		ServerInfo::EqualUnary<quint64, &ServerInfo::iaddress>( iaddr ) );
+		ServerInfo::EqualUnary<uint64_t, &ServerInfo::iaddress>( iaddr ) );
 
 	if( it_s == serverList.end() ) {
 		return;
@@ -860,7 +924,7 @@ void ServerBrowserDataSource::notifyOfFavoriteChange( quint64 iaddr, bool add )
 	ReferenceList &referenceList = referenceListMap[tableName];
 
 	ReferenceList::iterator it = find_if( referenceList,
-							ServerInfo::EqualUnary<quint64, &ServerInfo::iaddress>( iaddr ) );
+							ServerInfo::EqualUnary<uint64_t, &ServerInfo::iaddress>( iaddr ) );
 	if( it != referenceList.end() ) {
 		NotifyRowChange( tableName, std::distance( referenceList.begin(), it ), 1 );
 	}
@@ -876,7 +940,7 @@ void ServerBrowserDataSource::notifyOfFavoriteChange( quint64 iaddr, bool add )
 
 bool ServerBrowserDataSource::addFavorite( const char *fav )
 {
-	quint64 iaddr = addr_to_int( fav );
+	uint64_t iaddr = addr_to_int( fav );
 
 	// is that address already favorited?
 	FavoritesList::const_iterator it_f = favorites.find( iaddr );
@@ -894,7 +958,7 @@ bool ServerBrowserDataSource::addFavorite( const char *fav )
 
 bool ServerBrowserDataSource::removeFavorite( const char *fav )
 {
-	quint64 iaddr = addr_to_int( fav );
+	uint64_t iaddr = addr_to_int( fav );
 
 	FavoritesList::const_iterator it_f = favorites.find( iaddr );
 	if( it_f == favorites.end() ) {

@@ -29,14 +29,12 @@
 #define ROCKETCOREELEMENTSTYLE_H
 
 #include "ElementDefinition.h"
-#include <Rocket/Core/Types.h>
+#include "../../Include/Rocket/Core/Types.h"
 
 namespace Rocket {
 namespace Core {
 
 class ElementStyleCache;
-
-typedef std::map<String, int> PropCounter;
 
 /**
 	Manages an element's style and property information.
@@ -140,6 +138,8 @@ public:
 	void DirtyEmProperties();
 	// Dirties font-size on child elements if appropriate.
 	void DirtyInheritedEmProperties();
+	// Dirties rem properties.
+	void DirtyRemProperties();
 
 	/// Returns 'border-width' properties from element's style or local cache.
 	void GetBorderWidthProperties(const Property **border_top_width, const Property **border_bottom_width, const Property **border_left_width, const Property **border_right_width);
@@ -171,8 +171,6 @@ public:
 	int GetTextTransform();
 	/// Returns 'vertical-align' property value from element's style or local cache.
 	const Property *GetVerticalAlignProperty();
-
-	static PropCounter &GetPropCounter();
 
 private:
 	// Sets a single property as dirty.

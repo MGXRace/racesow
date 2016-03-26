@@ -134,8 +134,8 @@ static bool StringToFilter( char *s, ipfilter_t *f )
 {
 	char num[128];
 	int i, j;
-	qbyte b[4];
-	qbyte m[4];
+	uint8_t b[4];
+	uint8_t m[4];
 
 	for( i = 0; i < 4; i++ )
 	{
@@ -190,7 +190,7 @@ bool SV_FilterPacket( char *from )
 {
 	int i;
 	unsigned in;
-	qbyte m[4];
+	uint8_t m[4];
 	char *p;
 
 	if( !filterban->integer )
@@ -239,7 +239,7 @@ void SV_WriteIPList( void )
 	int file;
 	char name[MAX_QPATH];
 	char string[MAX_STRING_CHARS];
-	qbyte b[4] = { 0, 0, 0, 0 };
+	uint8_t b[4] = { 0, 0, 0, 0 };
 	int i;
 
 	Q_strncpyz( name, "listip.cfg", sizeof( name ) );
@@ -339,7 +339,7 @@ static void Cmd_RemoveIP_f( void )
 static void Cmd_ListIP_f( void )
 {
 	int i;
-	qbyte b[4];
+	uint8_t b[4];
 
 	G_Printf( "Filter list:\n" );
 	for( i = 0; i < numipfilters; i++ )
@@ -359,6 +359,22 @@ static void Cmd_ListIP_f( void )
 static void Cmd_WriteIP_f( void )
 {
 	SV_WriteIPList ();
+}
+
+/*
+* Cmd_ListLocations_f
+*/
+static void Cmd_ListLocations_f( void )
+{
+	int i;
+
+	for( i = 0; i < MAX_LOCATIONS; i++ ) {
+		const char *cs = trap_GetConfigString(CS_LOCATIONS + i);
+		if( !cs[0] ) { 
+			break;
+		}
+		G_Printf( "%2d %s\n", i, cs );
+	}
 }
 
 /*
@@ -393,6 +409,8 @@ void G_AddServerCommands( void )
 
 	trap_Cmd_AddCommand( "listratings", G_ListRatings_f );
 	trap_Cmd_AddCommand( "listraces", G_ListRaces_f );
+
+	trap_Cmd_AddCommand( "listlocations", Cmd_ListLocations_f );
 }
 
 /*
@@ -427,4 +445,6 @@ void G_RemoveCommands( void )
 
 	trap_Cmd_RemoveCommand( "listratings" );
 	trap_Cmd_RemoveCommand( "listraces" );
+
+	trap_Cmd_RemoveCommand( "listlocations" );
 }

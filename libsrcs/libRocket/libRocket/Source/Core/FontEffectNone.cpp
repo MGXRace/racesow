@@ -39,16 +39,5 @@ FontEffectNone::~FontEffectNone()
 {
 }
 
-// Resizes and repositions the glyph to fit the outline.
-bool FontEffectNone::GetGlyphSize(Vector2i& ROCKET_UNUSED(origin), Vector2i& ROCKET_UNUSED(dimensions), const FontGlyph& ROCKET_UNUSED(glyph)) const
-{
-	return false;
-}
-
-// Expands the original glyph texture for the outline.
-void FontEffectNone::GenerateGlyphTexture(byte* ROCKET_UNUSED(destination_data), const Vector2i& ROCKET_UNUSED(destination_dimensions), int ROCKET_UNUSED(destination_stride), const FontGlyph& ROCKET_UNUSED(glyph)) const
-{
-}
-
 }
 }

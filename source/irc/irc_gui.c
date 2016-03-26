@@ -17,7 +17,7 @@ static const char IRC_WINDOW_BG_PIC[] = "$whiteimage";
 struct qfontface_s;
 
 static cvar_t *con_fontSystemFamily = NULL;
-static cvar_t *con_fontSystemSmallSize = NULL;
+static cvar_t *irc_fontSize = NULL;
 
 static void Irc_Client_DrawWindow(struct qfontface_s *font, int x, int y, int width, int height, int lines, struct shader_s *shaderBg);
 static int Irc_Client_DrawLine(int lines_avail, int off, int *x, int *y, const char *s, struct qfontface_s *font, int font_height, vec4_t default_color, int last_color);
@@ -32,12 +32,12 @@ void Irc_Client_DrawNotify(const char *target, const char *chat_buffer, size_t c
 	int vskip, hskip;
 
 	if (!con_fontSystemFamily)
-		con_fontSystemFamily = IRC_IMPORT.Cvar_Get("con_fontSystemFamily", "", 0);
-	if (!con_fontSystemSmallSize)
-		con_fontSystemSmallSize = IRC_IMPORT.Cvar_Get("con_fontSystemSmallSize", "", 0);
+		con_fontSystemFamily = IRC_IMPORT.Cvar_Get("con_fontSystemFamily", DEFAULT_SYSTEM_FONT_FAMILY, CVAR_ARCHIVE);
+	if (!irc_fontSize)
+		irc_fontSize = IRC_IMPORT.Cvar_Get("irc_fontSize", STR_TOSTR(DEFAULT_SYSTEM_FONT_SMALL_SIZE), CVAR_ARCHIVE);
 
 	// get font and font size
-	font = IRC_IMPORT.SCR_RegisterFont((char*) Cvar_GetStringValue(con_fontSystemFamily), QFONT_STYLE_NONE, Cvar_GetIntegerValue(con_fontSystemSmallSize));
+	font = IRC_IMPORT.SCR_RegisterFont((char*) Cvar_GetStringValue(con_fontSystemFamily), QFONT_STYLE_NONE, Cvar_GetIntegerValue(irc_fontSize));
 	font_height = (unsigned int) IRC_IMPORT.SCR_strHeight(font);
 	target_width = (unsigned int) IRC_IMPORT.SCR_strWidth(target, font, 0);
 
@@ -57,7 +57,7 @@ void Irc_Client_DrawNotify(const char *target, const char *chat_buffer, size_t c
 	IRC_IMPORT.SCR_DrawString(hskip, vskip, ALIGN_LEFT_TOP, s, font, IRC_TXT_COLOR_WHITE);
 	hskip += (int) IRC_IMPORT.SCR_strWidth(s, font, 0);
 	// print blinking '_'
-	IRC_IMPORT.SCR_DrawRawChar(hskip, vskip, ((IRC_IMPORT.Milliseconds()>>8)&1)?'_':' ', font, IRC_TXT_COLOR_WHITE);
+	IRC_IMPORT.SCR_DrawRawChar(hskip, vskip, ((IRC_IMPORT.Sys_Milliseconds()>>8)&1)?'_':' ', font, IRC_TXT_COLOR_WHITE);
 
 }
 
@@ -70,16 +70,16 @@ void Irc_Client_DrawIngameWindow() {
 
 	// read cvars
 	if (!con_fontSystemFamily)
-		con_fontSystemFamily = IRC_IMPORT.Cvar_Get("con_fontSystemFamily", "", 0);
-	if (!con_fontSystemSmallSize)
-		con_fontSystemSmallSize = IRC_IMPORT.Cvar_Get("con_fontSystemSmallSize", "", 0);
+		con_fontSystemFamily = IRC_IMPORT.Cvar_Get("con_fontSystemFamily", DEFAULT_SYSTEM_FONT_FAMILY, CVAR_ARCHIVE);
+	if (!irc_fontSize)
+		irc_fontSize = IRC_IMPORT.Cvar_Get("irc_fontSize", STR_TOSTR(DEFAULT_SYSTEM_FONT_SMALL_SIZE), CVAR_ARCHIVE);
 	if (!irc_windowWidth)
 		irc_windowWidth = IRC_IMPORT.Cvar_Get("irc_windowWidth", "0.4", CVAR_ARCHIVE);
 	if (!shaderBg)
 		shaderBg = IRC_IMPORT.R_RegisterPic((char*) IRC_WINDOW_BG_PIC);
 
 	// get font and font height
-	font = IRC_IMPORT.SCR_RegisterFont((char*) Cvar_GetStringValue(con_fontSystemFamily), QFONT_STYLE_NONE, Cvar_GetIntegerValue(con_fontSystemSmallSize));
+	font = IRC_IMPORT.SCR_RegisterFont((char*) Cvar_GetStringValue(con_fontSystemFamily), QFONT_STYLE_NONE, Cvar_GetIntegerValue(irc_fontSize));
 	font_height = (unsigned int) IRC_IMPORT.SCR_strHeight(font);
 
 	// draw the window
@@ -199,15 +199,15 @@ static int Irc_Client_DrawLine(int lines_avail, int off, int *x, int *y, const c
 
 static int Irc_Client_LastColor(const char *msg, size_t msg_len) {
 	const char *c;
-	qboolean colorflag = qfalse;
+	bool colorflag = false;
 	int last_color = -1;
 	for (c = msg; c < msg + msg_len; ++c) {
 		if (colorflag) {
 			if (isdigit(*c))
 				last_color = *c;
-			colorflag = qfalse;
+			colorflag = false;
 		} else if (*c == Q_COLOR_ESCAPE)
-			colorflag = qtrue;
+			colorflag = true;
 	}
 	return last_color;
 }

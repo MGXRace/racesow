@@ -25,17 +25,17 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "tvm_client.h"
 #include "tvm_chase.h"
 
-//==================
-//TVM_Cmd_Ignore_f
-//==================
+/*
+* TVM_Cmd_Ignore_f
+*/
 static void TVM_Cmd_Ignore_f( edict_t *ent )
 {
 }
 
-//=================
-//TVM_Cmd_PlayersExt_f
-//=================
-static void TVM_Cmd_PlayersExt_f( edict_t *ent, qboolean onlyspecs )
+/*
+* TVM_Cmd_PlayersExt_f
+*/
+static void TVM_Cmd_PlayersExt_f( edict_t *ent, bool onlyspecs )
 {
 	int i;
 	int count = 0;
@@ -89,12 +89,12 @@ static void TVM_Cmd_PlayersExt_f( edict_t *ent, qboolean onlyspecs )
 		TVM_PrintMsg( relay, ent, "Type '%s %i' for more %s\n", trap_Cmd_Argv( 0 ), i, trap_Cmd_Argv( 0 ) );
 }
 
-//=================
-//TVM_Cmd_Players_f
-//=================
+/*
+* TVM_Cmd_Players_f
+*/
 static void TVM_Cmd_Players_f( edict_t *ent )
 {
-	TVM_Cmd_PlayersExt_f( ent, qfalse );
+	TVM_Cmd_PlayersExt_f( ent, false );
 }
 typedef struct
 {
@@ -104,10 +104,10 @@ typedef struct
 
 g_gamecommands_t g_Commands[MAX_GAMECOMMANDS];
 
-//=================
-//TVM_ClientCommand
-//=================
-qboolean TVM_ClientCommand( tvm_relay_t *relay, edict_t *ent )
+/*
+* TVM_ClientCommand
+*/
+bool TVM_ClientCommand( tvm_relay_t *relay, edict_t *ent )
 {
 	char *cmd;
 	int i;
@@ -124,17 +124,17 @@ qboolean TVM_ClientCommand( tvm_relay_t *relay, edict_t *ent )
 		{
 			if( g_Commands[i].func )
 				g_Commands[i].func( ent );
-			return qtrue;
+			return true;
 		}
 	}
 
 	// unknown command
-	return qfalse;
+	return false;
 }
 
-//==================
-//TVM_AddGameCommand
-//==================
+/*
+* TVM_AddGameCommand
+*/
 static void TVM_AddGameCommand( tvm_relay_t *relay, const char *name, void *callback )
 {
 	int i;
@@ -146,7 +146,7 @@ static void TVM_AddGameCommand( tvm_relay_t *relay, const char *name, void *call
 		if( g_Commands[i].name[0] == '\0' )
 			continue;
 		if( !Q_stricmp( g_Commands[i].name, name ) )
-			assert( qfalse );
+			assert( false );
 	}
 #endif
 
@@ -165,9 +165,9 @@ static void TVM_AddGameCommand( tvm_relay_t *relay, const char *name, void *call
 	TVM_RelayError( relay, "G_AddCommand: Couldn't find a free g_Commands spot for the new command\n" );
 }
 
-//==================
-//TVM_RemoveGameCommands
-//==================
+/*
+* TVM_RemoveGameCommands
+*/
 void TVM_RemoveGameCommands( tvm_relay_t *relay )
 {
 	int i;
@@ -183,9 +183,9 @@ void TVM_RemoveGameCommands( tvm_relay_t *relay )
 	}
 }
 
-//=================
-// List of commands
-//=================
+/*
+* List of commands
+*/
 typedef struct
 {
 	char *name;
@@ -206,9 +206,9 @@ static gamecmd_t gamecmdlist[] =
 	{ NULL, NULL }
 };
 
-//==================
-//TVM_AddGameCommands
-//==================
+/*
+* TVM_AddGameCommands
+*/
 void TVM_AddGameCommands( tvm_relay_t *relay )
 {
 	gamecmd_t *cmd;

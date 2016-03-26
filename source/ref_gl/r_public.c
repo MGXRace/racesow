@@ -37,8 +37,10 @@ static int GetRefAPIVersion( void )
 * Returns a pointer to the structure with all entry points
 */
 #ifdef __cplusplus
-extern "C" 
+extern "C"
+{
 #endif
+
 QF_DLL_EXPORT ref_export_t *GetRefAPI( ref_import_t *import )
 {
 	static ref_export_t globals;
@@ -49,6 +51,7 @@ QF_DLL_EXPORT ref_export_t *GetRefAPI( ref_import_t *import )
 
 	globals.Init = R_Init;
 	globals.SetMode = R_SetMode;
+	globals.SetWindow = R_SetWindow;
 	globals.BeginRegistration = R_BeginRegistration;
 	globals.EndRegistration = R_EndRegistration;
 	globals.Shutdown = R_Shutdown;
@@ -60,6 +63,7 @@ QF_DLL_EXPORT ref_export_t *GetRefAPI( ref_import_t *import )
 	globals.RegisterModel = R_RegisterModel;
 	globals.RegisterPic = R_RegisterPic;
 	globals.RegisterRawPic = R_RegisterRawPic;
+	globals.RegisterRawAlphaMask = R_RegisterRawAlphaMask;
 	globals.RegisterLevelshot = R_RegisterLevelshot;
 	globals.RegisterSkin = R_RegisterSkin;
 	globals.RegisterSkinFile = R_RegisterSkinFile;
@@ -67,6 +71,8 @@ QF_DLL_EXPORT ref_export_t *GetRefAPI( ref_import_t *import )
 
 	globals.RemapShader = R_RemapShader;
 	globals.GetShaderDimensions = R_GetShaderDimensions;
+
+	globals.ReplaceRawSubPic = R_ReplaceRawSubPic;
 
 	globals.ClearScene = R_ClearScene;
 	globals.AddEntityToScene = R_AddEntityToScene;
@@ -83,9 +89,10 @@ QF_DLL_EXPORT ref_export_t *GetRefAPI( ref_import_t *import )
 	
 	globals.Scissor = R_Scissor;
 	globals.GetScissor = R_GetScissor;
+	globals.ResetScissor = R_ResetScissor;
 
 	globals.SetCustomColor = R_SetCustomColor;
-	globals.LightForOrigin = R_LightForOrigin;
+	globals.LightForOrigin = R_LightForOrigin2;
 
 	globals.LerpTag = R_LerpTag;
 
@@ -100,6 +107,7 @@ QF_DLL_EXPORT ref_export_t *GetRefAPI( ref_import_t *import )
 
 	globals.TransformVectorToScreen = R_TransformVectorToScreen;
 
+	globals.ScreenEnabled = R_ScreenEnabled;
 	globals.BeginFrame = R_BeginFrame;
 	globals.EndFrame = R_EndFrame;
 	globals.SpeedsMessage = R_SpeedsMessage;
@@ -112,6 +120,10 @@ QF_DLL_EXPORT ref_export_t *GetRefAPI( ref_import_t *import )
 
 	return &globals;
 }
+
+#ifdef __cplusplus
+}
+#endif
 
 #ifndef REF_HARD_LINKED
 
@@ -155,7 +167,7 @@ void Com_DPrintf( const char *format, ... )
 #endif
 
 #if defined(HAVE_DLLMAIN) && !defined(REF_HARD_LINKED)
-int _stdcall DLLMain( void *hinstDll, unsigned long dwReason, void *reserved )
+int WINAPI DLLMain( void *hinstDll, unsigned long dwReason, void *reserved )
 {
 	return 1;
 }

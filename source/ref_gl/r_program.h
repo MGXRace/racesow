@@ -20,22 +20,23 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef R_PROGRAM_H
 #define R_PROGRAM_H
 
-typedef quint64 r_glslfeat_t;
+typedef uint64_t r_glslfeat_t;
 
 #define GLSL_BIT(x)							(1ULL << (x))
-#define GLSL_BITS_VERSION					4
+#define GLSL_BITS_VERSION					16
 
-#define DEFAULT_GLSL_MATERIAL_PROGRAM		"defaultMaterial"
-#define DEFAULT_GLSL_DISTORTION_PROGRAM		"defaultDistortion"
-#define DEFAULT_GLSL_RGB_SHADOW_PROGRAM		"defaultRGBShadow"
-#define DEFAULT_GLSL_SHADOWMAP_PROGRAM		"defaultShadowmap"
-#define DEFAULT_GLSL_OUTLINE_PROGRAM		"defaultOutline"
-#define DEFAULT_GLSL_DYNAMIC_LIGHTS_PROGRAM "defaultDynamicLights"
-#define DEFAULT_GLSL_Q3A_SHADER_PROGRAM		"defaultQ3AShader"
-#define DEFAULT_GLSL_CELSHADE_PROGRAM		"defaultCelshade"
-#define DEFAULT_GLSL_FOG_PROGRAM			"defaultFog"
-#define DEFAULT_GLSL_FXAA_PROGRAM			"defaultFXAA"
-#define DEFAULT_GLSL_YUV_PROGRAM			"defaultYUV"
+#define DEFAULT_GLSL_MATERIAL_PROGRAM			"defaultMaterial"
+#define DEFAULT_GLSL_DISTORTION_PROGRAM			"defaultDistortion"
+#define DEFAULT_GLSL_RGB_SHADOW_PROGRAM			"defaultRGBShadow"
+#define DEFAULT_GLSL_SHADOWMAP_PROGRAM			"defaultShadowmap"
+#define DEFAULT_GLSL_OUTLINE_PROGRAM			"defaultOutline"
+#define DEFAULT_GLSL_DYNAMIC_LIGHTS_PROGRAM		"defaultDynamicLights"
+#define DEFAULT_GLSL_Q3A_SHADER_PROGRAM			"defaultQ3AShader"
+#define DEFAULT_GLSL_CELSHADE_PROGRAM			"defaultCelshade"
+#define DEFAULT_GLSL_FOG_PROGRAM				"defaultFog"
+#define DEFAULT_GLSL_FXAA_PROGRAM				"defaultFXAA"
+#define DEFAULT_GLSL_YUV_PROGRAM				"defaultYUV"
+#define DEFAULT_GLSL_COLORCORRECTION_PROGRAM	"defaultColorCorrection"
 
 // program types
 enum
@@ -46,12 +47,13 @@ enum
 	GLSL_PROGRAM_TYPE_RGB_SHADOW,
 	GLSL_PROGRAM_TYPE_SHADOWMAP,
 	GLSL_PROGRAM_TYPE_OUTLINE,
-	GLSL_PROGRAM_TYPE_TURBULENCE,
+	GLSL_PROGRAM_TYPE_UNUSED,
 	GLSL_PROGRAM_TYPE_Q3A_SHADER,
 	GLSL_PROGRAM_TYPE_CELSHADE,
 	GLSL_PROGRAM_TYPE_FOG,
 	GLSL_PROGRAM_TYPE_FXAA,
 	GLSL_PROGRAM_TYPE_YUV,
+	GLSL_PROGRAM_TYPE_COLORCORRECTION,
 
 	GLSL_PROGRAM_TYPE_MAXTYPE
 };
@@ -60,7 +62,6 @@ enum
 #define GLSL_SHADER_COMMON_GREYSCALE			GLSL_BIT(0)
 #define GLSL_SHADER_COMMON_FOG					GLSL_BIT(1)
 #define GLSL_SHADER_COMMON_FOG_RGB				GLSL_BIT(2)
-
 
 #define GLSL_SHADER_COMMON_RGB_GEN_CONST 		GLSL_BIT(4)
 #define GLSL_SHADER_COMMON_RGB_GEN_VERTEX 		GLSL_BIT(5)
@@ -83,8 +84,10 @@ enum
 
 #define GLSL_SHADER_COMMON_DLIGHTS_4			GLSL_BIT(14) // 4
 #define GLSL_SHADER_COMMON_DLIGHTS_8			GLSL_BIT(15) // 8
-#define GLSL_SHADER_COMMON_DLIGHTS_16			(GLSL_SHADER_COMMON_DLIGHTS_4 | GLSL_SHADER_COMMON_DLIGHTS_8) // 16
-#define GLSL_SHADER_COMMON_DLIGHTS_32			GLSL_BIT(16) // 32
+#define GLSL_SHADER_COMMON_DLIGHTS_12			(GLSL_SHADER_COMMON_DLIGHTS_4 | GLSL_SHADER_COMMON_DLIGHTS_8) // 12
+#define GLSL_SHADER_COMMON_DLIGHTS_16			GLSL_BIT(16) // 16
+#define GLSL_SHADER_COMMON_DLIGHTS				(GLSL_SHADER_COMMON_DLIGHTS_4 | GLSL_SHADER_COMMON_DLIGHTS_8 \
+													| GLSL_SHADER_COMMON_DLIGHTS_12 | GLSL_SHADER_COMMON_DLIGHTS_16)
 
 #define GLSL_SHADER_COMMON_DRAWFLAT				GLSL_BIT(17)
 
@@ -100,6 +103,10 @@ enum
 #define GLSL_SHADER_COMMON_AFUNC_GT0			GLSL_BIT(24)
 #define GLSL_SHADER_COMMON_AFUNC_LT128			GLSL_BIT(25)
 #define GLSL_SHADER_COMMON_AFUNC_GE128			(GLSL_SHADER_COMMON_AFUNC_GT0 | GLSL_SHADER_COMMON_AFUNC_LT128)
+
+#define GLSL_SHADER_COMMON_FRAGMENT_HIGHP		GLSL_BIT(26)
+
+#define GLSL_SHADER_COMMON_TC_MOD				GLSL_BIT(27)
 
 // material prgoram type features
 #define GLSL_SHADER_MATERIAL_LIGHTSTYLE0		GLSL_BIT(32)
@@ -123,19 +130,24 @@ enum
 #define GLSL_SHADER_MATERIAL_ENTITY_DECAL		GLSL_BIT(47)
 #define GLSL_SHADER_MATERIAL_ENTITY_DECAL_ADD	GLSL_BIT(48)
 #define GLSL_SHADER_MATERIAL_DIRECTIONAL_LIGHT_FROM_NORMAL	GLSL_BIT(49)
+#define GLSL_SHADER_MATERIAL_LIGHTMAP_ARRAYS	GLSL_BIT(50)
 
 // q3a shader features
 #define GLSL_SHADER_Q3_TC_GEN_ENV				GLSL_BIT(32)
 #define GLSL_SHADER_Q3_TC_GEN_VECTOR			GLSL_BIT(33)
 #define GLSL_SHADER_Q3_TC_GEN_REFLECTION		(GLSL_SHADER_Q3_TC_GEN_ENV | GLSL_SHADER_Q3_TC_GEN_VECTOR)
-#define GLSL_SHADER_Q3_TC_GEN_PROJECTION		GLSL_BIT(34)
-#define GLSL_SHADER_Q3_COLOR_FOG				GLSL_BIT(35)
-#define GLSL_SHADER_Q3_LIGHTSTYLE0				GLSL_BIT(36)
-#define GLSL_SHADER_Q3_LIGHTSTYLE1				GLSL_BIT(37)
+#define GLSL_SHADER_Q3_TC_GEN_CELSHADE			GLSL_BIT(34)
+#define GLSL_SHADER_Q3_TC_GEN_PROJECTION		GLSL_BIT(35)
+#define GLSL_SHADER_Q3_TC_GEN_SURROUND			GLSL_BIT(36)
+#define GLSL_SHADER_Q3_COLOR_FOG				GLSL_BIT(37)
+#define GLSL_SHADER_Q3_LIGHTSTYLE0				GLSL_BIT(38)
+#define GLSL_SHADER_Q3_LIGHTSTYLE1				GLSL_BIT(39)
 #define GLSL_SHADER_Q3_LIGHTSTYLE2				(GLSL_SHADER_Q3_LIGHTSTYLE0 | GLSL_SHADER_Q3_LIGHTSTYLE1)
-#define GLSL_SHADER_Q3_LIGHTSTYLE3				GLSL_BIT(38)
+#define GLSL_SHADER_Q3_LIGHTSTYLE3				GLSL_BIT(40)
 #define GLSL_SHADER_Q3_LIGHTSTYLE				((GLSL_SHADER_Q3_LIGHTSTYLE0 | GLSL_SHADER_Q3_LIGHTSTYLE1 \
 													| GLSL_SHADER_Q3_LIGHTSTYLE2 | GLSL_SHADER_Q3_LIGHTSTYLE3))
+#define GLSL_SHADER_Q3_LIGHTMAP_ARRAYS			GLSL_BIT(41)
+#define GLSL_SHADER_Q3_ALPHA_MASK				GLSL_BIT(42)
 
 // distortions
 #define GLSL_SHADER_DISTORTION_DUDV				GLSL_BIT(32)
@@ -145,7 +157,7 @@ enum
 #define GLSL_SHADER_DISTORTION_REFRACTION		GLSL_BIT(36)
 
 // rgb shadows
-#define GLSL_SHADER_RGBSHADOW_16BIT				GLSL_BIT(32)
+#define GLSL_SHADER_RGBSHADOW_24BIT				GLSL_BIT(32)
 
 // shadowmaps
 #define GLSL_SHADOWMAP_LIMIT					4 // shadowmaps per program limit
@@ -154,8 +166,9 @@ enum
 #define GLSL_SHADER_SHADOWMAP_SHADOW2			GLSL_BIT(34)
 #define GLSL_SHADER_SHADOWMAP_SHADOW3			GLSL_BIT(35)
 #define GLSL_SHADER_SHADOWMAP_SHADOW4			GLSL_BIT(36)
-#define GLSL_SHADER_SHADOWMAP_RGB				GLSL_BIT(37)
-#define GLSL_SHADER_SHADOWMAP_RGB_16BIT			GLSL_BIT(38)
+#define GLSL_SHADER_SHADOWMAP_SAMPLERS			GLSL_BIT(37)
+#define GLSL_SHADER_SHADOWMAP_24BIT				GLSL_BIT(38)
+#define GLSL_SHADER_SHADOWMAP_NORMALCHECK		GLSL_BIT(39)
 
 // outlines
 #define GLSL_SHADER_OUTLINE_OUTLINES_CUTOFF		GLSL_BIT(32)
@@ -171,6 +184,9 @@ enum
 #define GLSL_SHADER_CELSHADE_CEL_LIGHT			GLSL_BIT(39)
 #define GLSL_SHADER_CELSHADE_CEL_LIGHT_ADD		GLSL_BIT(40)
 
+// fxaa
+#define GLSL_SHADER_FXAA_FXAA3					GLSL_BIT(32)
+
 void RP_Init( void );
 void RP_Shutdown( void );
 
@@ -183,8 +199,8 @@ int	RP_GetProgramObject( int elem );
 
 void RP_UpdateShaderUniforms( int elem, 
 	float shaderTime, 
-	const vec3_t entOrigin, const vec3_t entDist, const qbyte *entityColor, 
-	const qbyte *constColor, const float *rgbGenFuncArgs, const float *alphaGenFuncArgs,
+	const vec3_t entOrigin, const vec3_t entDist, const uint8_t *entityColor, 
+	const uint8_t *constColor, const float *rgbGenFuncArgs, const float *alphaGenFuncArgs,
 	const mat4_t texMatrix );
 
 void RP_UpdateViewUniforms( int elem, 
@@ -201,7 +217,7 @@ void RP_UpdateSoftParticlesUniforms( int elem, float scale );
 void RP_UpdateMaterialUniforms( int elem, 
 	float offsetmappingScale, float glossIntensity, float glossExponent );
 
-void RP_UpdateDistortionUniforms( int elem, qboolean frontPlane );
+void RP_UpdateDistortionUniforms( int elem, bool frontPlane );
 
 void RP_UpdateTextureUniforms( int elem, int TexWidth, int TexHeight );
 
@@ -222,7 +238,8 @@ void RP_UpdateBonesUniforms( int elem, unsigned int numBones, dualquat_t *animDu
 
 void RP_UpdateDrawFlatUniforms( int elem, const vec3_t wallColor, const vec3_t floorColor );
 
-void RP_UpdateShadowsUniforms( int elem, int numShadows, const shadowGroup_t **groups, const mat4_t objectMatrix );
+void RP_UpdateShadowsUniforms( int elem, int numShadows, const shadowGroup_t **groups, const mat4_t objectMatrix,
+	const vec3_t objectOrigin, const mat3_t objectAxis );
 
 void RP_UpdateInstancesUniforms( int elem, unsigned int numInstances, instancePoint_t *instances );
 

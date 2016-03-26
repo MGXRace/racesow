@@ -13,13 +13,11 @@
 
 // pretty solid
 #define MOREGRAVITY
-#define ALT_ZLIB_COMPRESSION
 
 // renderer config
 //#define CELSHADEDMATERIAL
 #define HALFLAMBERTLIGHTING
 #define AREAPORTALS_MATRIX
-#define PUTCPU2SLEEP
 
 // collision config
 #define TRACE_NOAXIAL // a hack to avoid issues with the return of traces against non axial planes
@@ -31,16 +29,25 @@
 
 //#define ANTICHEAT_MODULE
 
-#define MATCHMAKER_SUPPORT
-
 //#define UCMDTIMENUDGE
 
 #define TCP_SUPPORT
 
+//#define AUTHED_SAY
+
 //#define TCP_ALLOW_CONNECT
+#define TCP_ALLOW_TVCONNECT
 
 #if defined(TCP_ALLOW_CONNECT) && !defined(TCP_SUPPORT)
 #undef TCP_ALLOW_CONNECT
+#endif
+
+#if defined(TCP_ALLOW_CONNECT) && !defined(TCP_ALLOW_TVCONNECT)
+#define TCP_ALLOW_TVCONNECT
+#endif
+
+#if defined(TCP_ALLOW_TVCONNECT) && !defined(TCP_SUPPORT)
+#undef TCP_ALLOW_TVCONNECT
 #endif
 
 #define HTTP_SUPPORT
@@ -59,7 +66,3 @@
 
 // collaborations
 //==============================================
-
-// symbol address retrieval
-//==============================================
-// #define SYS_SYMBOL		// adds "sys_symbol" command and symbol exports to binary release

@@ -49,11 +49,18 @@ extern "C" STEAMDLL_EXPORT steamlib_export_t *GetSteamLibAPI( steamlib_import_t 
 	globals.RunFrame = &WSWSTEAM::SteamLib_RunFrame;
 	globals.Shutdown = &WSWSTEAM::SteamLib_Shutdown;
 
+	globals.GetSteamID = &WSWSTEAM::SteamLib_GetSteamID;
+	globals.GetAuthSessionTicket = &WSWSTEAM::SteamLib_GetAuthSessionTicket;
+
+	globals.AdvertiseGame = &WSWSTEAM::SteamLib_AdvertiseGame;
+
+	globals.GetPersonaName = &WSWSTEAM::SteamLib_GetPersonaName;
+
 	return &globals;
 }
 
-#if defined ( HAVE_DLLMAIN ) && !defined ( FTLIB_HARD_LINKED )
-int _stdcall DLLMain( void *hinstDll, unsigned long dwReason, void *reserved )
+#if defined ( HAVE_DLLMAIN ) && !defined ( STEAMLIB_HARD_LINKED )
+int WINAPI DLLMain( void *hinstDll, unsigned long dwReason, void *reserved )
 {
 	return 1;
 }

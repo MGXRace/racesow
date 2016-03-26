@@ -132,7 +132,9 @@ static void CG_AddLocalSounds( void )
 	{
 		if( !postmatchsound_set && !demostream )
 		{
-			trap_S_StartBackgroundTrack( S_PLAYLIST_POSTMATCH, "3" ); // loop random track from the playlist
+			CG_ShowQuickMenu( 1 );
+
+			trap_S_StartBackgroundTrack( S_PLAYLIST_POSTMATCH, NULL, 3 ); // loop random track from the playlist
 			postmatchsound_set = true;
 			background = false;
 		}
@@ -141,12 +143,14 @@ static void CG_AddLocalSounds( void )
 	{
 		if( cgs.demoPlaying && cgs.demoAudioStream && !demostream )
 		{
-			trap_S_StartBackgroundTrack( cgs.demoAudioStream, NULL );
+			trap_S_StartBackgroundTrack( cgs.demoAudioStream, NULL, 0 );
 			demostream = true;
 		}
 
 		if( postmatchsound_set )
 		{
+			CG_ShowQuickMenu( 0 );
+
 			trap_S_StopBackgroundTrack();
 			postmatchsound_set = false;
 			background = false;
@@ -157,10 +161,6 @@ static void CG_AddLocalSounds( void )
 			CG_StartBackgroundTrack();
 			background = true;
 		}
-
-		// notice: these 2 sound files aren't used anymore
-		//cgs.media.sfxTimerBipBip
-		//cgs.media.sfxTimerPloink
 	}
 }
 
@@ -210,19 +210,19 @@ static void CG_FlashGameWindow( void )
 }
 
 /*
-* CG_SetSensitivityScale
+* CG_GetSensitivityScale
 * Scale sensitivity for different view effects
 */
-float CG_SetSensitivityScale( const float sens )
+float CG_GetSensitivityScale( float sens, float zoomSens )
 {
 	float sensScale = 1.0f;
 
 	if( !cgs.demoPlaying && sens && ( cg.predictedPlayerState.pmove.stats[PM_STAT_ZOOMTIME] > 0 ) )
 	{
-		if( cg_zoomSens->value )
-			return cg_zoomSens->value/sens;
+		if( zoomSens )
+			return zoomSens/sens;
 
-		return ( cg.predictedPlayerState.fov / cgs.clientInfo[cgs.playerNum].fov );
+		return cg_zoomfov->value/cg_fov->value;
 	}
 
 	return sensScale;
@@ -245,7 +245,7 @@ void CG_AddKickAngles( vec3_t viewangles )
 
 		time = (float)( ( cg.kickangles[i].timestamp + cg.kickangles[i].kicktime ) - cg.time );
 		uptime = ( (float)cg.kickangles[i].kicktime ) * 0.5f;
-		delta = 1.0f - ( abs( time - uptime ) / uptime );
+		delta = 1.0f - ( fabs( time - uptime ) / uptime );
 		//CG_Printf("Kick Delta:%f\n", delta );
 		if( delta > 1.0f )
 			delta = 1.0f;
@@ -255,6 +255,24 @@ void CG_AddKickAngles( vec3_t viewangles )
 		viewangles[PITCH] += cg.kickangles[i].v_pitch * delta;
 		viewangles[ROLL] += cg.kickangles[i].v_roll * delta;
 	}
+}
+
+/*
+* CG_CalcViewFov
+*/
+static float CG_CalcViewFov( void )
+{
+	float frac;
+	float fov, zoomfov;
+
+	fov = cg_fov->value;
+	zoomfov = cg_zoomfov->value;
+
+	if( !cg.predictedPlayerState.pmove.stats[PM_STAT_ZOOMTIME] )
+		return fov;
+
+	frac = (float)cg.predictedPlayerState.pmove.stats[PM_STAT_ZOOMTIME] / (float)ZOOMTIME;
+	return fov - ( fov - zoomfov ) * frac;
 }
 
 /*
@@ -355,7 +373,7 @@ void CG_StartKickAnglesEffect( vec3_t source, float knockback, float radius, int
 	if( delta <= 0.0f )
 		return;
 
-	kick = abs( knockback ) * delta;
+	kick = fabs( knockback ) * delta;
 	if( kick ) // kick of 0 means no view adjust at all
 	{
 		//find first free kick spot, or the one closer to be finished
@@ -404,6 +422,31 @@ void CG_StartKickAnglesEffect( vec3_t source, float knockback, float radius, int
 			ftime = 100;
 		cg.kickangles[kicknum].kicktime = ftime;
 	}
+}
+
+/*
+* CG_StartFallKickEffect
+*/
+void CG_StartFallKickEffect( int bounceTime )
+{
+	if( !cg_viewBob->integer )
+	{
+		cg.fallEffectTime = 0;
+		cg.fallEffectRebounceTime = 0;
+		return;
+	}
+
+	if( cg.fallEffectTime > cg.time )
+		cg.fallEffectRebounceTime = 0;
+
+	bounceTime += 200;
+	clamp_high( bounceTime, 400 );
+
+	cg.fallEffectTime = cg.time + bounceTime;
+	if( cg.fallEffectRebounceTime )
+		cg.fallEffectRebounceTime = cg.time - ( ( cg.time - cg.fallEffectRebounceTime ) * 0.5 );
+	else
+		cg.fallEffectRebounceTime = cg.time;
 }
 
 /*
@@ -501,7 +544,7 @@ int CG_SkyPortal( void )
 		float off = cg.view.refdef.time * 0.001f;
 
 		sp->fov = fov;
-		sp->noEnts = (noents ? qtrue : qfalse);
+		sp->noEnts = (noents ? true : false);
 		sp->scale = scale ? 1.0f / scale : 0;
 		VectorSet( sp->viewanglesOffset, anglemod( off * pitchspeed ), anglemod( off * yawspeed ), anglemod( off * rollspeed ) );
 		return RDF_SKYPORTALINVIEW;
@@ -547,11 +590,10 @@ static int CG_RenderFlags( void )
 	if( cg_outlineWorld->integer )
 		rdflags |= RDF_WORLDOUTLINES;
 
-	rdflags |= CG_SkyPortal();
+	if( cg.view.flipped )
+		rdflags |= RDF_FLIPPED;
 
-	if( cg.view.refdef.weaponAlpha != 1 ) {
-		rdflags |= RDF_WEAPONALPHA;
-	}
+	rdflags |= CG_SkyPortal();
 
 	return rdflags;
 }
@@ -572,9 +614,9 @@ static void CG_InterpolatePlayerState( player_state_t *playerState )
 
 	teleported = ( ps->pmove.pm_flags & PMF_TIME_TELEPORT ) ? true : false;
 
-	if( abs( ops->pmove.origin[0] - ps->pmove.origin[0] ) > 256
-		|| abs( ops->pmove.origin[1] - ps->pmove.origin[1] ) > 256
-		|| abs( ops->pmove.origin[2] - ps->pmove.origin[2] ) > 256 )
+	if( abs( (int)(ops->pmove.origin[0] - ps->pmove.origin[0]) ) > 256
+		|| abs( (int)(ops->pmove.origin[1] - ps->pmove.origin[1]) ) > 256
+		|| abs( (int)(ops->pmove.origin[2] - ps->pmove.origin[2]) ) > 256 )
 		teleported = true;
 
 #ifdef EXTRAPOLATE_PLAYERSTATE // isn't smooth enough for the 1st person view
@@ -624,8 +666,8 @@ static void CG_InterpolatePlayerState( player_state_t *playerState )
 	// interpolate fov and viewheight
 	if( !teleported )
 	{
-		playerState->fov = ops->fov + cg.lerpfrac * ( ps->fov - ops->fov );
 		playerState->viewheight = ops->viewheight + cg.lerpfrac * ( ps->viewheight - ops->viewheight );
+		playerState->pmove.stats[PM_STAT_ZOOMTIME] = ops->pmove.stats[PM_STAT_ZOOMTIME] + cg.lerpfrac * ( ps->pmove.stats[PM_STAT_ZOOMTIME] - ops->pmove.stats[PM_STAT_ZOOMTIME] );
 	}
 }
 
@@ -694,6 +736,25 @@ void CG_ViewSmoothPredictedSteps( vec3_t vieworg )
 	timeDelta = cg.realTime - cg.predictedStepTime;
 	if( timeDelta < PREDICTED_STEP_TIME )
 		vieworg[2] -= cg.predictedStep * ( PREDICTED_STEP_TIME - timeDelta ) / PREDICTED_STEP_TIME;
+}
+
+/*
+* CG_ViewSmoothFallKick
+*/
+float CG_ViewSmoothFallKick( void )
+{
+	// fallkick offset
+	if( cg.fallEffectTime > cg.time )
+	{
+		float fallfrac = (float)( cg.time - cg.fallEffectRebounceTime ) / (float)( cg.fallEffectTime - cg.fallEffectRebounceTime );
+		float fallkick = -1.0f * sin( DEG2RAD( fallfrac*180 ) ) * ( ( cg.fallEffectTime - cg.fallEffectRebounceTime ) * 0.01f );
+		return fallkick;
+	}
+	else
+	{
+		cg.fallEffectTime = cg.fallEffectRebounceTime = 0;
+	}
+	return 0.0f;
 }
 
 /*
@@ -778,7 +839,7 @@ static void CG_ChaseCamButtons( void )
 /*
 * CG_SetupViewDef
 */
-void CG_SetupViewDef( cg_viewdef_t *view, int type )
+static void CG_SetupViewDef( cg_viewdef_t *view, int type, bool flipped )
 {
 	memset( view, 0, sizeof( cg_viewdef_t ) );
 
@@ -787,6 +848,7 @@ void CG_SetupViewDef( cg_viewdef_t *view, int type )
 	//
 
 	view->type = type;
+	view->flipped = flipped;
 
 	if( view->type == VIEWDEF_PLAYERVIEW )
 	{
@@ -857,6 +919,10 @@ void CG_SetupViewDef( cg_viewdef_t *view, int type )
 			}
 
 			CG_ViewSmoothPredictedSteps( view->origin ); // smooth out stair climbing
+
+			if( cg_viewBob->integer && !cg_thirdPerson->integer ) {
+				view->origin[2] += CG_ViewSmoothFallKick() * 6.5f;
+			}
 		}
 		else
 		{
@@ -872,7 +938,7 @@ void CG_SetupViewDef( cg_viewdef_t *view, int type )
 			VectorCopy( cg.predictedPlayerState.viewangles, view->angles );
 		}
 
-		view->refdef.fov_x = cg.predictedPlayerState.fov;
+		view->refdef.fov_x = CG_CalcViewFov();
 
 		CG_CalcViewBob();
 
@@ -882,6 +948,10 @@ void CG_SetupViewDef( cg_viewdef_t *view, int type )
 	{
 		view->refdef.fov_x = CG_DemoCam_GetOrientation( view->origin, view->angles, view->velocity );
 	}
+
+	Matrix3_FromAngles( view->angles, view->axis );
+	if( view->flipped )
+		VectorInverse( &view->axis[AXIS_RIGHT] );
 
 	// view rectangle size
 	view->refdef.x = scr_vrect.x;
@@ -896,12 +966,12 @@ void CG_SetupViewDef( cg_viewdef_t *view, int type )
 	view->refdef.scissor_height = scr_vrect.height;
 
 	view->refdef.fov_y = CalcFov( view->refdef.fov_x, view->refdef.width, view->refdef.height );
+
+	AdjustFov( &view->refdef.fov_x, &view->refdef.fov_y, view->refdef.width, view->refdef.height, false );
+
 	view->fracDistFOV = tan( view->refdef.fov_x * ( M_PI/180 ) * 0.5f );
 
-	view->refdef.weaponAlpha = bound( 0, cg_gun_alpha->value, 1 );
 	view->refdef.minLight = 0.3f;
-
-	Matrix3_FromAngles( view->angles, view->axis );
 
 	if( view->thirdperson )
 		CG_ThirdPersonOffsetView( view );
@@ -912,6 +982,14 @@ void CG_SetupViewDef( cg_viewdef_t *view, int type )
 	VectorCopy( cg.view.origin, view->refdef.vieworg );
 	Matrix3_Copy( cg.view.axis, view->refdef.viewaxis );
 	VectorInverse( &view->refdef.viewaxis[AXIS_RIGHT] );
+
+	view->refdef.colorCorrection = NULL;
+	if( cg_colorCorrection->integer )
+	{
+		int colorCorrection = GS_ColorCorrection();
+		if( ( colorCorrection > 0 ) && ( colorCorrection < MAX_IMAGES ) )
+			view->refdef.colorCorrection = cgs.imagePrecache[colorCorrection];
+	}
 }
 
 /*
@@ -919,7 +997,7 @@ void CG_SetupViewDef( cg_viewdef_t *view, int type )
 */
 #define	WAVE_AMPLITUDE	0.015   // [0..1]
 #define	WAVE_FREQUENCY	0.6     // [0..1]
-void CG_RenderView( float frameTime, float realFrameTime, int realTime, unsigned int serverTime, float stereo_separation, unsigned int extrapolationTime )
+void CG_RenderView( float frameTime, float realFrameTime, int realTime, unsigned int serverTime, float stereo_separation, unsigned int extrapolationTime, bool flipped )
 {
 	refdef_t *rd = &cg.view.refdef;
 
@@ -932,6 +1010,7 @@ void CG_RenderView( float frameTime, float realFrameTime, int realTime, unsigned
 
 	if( !cgs.precacheDone || !cg.frame.valid )
 	{
+		CG_Precache();
 		CG_DrawLoading();
 		return;
 	}
@@ -999,8 +1078,38 @@ void CG_RenderView( float frameTime, float realFrameTime, int realTime, unsigned
 		return;
 	}
 
+	// bring up the game menu after reconnecting
+	if( !cgs.tv && !cgs.demoPlaying ) {
+		if( ISREALSPECTATOR() && !cg.firstFrame ) {
+			if( !cgs.gameMenuRequested ) {
+				trap_Cmd_ExecuteText( EXEC_NOW, "gamemenu\n" );
+			}
+			cgs.gameMenuRequested = true;
+		}
+	}
+
 	if( !cg.viewFrameCount )
 		cg.firstViewRealTime = cg.realTime;
+
+	if( cg_fov->modified ) {
+		if( cg_fov->value < MIN_FOV ) {
+			trap_Cvar_ForceSet( cg_fov->name, STR_TOSTR( MIN_FOV ) );
+		}
+		else if( cg_fov->value > MAX_FOV ) {
+			trap_Cvar_ForceSet( cg_fov->name, STR_TOSTR( MAX_FOV ) );
+		}
+		cg_fov->modified = false;
+	}
+
+	if( cg_zoomfov->modified ) {
+		if( cg_zoomfov->value < MIN_ZOOMFOV ) {
+			trap_Cvar_ForceSet( cg_zoomfov->name, STR_TOSTR( MIN_ZOOMFOV ) );
+		}
+		else if( cg_zoomfov->value > MAX_ZOOMFOV ) {
+			trap_Cvar_ForceSet( cg_zoomfov->name, STR_TOSTR( MAX_ZOOMFOV ) );
+		}
+		cg_zoomfov->modified = false;
+	}
 
 	CG_FlashGameWindow(); // notify player of important game events
 
@@ -1016,9 +1125,9 @@ void CG_RenderView( float frameTime, float realFrameTime, int realTime, unsigned
 	trap_R_ClearScene();
 
 	if( CG_DemoCam_Update() )
-		CG_SetupViewDef( &cg.view, CG_DemoCam_GetViewType() );
+		CG_SetupViewDef( &cg.view, CG_DemoCam_GetViewType(), flipped );
 	else
-		CG_SetupViewDef( &cg.view, VIEWDEF_PLAYERVIEW );
+		CG_SetupViewDef( &cg.view, VIEWDEF_PLAYERVIEW, flipped );
 
 	CG_LerpEntities();  // interpolate packet entities positions
 

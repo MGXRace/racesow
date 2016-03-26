@@ -25,7 +25,7 @@ extern cvar_t *cm_noCurves;
 // debug/performance counter vars
 int c_pointcontents, c_traces, c_brush_traces;
 
-struct cmodel_s *CM_LoadMap( cmodel_state_t *cms, const char *name, qboolean clientload, unsigned *checksum );
+struct cmodel_s *CM_LoadMap( cmodel_state_t *cms, const char *name, bool clientload, unsigned *checksum );
 struct cmodel_s *CM_InlineModel( cmodel_state_t *cms, int num ); // 1, 2, etc
 char *CM_LoadMapMessage( char *name, char *message, int size );
 
@@ -52,10 +52,7 @@ void CM_TransformedBoxTrace( cmodel_state_t *cms, trace_t *tr, vec3_t start, vec
 
 void CM_RoundUpToHullSize( cmodel_state_t *cms, vec3_t mins, vec3_t maxs, struct cmodel_s *cmodel );
 
-qbyte *CM_ClusterPVS( cmodel_state_t *cms, int cluster );
-qbyte *CM_ClusterPHS( cmodel_state_t *cms, int cluster );
 int CM_ClusterRowSize( cmodel_state_t *cms );
-int CM_ClusterRowLongs( cmodel_state_t *cms );
 int CM_AreaRowSize( cmodel_state_t *cms );
 int CM_PointLeafnum( cmodel_state_t *cms, const vec3_t p );
 
@@ -66,19 +63,21 @@ int CM_BoxLeafnums( cmodel_state_t *cms, vec3_t mins, vec3_t maxs, int *list, in
 int CM_LeafCluster( cmodel_state_t *cms, int leafnum );
 int CM_LeafArea( cmodel_state_t *cms, int leafnum );
 
-void CM_SetAreaPortalState( cmodel_state_t *cms, int area1, int area2, qboolean open );
-qboolean CM_AreasConnected( cmodel_state_t *cms, int area1, int area2 );
+void CM_SetAreaPortalState( cmodel_state_t *cms, int area1, int area2, bool open );
+bool CM_AreasConnected( cmodel_state_t *cms, int area1, int area2 );
 
-int CM_WriteAreaBits( cmodel_state_t *cms, qbyte *buffer );
-void CM_ReadAreaBits( cmodel_state_t *cms, qbyte *buffer );
-qboolean CM_HeadnodeVisible( cmodel_state_t *cms, int headnode, qbyte *visbits );
+int CM_WriteAreaBits( cmodel_state_t *cms, uint8_t *buffer );
+void CM_ReadAreaBits( cmodel_state_t *cms, uint8_t *buffer );
+bool CM_HeadnodeVisible( cmodel_state_t *cms, int headnode, uint8_t *visbits );
 
 void CM_WritePortalState( cmodel_state_t *cms, int file );
 void CM_ReadPortalState( cmodel_state_t *cms, int file );
 
-void CM_MergePVS( cmodel_state_t *cms, vec3_t org, qbyte *out );
-void CM_MergePHS( cmodel_state_t *cms, int cluster, qbyte *out );
-int CM_MergeVisSets( cmodel_state_t *cms, vec3_t org, qbyte *pvs, qbyte *areabits );
+void CM_MergePVS( cmodel_state_t *cms, vec3_t org, uint8_t *out );
+void CM_MergePHS( cmodel_state_t *cms, int cluster, uint8_t *out );
+int CM_MergeVisSets( cmodel_state_t *cms, vec3_t org, uint8_t *pvs, uint8_t *areabits );
+
+bool CM_InPVS( cmodel_state_t *cms, const vec3_t p1, const vec3_t p2 );
 
 //
 cmodel_state_t *CM_New( void *mempool );

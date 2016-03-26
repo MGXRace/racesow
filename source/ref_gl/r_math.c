@@ -43,15 +43,15 @@ void Matrix4_Copy( const mat4_t m1, mat4_t m2 )
 	memcpy( m2, m1, sizeof( mat4_t ) );
 }
 
-qboolean Matrix4_Compare( const mat4_t m1, const mat4_t m2 )
+bool Matrix4_Compare( const mat4_t m1, const mat4_t m2 )
 {
 	int i;
 
 	for( i = 0; i < 16; i++ )
 		if( m1[i] != m2[i] )
-			return qfalse;
+			return false;
 
-	return qtrue;
+	return true;
 }
 
 void Matrix4_Multiply( const mat4_t m1, const mat4_t m2, mat4_t out )
@@ -97,9 +97,9 @@ void Matrix4_MultiplyFast( const mat4_t m1, const mat4_t m2, mat4_t out )
 // Taken from Darkplaces source code
 // Adapted from code contributed to Mesa by David Moore (Mesa 7.6 under SGI Free License B - which is MIT/X11-type)
 // added helper for common subexpression elimination by eihrul, and other optimizations by div0
-qboolean Matrix4_Invert( const mat4_t in, mat4_t out )
+bool Matrix4_Invert( const mat4_t in, mat4_t out )
 {
-	float det;
+	vec_t det;
 
 	// note: orientation does not matter, as transpose(invert(transpose(m))) == invert(m), proof:
 	//   transpose(invert(transpose(m))) * m
@@ -109,7 +109,7 @@ qboolean Matrix4_Invert( const mat4_t in, mat4_t out )
 	// = identity
 
 	// this seems to help gcc's common subexpression elimination, and also makes the code look nicer
-	float   m00 = in[0], m01 = in[1], m02 = in[2], m03 = in[3],
+	vec_t m00 = in[0], m01 = in[1], m02 = in[2], m03 = in[3],
 		m10 = in[4], m11 = in[5], m12 = in[6], m13 = in[7],
 		m20 = in[8], m21 = in[9], m22 = in[10], m23 = in[11],
 		m30 = in[12], m31 = in[13], m32 = in[14], m33 = in[15];
@@ -136,7 +136,7 @@ qboolean Matrix4_Invert( const mat4_t in, mat4_t out )
 	// so this calculates the det)
 	det = m00*out[0] + m10*out[1] + m20*out[2] + m30*out[3];
 	if (det == 0.0f)
-		return qfalse;
+		return false;
 
 	// multiplications are faster than divisions, usually
 	det = 1.0f / det;
@@ -147,7 +147,7 @@ qboolean Matrix4_Invert( const mat4_t in, mat4_t out )
 	out[8] *= det; out[9] *= det; out[10] *= det; out[11] *= det;
 	out[12] *= det; out[13] *= det; out[14] *= det; out[15] *= det;
 
-	return qtrue;
+	return true;
 }
 
 void Matrix4_FromQuaternion( const quat_t q, mat4_t out )
@@ -382,15 +382,12 @@ void Matrix4_PerspectiveProjection( vec_t fov_x, vec_t fov_y,
 	m[15] = 0.0f;
 }
 
-#define INFINITE_PROJECTION_EPSILON		24e-8
-
 /*
 * Matrix4_InfinitePerspectiveProjection
 */
 void Matrix4_InfinitePerspectiveProjection( vec_t fov_x, vec_t fov_y, 
-	vec_t near, vec_t stereoSeparation, mat4_t m )
+	vec_t near, vec_t stereoSeparation, mat4_t m, vec_t epsilon )
 {
-	const vec_t epsilon = INFINITE_PROJECTION_EPSILON;
 	m[0] = 1.0f / tan( fov_x * M_PI / 360.0 );
 	m[1] = 0.0f;
 	m[2] = 0.0f;
@@ -412,9 +409,8 @@ void Matrix4_InfinitePerspectiveProjection( vec_t fov_x, vec_t fov_y,
 /*
 * Matrix4_PerspectiveProjectionToInfinity
 */
-void Matrix4_PerspectiveProjectionToInfinity( vec_t near, mat4_t m )
+void Matrix4_PerspectiveProjectionToInfinity( vec_t near, mat4_t m, vec_t epsilon )
 {
-	const vec_t epsilon = INFINITE_PROJECTION_EPSILON;
 	m[10] = epsilon - 1.0f;
 	m[14] = (epsilon - 2.0f) * near;
 }

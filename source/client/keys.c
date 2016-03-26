@@ -30,12 +30,12 @@ key up events are sent even if in console mode
 int anykeydown;
 
 static char *keybindings[256];
-static qboolean consolekeys[256];   // if qtrue, can't be rebound while in console
-static qboolean menubound[256];     // if qtrue, can't be rebound while in menu
+static bool consolekeys[256];   // if true, can't be rebound while in console
+static bool menubound[256];     // if true, can't be rebound while in menu
 static int key_repeats[256];   // if > 1, it is autorepeating
-static qboolean keydown[256];
+static bool keydown[256];
 
-static qboolean	key_initialized = qfalse;
+static bool	key_initialized = false;
 
 static char alt_color_escape = '$';
 static dynvar_t *key_colorEscape = NULL;
@@ -134,44 +134,25 @@ const keyname_t keynames[] =
 	{ "MOUSE6", K_MOUSE6 },
 	{ "MOUSE7", K_MOUSE7 },
 	{ "MOUSE8", K_MOUSE8 },
+	{ "MOUSE1DBLCLK", K_MOUSE1DBLCLK },
 
-	{ "JOY1", K_JOY1 },
-	{ "JOY2", K_JOY2 },
-	{ "JOY3", K_JOY3 },
-	{ "JOY4", K_JOY4 },
-
-	{ "AUX1", K_AUX1 },
-	{ "AUX2", K_AUX2 },
-	{ "AUX3", K_AUX3 },
-	{ "AUX4", K_AUX4 },
-	{ "AUX5", K_AUX5 },
-	{ "AUX6", K_AUX6 },
-	{ "AUX7", K_AUX7 },
-	{ "AUX8", K_AUX8 },
-	{ "AUX9", K_AUX9 },
-	{ "AUX10", K_AUX10 },
-	{ "AUX11", K_AUX11 },
-	{ "AUX12", K_AUX12 },
-	{ "AUX13", K_AUX13 },
-	{ "AUX14", K_AUX14 },
-	{ "AUX15", K_AUX15 },
-	{ "AUX16", K_AUX16 },
-	{ "AUX17", K_AUX17 },
-	{ "AUX18", K_AUX18 },
-	{ "AUX19", K_AUX19 },
-	{ "AUX20", K_AUX20 },
-	{ "AUX21", K_AUX21 },
-	{ "AUX22", K_AUX22 },
-	{ "AUX23", K_AUX23 },
-	{ "AUX24", K_AUX24 },
-	{ "AUX25", K_AUX25 },
-	{ "AUX26", K_AUX26 },
-	{ "AUX27", K_AUX27 },
-	{ "AUX28", K_AUX28 },
-	{ "AUX29", K_AUX29 },
-	{ "AUX30", K_AUX30 },
-	{ "AUX31", K_AUX31 },
-	{ "AUX32", K_AUX32 },
+	{ "A_BUTTON", K_A_BUTTON },
+	{ "B_BUTTON", K_B_BUTTON },
+	{ "C_BUTTON", K_C_BUTTON },
+	{ "X_BUTTON", K_X_BUTTON },
+	{ "Y_BUTTON", K_Y_BUTTON },
+	{ "Z_BUTTON", K_Z_BUTTON },
+	{ "LSHOULDER", K_LSHOULDER },
+	{ "RSHOULDER", K_RSHOULDER },
+	{ "LTRIGGER", K_LTRIGGER },
+	{ "RTRIGGER", K_RTRIGGER },
+	{ "LSTICK", K_LSTICK },
+	{ "RSTICK", K_RSTICK },
+	{ "DPAD_UP", K_DPAD_UP },
+	{ "DPAD_DOWN", K_DPAD_DOWN },
+	{ "DPAD_LEFT", K_DPAD_LEFT },
+	{ "DPAD_RIGHT", K_DPAD_RIGHT },
+	{ "DPAD_CENTER", K_DPAD_CENTER },
 
 	{ "KP_HOME", KP_HOME },
 	{ "KP_UPARROW",	KP_UPARROW },
@@ -204,7 +185,7 @@ const keyname_t keynames[] =
 };
 
 static void Key_DelegateCallKeyDel( int key );
-static void Key_DelegateCallCharDel( qwchar key );
+static void Key_DelegateCallCharDel( wchar_t key );
 
 static int consolebinded = 0;
 
@@ -402,24 +383,24 @@ static void Key_Bindlist_f( void )
 * If nothing is bound to toggleconsole, we use default key for it
 * Also toggleconsole is specially handled, so it's never outputed to the console or so
 */
-static qboolean Key_IsToggleConsole( int key )
+static bool Key_IsToggleConsole( int key )
 {
 	if( key == -1 )
-		return qfalse;
+		return false;
 
 	assert (key >= 0 && key <= 255);
 
 	if( consolebinded > 0 )
 	{
 		if( keybindings[key] && !Q_stricmp( keybindings[key], "toggleconsole" ) )
-			return qtrue;
-		return qfalse;
+			return true;
+		return false;
 	}
 	else
 	{
 		if( key == '`' || key == '~' )
-			return qtrue;
-		return qfalse;
+			return true;
+		return false;
 	}
 }
 
@@ -429,12 +410,12 @@ static qboolean Key_IsToggleConsole( int key )
 * Called by sys code to avoid garbage if the toggleconsole
 * key happens to be a dead key (like in the German layout)
 */
-qboolean Key_IsNonPrintable (int key)
+bool Key_IsNonPrintable (int key)
 {
 	// This may be called before client is initialized. Shouldn't be a problem
 	// for Key_IsToggleConsole, but double check just in case
 	if (!key_initialized)
-		return qfalse;
+		return false;
 
 	return Key_IsToggleConsole(key);
 }
@@ -452,59 +433,65 @@ void Key_Init( void )
 	// init ascii characters in console mode
 	//
 	for( i = 32; i < 128; i++ )
-		consolekeys[i] = qtrue;
-	consolekeys[K_ENTER] = qtrue;
-	consolekeys[KP_ENTER] = qtrue;
-	consolekeys[K_TAB] = qtrue;
-	consolekeys[K_LEFTARROW] = qtrue;
-	consolekeys[KP_LEFTARROW] = qtrue;
-	consolekeys[K_RIGHTARROW] = qtrue;
-	consolekeys[KP_RIGHTARROW] = qtrue;
-	consolekeys[K_UPARROW] = qtrue;
-	consolekeys[KP_UPARROW] = qtrue;
-	consolekeys[K_DOWNARROW] = qtrue;
-	consolekeys[KP_DOWNARROW] = qtrue;
-	consolekeys[K_BACKSPACE] = qtrue;
-	consolekeys[K_HOME] = qtrue;
-	consolekeys[KP_HOME] = qtrue;
-	consolekeys[K_END] = qtrue;
-	consolekeys[KP_END] = qtrue;
-	consolekeys[K_PGUP] = qtrue;
-	consolekeys[KP_PGUP] = qtrue;
-	consolekeys[K_PGDN] = qtrue;
-	consolekeys[KP_PGDN] = qtrue;
-	consolekeys[K_LSHIFT] = qtrue;
-	consolekeys[K_RSHIFT] = qtrue;
-	consolekeys[K_INS] = qtrue;
-	consolekeys[K_DEL] = qtrue;
-	consolekeys[KP_INS] = qtrue;
-	consolekeys[KP_DEL] = qtrue;
-	consolekeys[KP_SLASH] = qtrue;
-	consolekeys[KP_PLUS] = qtrue;
-	consolekeys[KP_MINUS] = qtrue;
-	consolekeys[KP_5] = qtrue;
+		consolekeys[i] = true;
+	consolekeys[K_ENTER] = true;
+	consolekeys[KP_ENTER] = true;
+	consolekeys[K_RSHOULDER] = true;
+	consolekeys[K_RTRIGGER] = true;
+	consolekeys[K_TAB] = true;
+	consolekeys[K_LEFTARROW] = true;
+	consolekeys[KP_LEFTARROW] = true;
+	consolekeys[K_RIGHTARROW] = true;
+	consolekeys[KP_RIGHTARROW] = true;
+	consolekeys[K_UPARROW] = true;
+	consolekeys[KP_UPARROW] = true;
+	consolekeys[K_DOWNARROW] = true;
+	consolekeys[KP_DOWNARROW] = true;
+	consolekeys[K_BACKSPACE] = true;
+	consolekeys[K_HOME] = true;
+	consolekeys[KP_HOME] = true;
+	consolekeys[K_END] = true;
+	consolekeys[KP_END] = true;
+	consolekeys[K_PGUP] = true;
+	consolekeys[KP_PGUP] = true;
+	consolekeys[K_DPAD_UP] = true;
+	consolekeys[K_PGDN] = true;
+	consolekeys[KP_PGDN] = true;
+	consolekeys[K_DPAD_DOWN] = true;
+	consolekeys[K_LSHIFT] = true;
+	consolekeys[K_RSHIFT] = true;
+	consolekeys[K_INS] = true;
+	consolekeys[K_DEL] = true;
+	consolekeys[KP_INS] = true;
+	consolekeys[KP_DEL] = true;
+	consolekeys[KP_SLASH] = true;
+	consolekeys[KP_PLUS] = true;
+	consolekeys[KP_MINUS] = true;
+	consolekeys[KP_5] = true;
+	consolekeys[K_A_BUTTON] = true;
+	consolekeys[K_B_BUTTON] = true;
 
-	consolekeys[K_WIN] = qtrue;
-	//	consolekeys[K_LWIN] = qtrue;
-	//	consolekeys[K_RWIN] = qtrue;
-	consolekeys[K_MENU] = qtrue;
+	consolekeys[K_WIN] = true;
+	//	consolekeys[K_LWIN] = true;
+	//	consolekeys[K_RWIN] = true;
+	consolekeys[K_MENU] = true;
 
-	consolekeys[K_LCTRL] = qtrue; // wsw : pb : ctrl in console for ctrl-v
-	consolekeys[K_RCTRL] = qtrue;
-	consolekeys[K_LALT] = qtrue;
-	consolekeys[K_RALT] = qtrue;
+	consolekeys[K_LCTRL] = true; // wsw : pb : ctrl in console for ctrl-v
+	consolekeys[K_RCTRL] = true;
+	consolekeys[K_LALT] = true;
+	consolekeys[K_RALT] = true;
 
-	consolekeys['`'] = qfalse;
-	consolekeys['~'] = qfalse;
+	consolekeys['`'] = false;
+	consolekeys['~'] = false;
 
 	// wsw : pb : support mwheel in console
-	consolekeys[K_MWHEELDOWN] = qtrue;
-	consolekeys[K_MWHEELUP] = qtrue;
+	consolekeys[K_MWHEELDOWN] = true;
+	consolekeys[K_MWHEELUP] = true;
 
-	menubound[K_ESCAPE] = qtrue;
+	menubound[K_ESCAPE] = true;
 	// Vic: allow to bind F1-F12 from the menu
 	//	for (i=0 ; i<12 ; i++)
-	//		menubound[K_F1+i] = qtrue;
+	//		menubound[K_F1+i] = true;
 
 	//
 	// register our functions
@@ -515,11 +502,11 @@ void Key_Init( void )
 	Cmd_AddCommand( "bindlist", Key_Bindlist_f );
 
 	// wsw : aiwa : create dynvar for alternative color escape character
-	key_colorEscape = Dynvar_Create( "key_colorEscape", qtrue, Key_GetColorEscape_f, Key_SetColorEscape_f );
+	key_colorEscape = Dynvar_Create( "key_colorEscape", true, Key_GetColorEscape_f, Key_SetColorEscape_f );
 
 	in_debug = Cvar_Get( "in_debug", "0", 0 );
 
-	key_initialized = qtrue;
+	key_initialized = true;
 }
 
 void Key_Shutdown( void )
@@ -541,12 +528,12 @@ void Key_Shutdown( void )
 * Called by the system between frames for key down events for standard characters
 * Should NOT be called during an interrupt!
 */
-void Key_CharEvent( int key, qwchar charkey )
+void Key_CharEvent( int key, wchar_t charkey )
 {
 	if( Key_IsToggleConsole( key ) )
 		return;
 
-	if( charkey == ( qwchar )alt_color_escape )
+	if( charkey == ( wchar_t )alt_color_escape )
 		charkey = Q_COLOR_ESCAPE;
 
 	switch( cls.key_dest )
@@ -583,7 +570,7 @@ void Key_CharEvent( int key, qwchar charkey )
 * (This order is not final! We might want to suppress the second pair of 
 * mouse1 down/up events, or make +MOUSE1DBLCLK come before +MOUSE1)
 */
-void Key_MouseEvent( int key, qboolean down, unsigned time )
+void Key_MouseEvent( int key, bool down, unsigned time )
 {
 	static unsigned int last_button1_click = 0;
 	// use a lower delay than XP default (480 ms) because we don't support width/height yet
@@ -596,12 +583,12 @@ void Key_MouseEvent( int key, qboolean down, unsigned time )
 	{
 		if( down )
 		{
-			if( last_button1_click && ( (time - last_button1_click) < doubleclick_time ) )
+			if( time && last_button1_click && ( (time - last_button1_click) < doubleclick_time ) )
 			{
 				last_button1_click = 0;
 				Key_Event( key, down, time );
-				Key_Event( K_MOUSE1DBLCLK, qtrue, time );
-				Key_Event( K_MOUSE1DBLCLK, qfalse, time );
+				Key_Event( K_MOUSE1DBLCLK, true, time );
+				Key_Event( K_MOUSE1DBLCLK, false, time );
 				return;
 			}
 			else
@@ -619,16 +606,53 @@ void Key_MouseEvent( int key, qboolean down, unsigned time )
 }
 
 /*
+* Key_NumPadKeyValue
+*
+* Translates numpad keys into 0-9, if possible.
+*/
+static int Key_NumPadKeyValue( int key )
+{
+	switch( key ) {
+		case KP_HOME:
+			return '7';
+		case KP_UPARROW:
+			return '8';
+		case KP_PGUP:
+			return '9';
+		case KP_LEFTARROW:
+			return '4';
+		case KP_5:
+			return '5';
+		case KP_RIGHTARROW:
+			return '6';
+		case KP_END:
+			return '1';
+		case KP_DOWNARROW:
+			return '2';
+		case KP_PGDN:
+			return '3';
+		case KP_INS:
+			return '0';
+		default:
+			break;
+	}
+	return key;
+}
+
+/*
 * Key_Event
 * 
 * Called by the system between frames for both key up and key down events
 * Should NOT be called during an interrupt!
 */
-void Key_Event( int key, qboolean down, unsigned time )
+void Key_Event( int key, bool down, unsigned time )
 {
 	char *kb;
 	char cmd[1024];
-	qboolean handled = qfalse;
+	bool handled = false;
+	int numkey = Key_NumPadKeyValue( key );
+	bool have_quickmenu = SCR_IsQuickMenuShown();
+	bool numeric = numkey >= '0' && numkey <='9';
 
 	// update auto-repeat status
 	if( down )
@@ -649,7 +673,7 @@ void Key_Event( int key, qboolean down, unsigned time )
 		key_repeats[key] = 0;
 	}
 
-#ifndef WIN32
+#if !defined( WIN32 ) && !defined( __ANDROID__ )
 	// switch between fullscreen/windowed when ALT+ENTER is pressed
 	if( key == K_ENTER && down && (keydown[K_LALT] || keydown[K_RALT]) )
 	{
@@ -721,7 +745,7 @@ void Key_Event( int key, qboolean down, unsigned time )
 	//
 	if( ( cls.key_dest == key_menu && menubound[key] )
 		|| ( cls.key_dest == key_console && !consolekeys[key] )
-		|| ( cls.key_dest == key_game && ( cls.state == CA_ACTIVE || !consolekeys[key] ) )
+		|| ( cls.key_dest == key_game && ( cls.state == CA_ACTIVE || !consolekeys[key] ) && (!have_quickmenu || !numeric) )
 		|| ( cls.key_dest == key_message && ( key >= K_F1 && key <= K_F15 ) ) )
 	{
 		kb = keybindings[key];
@@ -751,7 +775,7 @@ void Key_Event( int key, qboolean down, unsigned time )
 				Cbuf_AddText( "\n" );
 			}
 		}
-		handled = qtrue; // can't return here, because we want to track keydown & repeats
+		handled = true; // can't return here, because we want to track keydown & repeats
 	}
 
 	// track if any key is down for BUTTON_ANY
@@ -786,6 +810,13 @@ void Key_Event( int key, qboolean down, unsigned time )
 		Con_MessageKeyDown( key );
 		break;
 	case key_game:
+		if( have_quickmenu && numeric ) {
+			if( down )
+				CL_UIModule_KeydownQuick( numkey );
+			else
+				CL_UIModule_KeyupQuick( numkey );
+			break;
+		}
 	case key_console:
 		Con_KeyDown( key );
 		break;
@@ -804,12 +835,12 @@ void Key_ClearStates( void )
 {
 	int i;
 
-	anykeydown = qfalse;
+	anykeydown = false;
 
 	for( i = 0; i < 256; i++ )
 	{
 		if( keydown[i] || key_repeats[i] )
-			Key_Event( i, qfalse, 0 );
+			Key_Event( i, false, 0 );
 		keydown[i] = 0;
 		key_repeats[i] = 0;
 	}
@@ -827,10 +858,10 @@ const char *Key_GetBindingBuf( int binding )
 /*
 * Key_IsDown
 */
-qboolean Key_IsDown( int keynum )
+bool Key_IsDown( int keynum )
 {
 	if( keynum < 0 || keynum > 255 )
-		return qfalse;
+		return false;
 	return keydown[keynum];
 }
 
@@ -848,7 +879,7 @@ static int key_delegate_stack_index = 0;
 */
 keydest_t Key_DelegatePush( key_delegate_f key_del, key_char_delegate_f char_del )
 {
-	assert( key_delegate_stack_index < sizeof( key_delegate_stack ) / sizeof( key_delegate_f ) );
+	assert( key_delegate_stack_index < sizeof( key_delegate_stack ) / sizeof( key_delegates_t ) );
 	key_delegate_stack[key_delegate_stack_index].key_del = key_del;
 	key_delegate_stack[key_delegate_stack_index].char_del = char_del;
 	++key_delegate_stack_index;
@@ -884,7 +915,7 @@ static void Key_DelegateCallKeyDel( int key )
 /*
 * Key_DelegateCallCharDel
 */
-static void Key_DelegateCallCharDel( qwchar key )
+static void Key_DelegateCallCharDel( wchar_t key )
 {
 	assert( key_delegate_stack_index > 0 );
 	key_delegate_stack[key_delegate_stack_index - 1].char_del( key );

@@ -1,3 +1,4 @@
+<!-- HTML header for doxygen 1.8.3.1-->
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
@@ -8,6 +9,7 @@
 <link href="tabs.css" rel="stylesheet" type="text/css"/>
 <script type="text/javascript" src="jquery.js"></script>
 <script type="text/javascript" src="dynsections.js"></script>
+<script type="test/javascript" src="touch.js"></script>
 <link href="navtree.css" rel="stylesheet" type="text/css"/>
 <script type="text/javascript" src="resize.js"></script>
 <script type="text/javascript" src="navtree.js"></script>
@@ -23,6 +25,7 @@
 <table cellspacing="0" cellpadding="0">
  <tbody>
  <tr style="height: 56px;">
+  <td id="projectlogo"><img alt="Logo" src="aslogo_small.png"/></td>
   <td style="padding-left: 0.5em;">
    <div id="projectname">AngelScript
    </div>
@@ -194,7 +197,7 @@ Public Member Functions</h2></td></tr>
 </table>
 </div><div class="memdoc">
 <dl class="section return"><dt>Returns</dt><dd>A pointer to the memory where the return values is to be placed.</dd></dl>
-<p>The memory is not initialized, so if you're going to return a complex type by value, you shouldn't use the assignment operator to initialize it. Instead use the placement new operator to call the type's copy constructor to perform the initialization.</p>
+<p>The memory is not initialized, so if you're going to return a complex type by value you shouldn't use the assignment operator to initialize it. Instead use the placement new operator to call the type's copy constructor to perform the initialization.</p>
 <div class="fragment"><div class="line"><span class="keyword">new</span>(gen-&gt;<a class="code" href="classas_i_script_generic.html#a103a91f081ec894a116cd3db06b0d8d1" title="Gets the address to the memory where the return value should be placed.">GetAddressOfReturnLocation</a>()) std::string(myRetValue);</div>
 </div><!-- fragment --><p>The placement new operator works for primitive types too, so this method is ideal for writing automatically generated functions that works the same way for all types. </p>
 
@@ -950,7 +953,7 @@ Public Member Functions</h2></td></tr>
 <div id="nav-path" class="navpath"><!-- id is needed for treeview function! -->
   <ul>
     <li class="navelem"><a class="el" href="classas_i_script_generic.html">asIScriptGeneric</a></li>
-    <li class="footer">Generated on Sat Nov 2 2013 14:43:48 for AngelScript by
+    <li class="footer">Generated on Tue Oct 21 2014 22:29:18 for AngelScript by
     <a href="http://www.doxygen.org/index.html">
     <img class="footer" src="doxygen.png" alt="doxygen"/></a> 1.8.3.1 </li>
   </ul>

@@ -53,21 +53,26 @@ public:
 
 //==================================================
 
-RocketModule::RocketModule( int vidWidth, int vidHeight )
-	: rocketInitialized(false),
+RocketModule::RocketModule( int vidWidth, int vidHeight, float pixelRatio )
+	: rocketInitialized( false ), hideCursorBits( 0 ),
 	// pointers
-	systemInterface(0), fsInterface(0), renderInterface(0), context(0)
+	systemInterface(0), fsInterface(0), renderInterface(0), 
+	contextMain(0), contextQuick(0)
 {
+	Rocket::Core::String contextName = trap::Cvar_String( "gamename" );
 
-	renderInterface = __new__( UI_RenderInterface )( vidWidth, vidHeight );
+	renderInterface = __new__( UI_RenderInterface )( vidWidth, vidHeight, pixelRatio );
 	Rocket::Core::SetRenderInterface( renderInterface );
 	systemInterface = __new__( UI_SystemInterface )();
 	Rocket::Core::SetSystemInterface( systemInterface );
 	fsInterface = __new__( UI_FileInterface )();
 	Rocket::Core::SetFileInterface( fsInterface );
+	fontProviderInterface = __new__( UI_FontProviderInterface )( renderInterface );
+	Rocket::Core::SetFontProviderInterface( fontProviderInterface );
 
 	// TODO: figure out why renderinterface has +1 refcount
 	renderInterface->AddReference();
+	fontProviderInterface->AddReference();
 
 	rocketInitialized = Rocket::Core::Initialise();
 	if( !rocketInitialized )
@@ -76,12 +81,15 @@ RocketModule::RocketModule( int vidWidth, int vidHeight )
 	// initialize the controls plugin
 	Rocket::Controls::Initialise();
 
-	// fonts can (has to?) be loaded before context creation
-	preloadFonts( ".ttf" );
-	preloadFonts( ".otf" );
+	// Create our contexts
+	contextMain = Rocket::Core::CreateContext( contextName, Vector2i( vidWidth, vidHeight ) );
 
-	// Create our context
-	context = Rocket::Core::CreateContext( trap::Cvar_String( "gamename" ), Vector2i( vidWidth, vidHeight ) );
+	contextQuick = Rocket::Core::CreateContext( contextName + "_quick", Vector2i( vidWidth, vidHeight ) );
+	if( contextQuick )
+		contextQuick->ShowMouseCursor( false );
+
+	contextsTouch[UI_CONTEXT_MAIN].id = -1;
+	contextsTouch[UI_CONTEXT_QUICK].id = -1;
 }
 
 // here for hax0rz, TODO: move to "common" area
@@ -92,17 +100,22 @@ void unref_object( T *obj ) {
 
 RocketModule::~RocketModule()
 {
-	if( context )
-		context->RemoveReference();
-	context = 0;
+	if( fontProviderInterface )
+		fontProviderInterface->RemoveReference();
+	
+	if( contextMain )
+		contextMain->RemoveReference();
+	contextMain = 0;
 
-	if(rocketInitialized)
+	if( contextQuick )
+		contextQuick->RemoveReference();
+	contextQuick = 0;
+
+	if( rocketInitialized )
 		Rocket::Core::Shutdown();
 	rocketInitialized = false;
 
-	// instancers bye bye
-	// std::for_each( elementInstancers.begin(), elementInstancers.end(), unref_object<Rocket::Core::ElementInstancer> );
-
+	__SAFE_DELETE_NULLIFY( fontProviderInterface );
 	__SAFE_DELETE_NULLIFY( fsInterface );
 	__SAFE_DELETE_NULLIFY( systemInterface );
 	__SAFE_DELETE_NULLIFY( renderInterface );
@@ -110,23 +123,21 @@ RocketModule::~RocketModule()
 
 //==================================================
 
-void RocketModule::mouseMove( int mousex, int mousey )
+void RocketModule::mouseMove( int contextId, int mousex, int mousey )
 {
-	KeyConverter keyconv;
-	context->ProcessMouseMove( mousex, mousey, keyconv.getModifiers() );
+	auto *context = contextForId( contextId );
+	context->ProcessMouseMove( mousex, mousey, KeyConverter::getModifiers() );
 }
 
-void RocketModule::textInput( qwchar c )
+void RocketModule::textInput( int contextId, wchar_t c )
 {
+	auto *context = contextForId( contextId );
 	if( c >= ' ' )
 		context->ProcessTextInput( c );
 }
 
-void RocketModule::keyEvent( int key, bool pressed )
+void RocketModule::keyEvent( int contextId, int key, bool pressed )
 {
-	KeyConverter keyconv;
-	int mod;
-
 	// DEBUG
 #if 0
 	if( key >= 32 && key <= 126 )
@@ -135,58 +146,176 @@ void RocketModule::keyEvent( int key, bool pressed )
 		Com_Printf("**KEYEVENT KEY %d\n", key );
 #endif
 
-	mod = keyconv.getModifiers();
+	if( key == K_MOUSE1DBLCLK )
+		return; // Rocket handles double click internally
 
-	// warsow sends mousebuttons as keys
-	if( key >= K_MOUSE1 && key <= K_MOUSE8 )
+	auto *context = contextForId( contextId );
+	Element *element = context->GetFocusElement();
+
+	int mod = KeyConverter::getModifiers();
+
+	// send the blur event, to the current focused element, when ESC key is pressed
+	if( ( key == K_ESCAPE ) && element )
+		element->Blur();
+
+	if( element && ( element->GetTagName() == "keyselect" ) )
+	{
+		if( pressed )
+		{
+			Rocket::Core::Dictionary parameters;
+			parameters.Set( "key", key );
+			element->DispatchEvent( "keyselect", parameters );
+		}
+	}
+	else if( key >= K_MOUSE1 && key <= K_MOUSE8 ) // warsow sends mousebuttons as keys
 	{
 		if( pressed )
 			context->ProcessMouseButtonDown( key-K_MOUSE1, mod );
 		else
 			context->ProcessMouseButtonUp( key-K_MOUSE1, mod );
 	}
-	// and ditto for wheel
-	else if( key == K_MWHEELDOWN )
+	else if( key == K_MWHEELDOWN ) // and ditto for wheel
 	{
-		context->ProcessMouseWheel( KI_MWHEELDOWN, mod );
+		context->ProcessMouseWheel( 1, mod );
 	}
 	else if( key == K_MWHEELUP )
 	{
-		context->ProcessMouseWheel( KI_MWHEELUP, mod );
+		context->ProcessMouseWheel( -1, mod );
 	}
 	else
 	{
-		// send the blur event, to the current focused element,
-		// when ESC key is pressed
-		if( key == K_ESCAPE )
-		{
-			Element* element = context->GetFocusElement();
-			if( element )
-				element->Blur();
-		}
-
-		int rkey = keyconv.toRocketKey( key );
-
-		if( rkey != 0 )
+		if( ( key == K_A_BUTTON ) || ( key == K_DPAD_CENTER ) )
 		{
 			if( pressed )
-				context->ProcessKeyDown( Rocket::Core::Input::KeyIdentifier( rkey ), keyconv.getModifiers() );
+				context->ProcessMouseButtonDown( 0, mod );
 			else
-				context->ProcessKeyUp( Rocket::Core::Input::KeyIdentifier( rkey ), keyconv.getModifiers() );
+				context->ProcessMouseButtonUp( 0, mod );
+		}
+		else
+		{
+			int rkey = KeyConverter::toRocketKey( key );
+
+			if( key == K_B_BUTTON )
+			{
+				rkey = Rocket::Core::Input::KI_ESCAPE;
+				if( element )
+					element->Blur();
+			}
+
+			if( rkey != 0 )
+			{
+				if( pressed )
+					context->ProcessKeyDown( Rocket::Core::Input::KeyIdentifier( rkey ), mod );
+				else
+					context->ProcessKeyUp( Rocket::Core::Input::KeyIdentifier( rkey ), mod );
+			}
 		}
 	}
 }
 
+bool RocketModule::touchEvent( int contextId, int id, touchevent_t type, int x, int y )
+{
+	auto &contextTouch = contextsTouch[contextId];
+	auto *context = contextForId( contextId );
+
+	if( ( type == TOUCH_DOWN ) && ( contextTouch.id < 0 ) ) {
+		if( contextId == UI_CONTEXT_QUICK ) {
+			Rocket::Core::Vector2f position( (float)x, (float)y );
+			Element *element = context->GetElementAtPoint( position );
+			if( !element || element->GetTagName() == "body" ) {
+				return false;
+			}
+		}
+
+		contextTouch.id = id;
+		contextTouch.origin.x = x;
+		contextTouch.origin.y = y;
+		contextTouch.y = y;
+		contextTouch.scroll = false;
+	}
+
+	if( id != contextTouch.id ) {
+		return false;
+	}
+
+	UI_Main::Get()->mouseMove( contextId, x, y, true, false );
+
+	if( type == TOUCH_DOWN ) {
+		context->ProcessMouseButtonDown( 0, KeyConverter::getModifiers() );
+	} else {
+		int delta = contextTouch.y - y;
+		if( delta ) {
+			if( !contextTouch.scroll ) {
+				int threshold = 32 * ( renderInterface->GetPixelsPerInch() / renderInterface->GetBasePixelsPerInch() );
+				if( abs( delta ) > threshold ) {
+					contextTouch.scroll = true;
+					contextTouch.y += ( ( delta < 0 ) ? threshold : -threshold );
+					delta = contextTouch.y - y;
+				}
+			}
+
+			if( contextTouch.scroll ) {
+				Element *element;
+				for( element = context->GetElementAtPoint( contextTouch.origin ); element; element = element->GetParentNode() ) {
+					if( element->GetTagName() == "scrollbarvertical" ) {
+						break;
+					}
+
+					int overflow = element->GetProperty< int >( "overflow-y" );
+					if( ( overflow != Rocket::Core::OVERFLOW_AUTO ) && ( overflow != Rocket::Core::OVERFLOW_SCROLL ) ) {
+						continue;
+					}
+
+					int scrollTop = element->GetScrollTop();
+					if( ( ( delta < 0 ) && ( scrollTop > 0 ) ) ||
+						( ( delta > 0 ) && ( element->GetScrollHeight() > scrollTop + element->GetClientHeight() ) ) ) {
+						element->SetScrollTop( element->GetScrollTop() + delta );
+						break;
+					}
+				}
+				contextTouch.y = y;
+			}
+		}
+
+		if( type == TOUCH_UP ) {
+			cancelTouches( contextId );
+		}
+	}
+
+	return true;
+}
+
+bool RocketModule::isTouchDown( int contextId, int id )
+{
+	return contextsTouch[contextId].id == id;
+}
+
+void RocketModule::cancelTouches( int contextId )
+{
+	auto &contextTouch = contextsTouch[contextId];
+
+	if( contextTouch.id < 0 ) {
+		return;
+	}
+
+	auto *context = contextForId( contextId );
+
+	contextTouch.id = -1;
+	context->ProcessMouseButtonUp( 0, KeyConverter::getModifiers() );
+	UI_Main::Get()->mouseMove( contextId, 0, 0, true, false );
+}
+
 //==================================================
 
-Rocket::Core::ElementDocument *RocketModule::loadDocument( const char *filename, bool show )
+Rocket::Core::ElementDocument *RocketModule::loadDocument( int contextId, const char *filename, bool show, void *user_data )
 {
-	Rocket::Core::ElementDocument *document;
+	auto *context = contextForId( contextId );
+	ASUI::UI_ScriptDocument *document = dynamic_cast<ASUI::UI_ScriptDocument *>(context->LoadDocument( filename ));
+	if( !document ) {
+		return NULL;
+	}
 
-	// YES I really had to make a function for this!
-	document = context->LoadDocument( filename );
-
-	if( show && document )
+	if( show )
 	{
 		// load documents with autofocus disabled
 		document->Show( Rocket::Core::ElementDocument::NONE );
@@ -208,7 +337,7 @@ Rocket::Core::ElementDocument *RocketModule::loadDocument( const char *filename,
 
 void RocketModule::closeDocument( Rocket::Core::ElementDocument *doc )
 {
-	context->UnloadDocument( doc );
+	doc->Close();
 }
 
 //==================================================
@@ -216,7 +345,6 @@ void RocketModule::closeDocument( Rocket::Core::ElementDocument *doc )
 void RocketModule::registerElementDefaults( Rocket::Core::Element *element )
 {
 	// add these as they pile up in BaseEventListener
-	element->AddEventListener( "keydown", GetBaseEventListener() );
 	element->AddEventListener( "mouseover", GetBaseEventListener() );
 	element->AddEventListener( "click", GetBaseEventListener() );
 }
@@ -252,34 +380,60 @@ void RocketModule::registerEventListener( Rocket::Core::EventListenerInstancer *
 	instancer->RemoveReference();
 }
 
+Rocket::Core::Context *RocketModule::contextForId( int contextId )
+{
+	switch( contextId ) {
+		case UI_CONTEXT_MAIN:
+			return contextMain;
+		case UI_CONTEXT_QUICK:
+			return contextQuick;
+		default:
+			assert( contextId != UI_CONTEXT_MAIN && contextId != UI_CONTEXT_QUICK );
+			return NULL;
+	}
+}
+
+int RocketModule::idForContext( Rocket::Core::Context *context )
+{
+	if( context == contextMain )
+		return UI_CONTEXT_MAIN;
+	if( context == contextQuick )
+		return UI_CONTEXT_QUICK;
+	return UI_NUM_CONTEXTS;
+}
+
 // Load the mouse cursor and release the caller's reference:
 // NOTE: be sure to use it before initRocket( .. ) function
-void RocketModule::loadCursor( const String& rmlCursor )
+void RocketModule::loadCursor( int contextId, const String& rmlCursor )
 {
-	Rocket::Core::ElementDocument* cursor = context->LoadMouseCursor( rmlCursor );
+	Rocket::Core::ElementDocument* cursor = contextForId( contextId )->LoadMouseCursor( rmlCursor );
 
 	if( cursor )
 		cursor->RemoveReference();
 }
 
-void RocketModule::showCursor( void )
+void RocketModule::hideCursor( int contextId, unsigned int addBits, unsigned int clearBits )
 {
-	context->ShowMouseCursor( true );
-}
+	if( contextId == UI_CONTEXT_QUICK ) {
+		contextQuick->ShowMouseCursor( false );
+		return;
+	}
 
-void RocketModule::hideCursor( void )
-{
-	context->ShowMouseCursor( false );
+	hideCursorBits = ( hideCursorBits & ~clearBits ) | addBits;
+	contextForId( contextId )->ShowMouseCursor( hideCursorBits == 0 );
 }
 
 void RocketModule::update( void )
 {
-	context->Update();
+	ASUI::GarbageCollectEventListenersFunctions( scriptEventListenerInstancer );
+
+	contextQuick->Update();
+	contextMain->Update();
 }
 
-void RocketModule::render( void )
+void RocketModule::render( int contextId )
 {
-	context->Render();
+	contextForId( contextId )->Render();
 }
 
 void RocketModule::registerCustoms()
@@ -290,6 +444,11 @@ void RocketModule::registerCustoms()
 
 	// Main document that implements <script> tags
 	registerElement( "body", ASUI::GetScriptDocumentInstancer() );
+	// Soft keyboard listener
+	registerElement( "input",
+		__new__( GenericElementInstancerSoftKeyboard<Rocket::Controls::ElementFormControlInput> )() );
+	registerElement( "textarea",
+		__new__( GenericElementInstancerSoftKeyboard<Rocket::Controls::ElementFormControlTextArea> )() );
 	// other widgets
 	registerElement( "keyselect", GetKeySelectInstancer() );
 	registerElement( "a", GetAnchorWidgetInstancer() );
@@ -306,6 +465,8 @@ void RocketModule::registerCustoms()
 	registerElement( "field", GetElementFieldInstancer() );
 	registerElement( "video", GetVideoInstancer() );
 	registerElement( "irclog", GetIrcLogWidgetInstancer() );
+	registerElement( "iframe", GetIFrameWidgetInstancer() );
+	registerElement( "l10n", GetElementL10nInstancer() );
 
 	//
 	// EVENTS
@@ -326,9 +487,12 @@ void RocketModule::registerCustoms()
 	//
 	// DECORATORS
 	registerDecorator( "gradient", GetGradientDecoratorInstancer() );
+	registerDecorator( "ninepatch", GetNinePatchDecoratorInstancer() );
 
 	//
 	// GLOBAL CUSTOM PROPERTIES
+
+	Rocket::Core::StyleSheetSpecification::RegisterProperty("background-music", "", false).AddParser("string");
 
 	Rocket::Core::StyleSheetSpecification::RegisterParser("sound", new PropertyParserSound());
 
@@ -348,43 +512,6 @@ void RocketModule::unregisterCustoms()
 }
 
 //==================================================
-
-// preload all fonts in fonts/ directory with extension ext
-void RocketModule::preloadFonts( const char *ext )
-{
-	int i, j, numFonts;
-	char listbuf[1024], scratch[MAX_QPATH + 6];
-	char *ptr;
-
-	numFonts = trap::FS_GetFileList( "fonts", ext, NULL, 0, 0, 0 );
-	if( !numFonts )
-	{
-		Com_Printf("Warning: no fonts found for preloading!\n" );
-		return;
-	}
-
-	i = 0;
-	do
-	{
-		j = trap::FS_GetFileList( "fonts", ext, listbuf, sizeof( listbuf ), i, numFonts );
-
-		if( !j )
-		{
-			i++; // can happen if the filename is too long to fit into the buffer or we're done
-			continue;
-		}
-		i += j;
-
-		for( ptr = listbuf; j > 0; j--, ptr += strlen( ptr ) + 1 )
-		{
-			strcpy( scratch, "fonts/" );
-			Q_strncatz( scratch, ptr, sizeof( scratch ) );
-			Rocket::Core::FontDatabase::LoadFontFace( scratch );
-
-			// Com_Printf("** Preloaded font %s\n", scratch );
-		}
-	} while( i < numFonts );
-}
 
 void RocketModule::clearShaderCache( void )
 {

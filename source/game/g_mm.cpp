@@ -464,7 +464,6 @@ void G_AddPlayerReport( edict_t *ent, bool final )
 {
 	gclient_t *cl;
 	gclient_quit_t *quit;
-	const char *mm_session_str;
 	int i, mm_session;
 	cvar_t *report_bots;
 
@@ -494,16 +493,10 @@ void G_AddPlayerReport( edict_t *ent, bool final )
 	if( cl == NULL || cl->team == TEAM_SPECTATOR )
 		return;
 
-	// FIXME: mm_session now exists in gclient_t
-	mm_session = 0;
-	mm_session_str = Info_ValueForKey( cl->userinfo, "cl_mm_session" );
-
-	if( mm_session_str != NULL )
-		mm_session = atoi( mm_session_str );
-
+	mm_session = cl->mm_session;
 	if( mm_session == 0 )
 	{
-		G_Printf( "G_AddPlayerReport: Client without session-id (%s) %d\n\t(%s)\n", cl->netname, mm_session, cl->userinfo );
+		G_Printf( "G_AddPlayerReport: Client without session-id (%s" S_COLOR_WHITE ") %d\n\t(%s)\n", cl->netname, mm_session, cl->userinfo );
 		return;
 	}
 
@@ -519,7 +512,7 @@ void G_AddPlayerReport( edict_t *ent, bool final )
 	}
 
 	// debug :
-	G_Printf("G_AddPlayerReport %s, session %d\n", cl->netname, mm_session );
+	G_Printf("G_AddPlayerReport %s" S_COLOR_WHITE ", session %d\n", cl->netname, mm_session );
 
 	if( quit )
 	{
@@ -556,6 +549,7 @@ void G_AddPlayerReport( edict_t *ent, bool final )
 		quit->stats.bombs_planted += cl->level.stats.bombs_planted;
 		quit->stats.bombs_defused += cl->level.stats.bombs_defused;
 		quit->stats.flags_capped += cl->level.stats.flags_capped;
+		quit->stats.fairplay_count += cl->level.stats.fairplay_count;
 
 		for( i = 0; i < (AMMO_TOTAL-AMMO_GUNBLADE); i++ )
 		{
@@ -619,7 +613,6 @@ void G_AddPlayerReport( edict_t *ent, bool final )
 			LinearAllocator_Free( cl->level.stats.fragAllocator );
 			cl->level.stats.fragAllocator = 0;
 		}
-
 	}
 	else
 	{
@@ -652,7 +645,7 @@ static void g_mm_writeHeader( stat_query_t *query, int teamGame )
 	sq_api->SetString( matchsection, "gametype", gs.gametypeName );
 	sq_api->SetString( matchsection, "map", level.mapname );
 	sq_api->SetString( matchsection, "hostname", trap_Cvar_String( "sv_hostname" ) );
-	sq_api->SetNumber( matchsection, "timeplayed", ( game.serverTime - GS_MatchStartTime() ) / 1000 );
+	sq_api->SetNumber( matchsection, "timeplayed", level.finalMatchDuration / 1000 );
 	sq_api->SetNumber( matchsection, "timelimit", GS_MatchDuration() / 1000 );
 	sq_api->SetNumber( matchsection, "scorelimit", g_scorelimit->integer );
 	sq_api->SetNumber( matchsection, "instagib", ( GS_Instagib() ? 1 : 0 ));
@@ -661,7 +654,7 @@ static void g_mm_writeHeader( stat_query_t *query, int teamGame )
 	sq_api->SetString( matchsection, "gamedir", trap_Cvar_String( "fs_game" ) );
 	sq_api->SetNumber( matchsection, "timestamp", trap_Milliseconds() );
 	if( g_autorecord->integer ) {
-		sq_api->SetString( matchsection, "demo_filename", va( "%s.wd%i", level.autorecord_name, game.protocol ) );
+		sq_api->SetString( matchsection, "demo_filename", va( "%s%s", level.autorecord_name, game.demoExtension ) );
 	}
 }
 
@@ -670,16 +663,16 @@ static stat_query_t *G_Match_GenerateReport( void )
 	stat_query_t *query;
 	stat_query_section_t *playersarray;
 	//stat_query_section_t *weapindexarray;
-	gclient_quit_t *cl;
+	gclient_quit_t *cl, *potm;
 	int i, teamGame, duelGame;
-	// FIXME: globalize this
-	const char *weapnames[] = { "gb", "mg", "rg", "gl", "rl", "pg", "lg", "eb", "ig" };
+	static const char *weapnames[WEAP_TOTAL] = { NULL };
+	score_stats_t *stats;
 
 	// Feature: do not report matches with duration less than 1 minute (actually 66 seconds)
-	if( ( game.serverTime - GS_MatchStartTime() ) <= 66 * 1000 )
+	if( level.finalMatchDuration <= SIGNIFICANT_MATCH_DURATION )
 		return 0;
 
-	query = sq_api->CreateQuery( "smr", qfalse );
+	query = sq_api->CreateQuery( NULL, "smr", false );
 	if( !query )
 		return 0;
 
@@ -713,8 +706,37 @@ static stat_query_t *G_Match_GenerateReport( void )
 		}
 	}
 
+
 	// TODO: write the weapon indexes
 	// weapindexarray = sq_api->CreateSection( query, 0, "weapindices" );
+
+	// find player of the match (best score)
+	// FIXME: is it the right place for this stuff here?
+	potm = NULL;
+	for( cl = game.quits; cl; cl = cl->next ) {
+		stats = &cl->stats;
+		if( !potm || stats->score > potm->stats.score )
+			potm = cl;
+	}
+
+	// to receieve "Player of the Match" award the player must also have the "Fair Play" award
+	if( potm && potm->stats.fairplay_count <= 0 ) {
+		potm = NULL;
+	}
+
+	if( potm ) {
+		edict_t *ent;
+		for( ent = game.edicts + 1; PLAYERNUM( ent ) < gs.maxclients; ent++ ) {
+			if( ent->r.client->mm_session != potm->mm_session ) {
+				continue;
+			}
+			if( ent->r.inuse ) {
+				G_PlayerAward( ent, S_COLOR_YELLOW "Player of the Match!" );
+			}
+			break;
+		}
+		G_PrintMsg( NULL, "Player of the match: %s" S_COLOR_WHITE "\n", potm->netname );
+	}
 
 	// Write player properties
 	playersarray = sq_api->CreateArray( query, 0, "players" );
@@ -722,7 +744,7 @@ static stat_query_t *G_Match_GenerateReport( void )
 	{
 		stat_query_section_t *playersection, *accsection, *awardssection;
 		gameaward_t *ga;
-		score_stats_t *stats;
+		int numAwards;
 
 		stats = &cl->stats;
 
@@ -758,21 +780,27 @@ static stat_query_t *G_Match_GenerateReport( void )
 			sq_api->SetNumber( playersection, "team", cl->team - TEAM_ALPHA );
 
 		// AWARDS
+		numAwards = 0;
+		if( stats->awardAllocator && LA_Size( stats->awardAllocator ) > 0 )
+			numAwards += LA_Size( stats->awardAllocator );
 
-		if ( stats->awardAllocator && LA_Size( stats->awardAllocator ) > 0 )
+		if( numAwards )
 		{
 			stat_query_section_t *gasection;
 			int size;
 
 			awardssection = sq_api->CreateArray( query, playersection, "awards" );
-			size = LA_Size( stats->awardAllocator );
 
-			for ( i = 0; i < size; i++ )
+			if( stats->awardAllocator )
 			{
-				ga = (gameaward_t*)LA_Pointer( stats->awardAllocator, i );
-				gasection = sq_api->CreateSection( query, awardssection, 0 );
-				sq_api->SetString( gasection, "name", ga->name );
-				sq_api->SetNumber( gasection, "count", ga->count );
+				size = numAwards;
+				for ( i = 0; i < size; i++ )
+				{
+					ga = (gameaward_t*)LA_Pointer( stats->awardAllocator, i );
+					gasection = sq_api->CreateSection( query, awardssection, 0 );
+					sq_api->SetString( gasection, "name", ga->name );
+					sq_api->SetNumber( gasection, "count", ga->count );
+				}
 			}
 
 			// theoretically you could Free() the awards now, but they are from levelpool
@@ -805,6 +833,12 @@ static stat_query_t *G_Match_GenerateReport( void )
 				if ( stats->accuracy_shots[j] == 0 && stats->accuracy_shots[weak] == 0)
 					continue;
 
+				if( !weapnames[j] ) {
+					gsitem_t *it = GS_FindItemByTag( WEAP_GUNBLADE + j );
+					if( it ) {
+						weapnames[j] = it->shortname;
+					}
+				}
 				weapsection = sq_api->CreateSection( query, accsection, weapnames[j] );
 
 				// STRONG
@@ -973,7 +1007,7 @@ static void G_Match_RaceReport( void )
 	* ]
 	*  ( TODO: get the nickname there )
 	*/
-	query = sq_api->CreateQuery( "smr", qfalse );
+	query = sq_api->CreateQuery( NULL, "smr", false );
 	if( !query )
 	{
 		G_Printf("G_Match_RaceReport.. failed to create query object\n");

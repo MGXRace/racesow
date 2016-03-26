@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 struct shader_s;
 struct mfog_s;
+struct portalSurface_s;
 
 #define MIN_RENDER_MESHES			2048
 
@@ -33,10 +34,11 @@ typedef struct mesh_s
 	vec4_t				*sVectorsArray;
 	vec2_t				*stArray;
 	vec2_t				*lmstArray[MAX_LIGHTMAPS];
+	byte_vec4_t			*lmlayersArray[( MAX_LIGHTMAPS + 3 ) / 4];
 	byte_vec4_t			*colorsArray[MAX_LIGHTMAPS];
 
-	qbyte				*blendIndices;
-	qbyte				*blendWeights;
+	uint8_t				*blendIndices;
+	uint8_t				*blendWeights;
 
 	unsigned short		numElems;
 	elem_t				*elems;
@@ -62,9 +64,12 @@ typedef struct
 
 	unsigned int		maxVboSlices;
 	vboSlice_t			*vboSlices;
+
+	unsigned			numSliceVerts, numSliceVertsReal;
+	unsigned			numSliceElems, numSliceElemsReal;
 } drawList_t;
 
-typedef qboolean (*beginDrawSurf_cb)( const entity_t *, const struct shader_s *, const struct mfog_s *, void * );
-typedef void (*batchDrawSurf_cb)( const entity_t *, const struct shader_s *, const struct mfog_s *, void * );
+typedef void (*drawSurf_cb)( const entity_t *, const struct shader_s *, const struct mfog_s *, const struct portalSurface_s *, unsigned int, void * );
+typedef void (*batchDrawSurf_cb)( const entity_t *, const struct shader_s *, const struct mfog_s *, const struct portalSurface_s *, unsigned int, void * );
 
 #endif // R_MESH_H

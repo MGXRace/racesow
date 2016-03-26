@@ -69,7 +69,7 @@ FRAME PARSING
 static void SNAP_ParseDeltaGameState( msg_t *msg, snapshot_t *oldframe, snapshot_t *newframe )
 {
 	short statbits;
-	qbyte bits;
+	uint8_t bits;
 	int i;
 	game_state_t *gameState;
 
@@ -85,7 +85,7 @@ static void SNAP_ParseDeltaGameState( msg_t *msg, snapshot_t *oldframe, snapshot
 
 	//memcpy( gameState, deltaGameState, sizeof( game_state_t ) );
 
-	bits = (qbyte)MSG_ReadByte( msg );
+	bits = (uint8_t)MSG_ReadByte( msg );
 	statbits = MSG_ReadShort( msg );
 
 	if( bits )
@@ -122,20 +122,20 @@ static void SNAP_ParsePlayerstate( msg_t *msg, player_state_t *oldstate, player_
 	else
 		memset( state, 0, sizeof( *state ) );
 
-	flags = (qbyte)MSG_ReadByte( msg );
+	flags = (uint8_t)MSG_ReadByte( msg );
 	if( flags & PS_MOREBITS1 )
 	{
-		b = (qbyte)MSG_ReadByte( msg );
+		b = (uint8_t)MSG_ReadByte( msg );
 		flags |= b<<8;
 	}
 	if( flags & PS_MOREBITS2 )
 	{
-		b = (qbyte)MSG_ReadByte( msg );
+		b = (uint8_t)MSG_ReadByte( msg );
 		flags |= b<<16;
 	}
 	if( flags & PS_MOREBITS3 )
 	{
-		b = (qbyte)MSG_ReadByte( msg );
+		b = (uint8_t)MSG_ReadByte( msg );
 		flags |= b<<24;
 	}
 
@@ -143,7 +143,7 @@ static void SNAP_ParsePlayerstate( msg_t *msg, player_state_t *oldstate, player_
 	// parse the pmove_state_t
 	//
 	if( flags & PS_M_TYPE )
-		state->pmove.pm_type = (qbyte)MSG_ReadByte( msg );
+		state->pmove.pm_type = (uint8_t)MSG_ReadByte( msg );
 
 	if( flags & PS_M_ORIGIN0 )
 		state->pmove.origin[0] = ( (float)MSG_ReadInt3( msg )*( 1.0/PM_VECTOR_SNAP ) );
@@ -160,7 +160,7 @@ static void SNAP_ParsePlayerstate( msg_t *msg, player_state_t *oldstate, player_
 		state->pmove.velocity[2] = ( (float)MSG_ReadInt3( msg )*( 1.0/PM_VECTOR_SNAP ) );
 
 	if( flags & PS_M_TIME )
-		state->pmove.pm_time = (qbyte)MSG_ReadByte( msg );
+		state->pmove.pm_time = (uint8_t)MSG_ReadByte( msg );
 
 	if( flags & PS_M_FLAGS )
 		state->pmove.pm_flags = MSG_ReadShort( msg );
@@ -213,18 +213,18 @@ static void SNAP_ParsePlayerstate( msg_t *msg, player_state_t *oldstate, player_
 		state->pmove.gravity = MSG_ReadShort( msg );
 
 	if( flags & PS_WEAPONSTATE )
-		state->weaponState = (qbyte)MSG_ReadByte( msg );
+		state->weaponState = (uint8_t)MSG_ReadByte( msg );
 
 	if( flags & PS_FOV )
-		state->fov = (qbyte)MSG_ReadByte( msg );
+		state->fov = (uint8_t)MSG_ReadByte( msg );
 
 	if( flags & PS_POVNUM )
-		state->POVnum = (qbyte)MSG_ReadByte( msg );
+		state->POVnum = (uint8_t)MSG_ReadByte( msg );
 	if( state->POVnum == 0 )
 		Com_Error( ERR_DROP, "SNAP_ParsePlayerstate: Invalid POVnum %i", state->POVnum );
 
 	if( flags & PS_PLAYERNUM )
-		state->playerNum = (qbyte)MSG_ReadByte( msg );
+		state->playerNum = (uint8_t)MSG_ReadByte( msg );
 	if( state->playerNum >= MAX_CLIENTS )
 		Com_Error( ERR_DROP, "SNAP_ParsePlayerstate: Invalid playerNum %i", state->playerNum );
 
@@ -341,7 +341,7 @@ static void SNAP_ParsePacketEntities( msg_t *msg, snapshot_t *oldframe, snapshot
 		oldnum = oldstate->number;
 	}
 
-	while( qtrue )
+	while( true )
 	{
 		newnum = SNAP_ParseEntityBits( msg, &bits );
 		if( newnum >= MAX_EDICTS )
@@ -458,11 +458,11 @@ static void SNAP_ParsePacketEntities( msg_t *msg, snapshot_t *oldframe, snapshot
 /*
 * SNAP_ParseFrameHeader
 */
-static snapshot_t *SNAP_ParseFrameHeader( msg_t *msg, snapshot_t *newframe, int *suppressCount, snapshot_t *backup, qboolean skipBody )
+static snapshot_t *SNAP_ParseFrameHeader( msg_t *msg, snapshot_t *newframe, int *suppressCount, snapshot_t *backup, bool skipBody )
 {
 	int len, pos;
 	int areabytes;
-	qbyte *areabits;
+	uint8_t *areabits;
 	unsigned int serverTime;
 	int flags, snapNum, supCnt;
 
@@ -489,9 +489,9 @@ static snapshot_t *SNAP_ParseFrameHeader( msg_t *msg, snapshot_t *newframe, int 
 	newframe->ucmdExecuted = MSG_ReadLong( msg );
 
 	flags = MSG_ReadByte( msg );
-	newframe->delta = ( flags & FRAMESNAP_FLAG_DELTA ) ? qtrue : qfalse;
-	newframe->multipov = ( flags & FRAMESNAP_FLAG_MULTIPOV ) ? qtrue : qfalse;
-	newframe->allentities = ( flags & FRAMESNAP_FLAG_ALLENTITIES ) ? qtrue : qfalse;
+	newframe->delta = ( flags & FRAMESNAP_FLAG_DELTA ) ? true : false;
+	newframe->multipov = ( flags & FRAMESNAP_FLAG_MULTIPOV ) ? true : false;
+	newframe->allentities = ( flags & FRAMESNAP_FLAG_ALLENTITIES ) ? true : false;
 
 	supCnt = MSG_ReadByte( msg );
 	if( suppressCount )
@@ -503,7 +503,7 @@ static snapshot_t *SNAP_ParseFrameHeader( msg_t *msg, snapshot_t *newframe, int 
 	}
 
 	// validate the new frame
-	newframe->valid = qfalse;
+	newframe->valid = false;
 
 	// If the frame is delta compressed from data that we
 	// no longer have available, we must suck up the rest of
@@ -511,7 +511,7 @@ static snapshot_t *SNAP_ParseFrameHeader( msg_t *msg, snapshot_t *newframe, int 
 	// message
 	if( !newframe->delta )
 	{
-		newframe->valid = qtrue; // uncompressed frame
+		newframe->valid = true; // uncompressed frame
 	}
 	else
 	{
@@ -535,7 +535,7 @@ static snapshot_t *SNAP_ParseFrameHeader( msg_t *msg, snapshot_t *newframe, int 
 			}
 			else
 			{
-				newframe->valid = qtrue; // valid delta parse
+				newframe->valid = true; // valid delta parse
 			}
 		}
 		else
@@ -556,7 +556,7 @@ static snapshot_t *SNAP_ParseFrameHeader( msg_t *msg, snapshot_t *newframe, int 
 void SNAP_SkipFrame( msg_t *msg, snapshot_t *header )
 {
 	static snapshot_t frame;
-	SNAP_ParseFrameHeader( msg, header ? header : &frame, NULL, NULL, qtrue );
+	SNAP_ParseFrameHeader( msg, header ? header : &frame, NULL, NULL, true );
 }
 
 /*
@@ -574,7 +574,7 @@ snapshot_t *SNAP_ParseFrame( msg_t *msg, snapshot_t *lastFrame, int *suppressCou
 	snapshot_t	*newframe;
 
 	// read header
-	newframe = SNAP_ParseFrameHeader( msg, NULL, suppressCount, backup, qfalse );
+	newframe = SNAP_ParseFrameHeader( msg, NULL, suppressCount, backup, false );
 	deltaframe = NULL;
 
 	if( showNet == 3 )
@@ -610,7 +610,7 @@ snapshot_t *SNAP_ParseFrame( msg_t *msg, snapshot_t *lastFrame, int *suppressCou
 				Com_Error( ERR_DROP, "SNAP_ParseFrame: too much gamecommands" );
 
 			gcmd = &newframe->gamecommands[newframe->numgamecommands - 1];
-			gcmd->all = qtrue;
+			gcmd->all = true;
 
 			Q_strncpyz( newframe->gamecommandsData + newframe->gamecommandsDataHead, text,
 				sizeof( newframe->gamecommandsData ) - newframe->gamecommandsDataHead );
@@ -622,7 +622,10 @@ snapshot_t *SNAP_ParseFrame( msg_t *msg, snapshot_t *lastFrame, int *suppressCou
 				numtargets = MSG_ReadByte( msg );
 				if( numtargets )
 				{
-					gcmd->all = qfalse;
+					if( numtargets > sizeof( gcmd->targets ) ) {
+						Com_Error( ERR_DROP, "SNAP_ParseFrame: too many gamecommand targets" );
+					}
+					gcmd->all = false;
 					MSG_ReadData( msg, gcmd->targets, numtargets );
 				}
 			}

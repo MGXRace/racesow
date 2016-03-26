@@ -25,7 +25,7 @@ static trie_t *irc_rcon_users = NULL;
 static const char *rcon_flush_to = NULL;
 
 void Irc_Rcon_Connected_f(void *connected) {
-	qboolean * const c = (qboolean*) connected;
+	bool * const c = (bool*) connected;
 	if (!irc_rcon)
 		irc_rcon = IRC_IMPORT.Cvar_Get("irc_rcon", "0", CVAR_ARCHIVE);
 	if (!irc_rconTimeout)
@@ -92,7 +92,7 @@ static void Irc_Rcon_ProcessMsg(const char *user, const char *msg) {
 	word = strtok(buf, " ");
 	if (word && !strcasecmp(word, IRC_RCON_PREFIX)) {
 		// it really is an RCON message, not a normal PRIVMSG
-		unsigned int millis = IRC_IMPORT.Milliseconds();
+		unsigned int millis = IRC_IMPORT.Sys_Milliseconds();
 		irc_rcon_user_t *rcon_user;
 		if (IRC_IMPORT.Trie_Find(irc_rcon_users, user, TRIE_EXACT_MATCH, (void**) &rcon_user) == TRIE_OK) {
 			// user is already authorized

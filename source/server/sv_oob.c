@@ -21,9 +21,16 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "server.h"
 #include "../matchmaker/mm_common.h"
 
-static netadr_t master_adr[MAX_MASTERS];    // address of group servers
+typedef struct sv_master_s
+{
+	netadr_t address;
+	bool steam;
+} sv_master_t;
+
+static sv_master_t sv_masters[MAX_MASTERS];
 
 extern cvar_t *sv_masterservers;
+extern cvar_t *sv_masterservers_steam;
 extern cvar_t *sv_hostname;
 extern cvar_t *sv_skilllevel;
 extern cvar_t *sv_reconnectlimit;     // minimum seconds between connect messages
@@ -42,11 +49,11 @@ extern cvar_t *sv_iplimit;
 * SV_AddMaster_f
 * Add a master server to the list
 */
-static void SV_AddMaster_f( char *master )
+static void SV_AddMaster_f( char *address, bool steam )
 {
 	int i;
 
-	if( !master || !master[0] )
+	if( !address || !address[0] )
 		return;
 
 	if( !sv_public->integer )
@@ -61,19 +68,23 @@ static void SV_AddMaster_f( char *master )
 
 	for( i = 0; i < MAX_MASTERS; i++ )
 	{
-		if( master_adr[i].type != NA_NOTRANSMIT )
+		sv_master_t *master = &sv_masters[i];
+
+		if( master->address.type != NA_NOTRANSMIT )
 			continue;
 
-		if( !NET_StringToAddress( master, &master_adr[i] ) )
+		if( !NET_StringToAddress( address, &master->address ) )
 		{
-			Com_Printf( "'SV_AddMaster_f' Bad Master server address: %s\n", master );
+			Com_Printf( "'SV_AddMaster_f' Bad Master server address: %s\n", address );
 			return;
 		}
 
-		if( NET_GetAddressPort( &master_adr[i] ) == 0 )
-			NET_SetAddressPort( &master_adr[i], PORT_MASTER );
+		if( NET_GetAddressPort( &master->address ) == 0 )
+			NET_SetAddressPort( &master->address, steam ? PORT_MASTER_STEAM : PORT_MASTER );
 
-		Com_Printf( "Added new master server #%i at %s\n", i, NET_AddressToString( &master_adr[i] ) );
+		master->steam = steam;
+
+		Com_Printf( "Added new master server #%i at %s\n", i, NET_AddressToString( &master->address ) );
 		return;
 	}
 
@@ -88,7 +99,7 @@ static void SV_ResolveMaster( void )
 	char *master, *mlist;
 
 	// wsw : jal : initialize masters list
-	memset( master_adr, 0, sizeof( master_adr ) );
+	memset( sv_masters, 0, sizeof( sv_masters ) );
 
 	//never go public when not acting as a game server
 	if( sv.state > ss_game )
@@ -106,9 +117,24 @@ static void SV_ResolveMaster( void )
 			if( !master[0] )
 				break;
 
-			SV_AddMaster_f( master );
+			SV_AddMaster_f( master, false );
 		}
 	}
+
+#if APP_STEAMID
+	mlist = sv_masterservers_steam->string;
+	if( *mlist )
+	{
+		while( mlist )
+		{
+			master = COM_Parse( &mlist );
+			if( !master[0] )
+				break;
+
+			SV_AddMaster_f( master, true );
+		}
+	}
+#endif
 
 	svc.lastMasterResolve = Sys_Milliseconds();
 }
@@ -121,7 +147,7 @@ void SV_InitMaster( void )
 {
 	SV_ResolveMaster();
 
-	svc.lastHeartbeat = 30000; // racesow - first heartbeat after 30 seconds
+	svc.nextHeartbeat = Sys_Milliseconds() + HEARTBEAT_SECONDS * 1000; // wait a while before sending first heartbeat
 }
 
 /*
@@ -142,15 +168,15 @@ void SV_UpdateMaster( void )
 */
 void SV_MasterHeartbeat( void )
 {
+	unsigned int time = Sys_Milliseconds();
 	int i;
 
-	svc.lastHeartbeat -= svc.snapFrameTime;
-	if( svc.lastHeartbeat > 0 )
+	if( svc.nextHeartbeat > time )
 		return;
 
-	svc.lastHeartbeat = HEARTBEAT_SECONDS * 1000;
+	svc.nextHeartbeat = time + HEARTBEAT_SECONDS * 1000;
 
-	if( !sv_public->integer )
+	if( !sv_public->integer || ( sv_maxclients->integer == 1 ) )
 		return;
 
 	// never go public when not acting as a game server
@@ -160,17 +186,60 @@ void SV_MasterHeartbeat( void )
 	// send to group master
 	for( i = 0; i < MAX_MASTERS; i++ )
 	{
-		if( master_adr[i].type != NA_NOTRANSMIT )
+		sv_master_t *master = &sv_masters[i];
+
+		if( master->address.type != NA_NOTRANSMIT )
 		{
 			socket_t *socket;
 
 			if( dedicated && dedicated->integer )
-				Com_Printf( "Sending heartbeat to %s\n", NET_AddressToString( &master_adr[i] ) );
+				Com_Printf( "Sending heartbeat to %s\n", NET_AddressToString( &master->address ) );
 
-			socket = ( master_adr[i].type == NA_IP6 ? &svs.socket_udp6 : &svs.socket_udp );
+			socket = ( master->address.type == NA_IP6 ? &svs.socket_udp6 : &svs.socket_udp );
 
-			// warning: "DarkPlaces" is a protocol name here, not a game name. Do not replace it.
-			Netchan_OutOfBandPrint( socket, &master_adr[i], "heartbeat DarkPlaces\n" );
+			if( master->steam )
+			{
+				uint8_t steamHeartbeat = 'q';
+				NET_SendPacket( socket, &steamHeartbeat, sizeof( steamHeartbeat ), &master->address );
+			}
+			else
+			{
+				// warning: "DarkPlaces" is a protocol name here, not a game name. Do not replace it.
+				Netchan_OutOfBandPrint( socket, &master->address, "heartbeat DarkPlaces\n" );
+			}
+		}
+	}
+}
+
+/*
+* SV_MasterSendQuit
+* Notifies Steam master servers that the server is shutting down.
+*/
+void SV_MasterSendQuit( void )
+{
+	int i;
+	const char quitMessage[] = "b\n";
+
+	if( !sv_public->integer || ( sv_maxclients->integer == 1 ) )
+		return;
+
+	// never go public when not acting as a game server
+	if( sv.state > ss_game )
+		return;
+
+	// send to group master
+	for( i = 0; i < MAX_MASTERS; i++ )
+	{
+		sv_master_t *master = &sv_masters[i];
+
+		if( master->steam && ( master->address.type != NA_NOTRANSMIT ) )
+		{
+			socket_t *socket = ( master->address.type == NA_IP6 ? &svs.socket_udp6 : &svs.socket_udp );
+
+			if( dedicated && dedicated->integer )
+				Com_Printf( "Sending quit to %s\n", NET_AddressToString( &master->address ) );
+
+			NET_SendPacket( socket, ( const uint8_t * )quitMessage, sizeof( quitMessage ), &master->address );
 		}
 	}
 }
@@ -182,7 +251,7 @@ void SV_MasterHeartbeat( void )
 * SV_LongInfoString
 * Builds the string that is sent as heartbeats and status replies
 */
-static char *SV_LongInfoString( qboolean fullStatus )
+static char *SV_LongInfoString( bool fullStatus )
 {
 	char tempstr[1024] = { 0 };
 	const char *gametype;
@@ -260,6 +329,7 @@ static char *SV_ShortInfoString( void )
 	char entry[20];
 	size_t len;
 	int i, count, bots;
+	int maxcount;
 	const char *password;
 
 	bots = 0;
@@ -270,9 +340,11 @@ static char *SV_ShortInfoString( void )
 		{
 			if( svs.clients[i].edict->r.svflags & SVF_FAKECLIENT || svs.clients[i].tvclient )
 				bots++;
-			count++;
+			else
+				count++;
 		}
 	}
+	maxcount = sv_maxclients->integer - bots;
 
 	//format:
 	//" \377\377\377\377info\\n\\server_name\\m\\map name\\u\\clients/maxclients\\g\\gametype\\s\\skill\\EOT "
@@ -283,7 +355,7 @@ static char *SV_ShortInfoString( void )
 		hostname,
 		sv.mapname,
 		count > 99 ? 99 : count,
-		sv_maxclients->integer > 99 ? 99 : sv_maxclients->integer
+		maxcount > 99 ? 99 : maxcount
 		);
 
 	len = strlen( string );
@@ -405,7 +477,7 @@ static void SVC_InfoResponse( const socket_t *socket, const netadr_t *address )
 {
 	int i, count;
 	char *string;
-	qboolean allow_empty = qfalse, allow_full = qfalse;
+	bool allow_empty = false, allow_full = false;
 
 	if( sv_showInfoQueries->integer )
 		Com_Printf( "Info Packet %s\n", NET_AddressToString( address ) );
@@ -434,10 +506,10 @@ static void SVC_InfoResponse( const socket_t *socket, const netadr_t *address )
 	for( i = 0; i < Cmd_Argc(); i++ )
 	{
 		if( !Q_stricmp( Cmd_Argv( i ), "full" ) )
-			allow_full = qtrue;
+			allow_full = true;
 
 		if( !Q_stricmp( Cmd_Argv( i ), "empty" ) )
-			allow_empty = qtrue;
+			allow_empty = true;
 	}
 
 	count = 0;
@@ -467,7 +539,7 @@ static void SVC_InfoResponse( const socket_t *socket, const netadr_t *address )
 /*
 * SVC_SendInfoString
 */
-static void SVC_SendInfoString( const socket_t *socket, const netadr_t *address, const char *requestType, const char *responseType, qboolean fullStatus )
+static void SVC_SendInfoString( const socket_t *socket, const netadr_t *address, const char *requestType, const char *responseType, bool fullStatus )
 {
 	char *string;
 
@@ -501,7 +573,7 @@ static void SVC_SendInfoString( const socket_t *socket, const netadr_t *address,
 */
 static void SVC_GetInfoResponse( const socket_t *socket, const netadr_t *address )
 {
-	SVC_SendInfoString( socket, address, "GetInfo", "infoResponse", qfalse );
+	SVC_SendInfoString( socket, address, "GetInfo", "infoResponse", false );
 }
 
 /*
@@ -509,7 +581,7 @@ static void SVC_GetInfoResponse( const socket_t *socket, const netadr_t *address
 */
 static void SVC_GetStatusResponse( const socket_t *socket, const netadr_t *address )
 {
-	SVC_SendInfoString( socket, address, "GetStatus", "statusResponse", qtrue );
+	SVC_SendInfoString( socket, address, "GetStatus", "statusResponse", true );
 }
 
 
@@ -575,7 +647,8 @@ static void SVC_DirectConnect( const socket_t *socket, const netadr_t *address )
 	int session_id;
 	char *session_id_str;
 	unsigned int ticket_id;
-	qboolean tv_client;
+	bool tv_client;
+	unsigned int time;
 
 	Com_DPrintf( "SVC_DirectConnect (%s)\n", Cmd_Args() );
 
@@ -598,7 +671,7 @@ static void SVC_DirectConnect( const socket_t *socket, const netadr_t *address )
 
 	game_port = atoi( Cmd_Argv( 2 ) );
 	challenge = atoi( Cmd_Argv( 3 ) );
-	tv_client = ( atoi( Cmd_Argv( 5 ) ) & 1 ? qtrue : qfalse );
+	tv_client = ( atoi( Cmd_Argv( 5 ) ) & 1 ? true : false );
 
 	if( !Info_Validate( Cmd_Argv( 4 ) ) )
 	{
@@ -717,6 +790,7 @@ static void SVC_DirectConnect( const socket_t *socket, const netadr_t *address )
 	newcl = NULL;
 
 	// if there is already a slot for this ip, reuse it
+	time = Sys_Milliseconds();
 	for( i = 0, cl = svs.clients; i < sv_maxclients->integer; i++, cl++ )
 	{
 		if( cl->state == CS_FREE )
@@ -725,7 +799,7 @@ static void SVC_DirectConnect( const socket_t *socket, const netadr_t *address )
 			( NET_CompareBaseAddress( address, &cl->netchan.remoteAddress ) && cl->netchan.game_port == game_port ) )
 		{
 			if( !NET_IsLocalAddress( address ) &&
-				( svs.realtime - cl->lastconnect ) < (unsigned)( sv_reconnectlimit->integer * 1000 ) )
+				( time - cl->lastconnect ) < (unsigned)( sv_reconnectlimit->integer * 1000 ) )
 			{
 				Com_DPrintf( "%s:reconnect rejected : too soon\n", NET_AddressToString( address ) );
 				return;
@@ -758,11 +832,11 @@ static void SVC_DirectConnect( const socket_t *socket, const netadr_t *address )
 			return;
 		}
 		if( newcl->state && newcl->edict && ( newcl->edict->r.svflags & SVF_FAKECLIENT ) )
-			SV_DropClient( newcl, DROP_TYPE_GENERAL, "Need room for a real player" );
+			SV_DropClient( newcl, DROP_TYPE_GENERAL, "%s", "Need room for a real player" );
 	}
 
 	// get the game a chance to reject this connection or modify the userinfo
-	if( !SV_ClientConnect( socket, address, newcl, userinfo, game_port, challenge, qfalse, 
+	if( !SV_ClientConnect( socket, address, newcl, userinfo, game_port, challenge, false, 
 		tv_client, ticket_id, session_id ) )
 	{
 		char *rejtype, *rejflag, *rejtypeflag, *rejmsg;
@@ -793,8 +867,8 @@ static void SVC_DirectConnect( const socket_t *socket, const netadr_t *address )
 #ifdef TCP_ALLOW_CONNECT
 	if( socket->type == SOCKET_TCP )
 	{
-		svs.incoming[incoming].active = qfalse;
-		svs.incoming[incoming].socket.open = qfalse;
+		svs.incoming[incoming].active = false;
+		svs.incoming[incoming].socket.open = false;
 	}
 #endif
 }
@@ -846,7 +920,7 @@ int SVC_FakeConnect( char *fakeUserinfo, char *fakeSocketType, const char *fakeI
 
 	NET_InitAddress( &address, NA_NOTRANSMIT );
 	// get the game a chance to reject this connection or modify the userinfo
-	if( !SV_ClientConnect( NULL, &address, newcl, userinfo, -1, -1, qtrue, qfalse, 0, 0 ) )
+	if( !SV_ClientConnect( NULL, &address, newcl, userinfo, -1, -1, true, false, 0, 0 ) )
 	{
 		Com_DPrintf( "Game rejected a connection.\n" );
 		return -1;
@@ -921,6 +995,284 @@ static void SVC_RemoteCommand( const socket_t *socket, const netadr_t *address )
 	Com_EndRedirect();
 }
 
+#define MAX_STEAMQUERY_PACKETLEN 1260
+#define MAX_STEAMQUERY_TAG_STRING 128
+
+/**
+ * Writes the tags of the server for filtering in the Steam server browser.
+ *
+ * @param tags string where to write the tags (at least MAX_STEAMQUERY_TAG_STRING bytes)
+ */
+static void SV_GetSteamTags( char *tags )
+{
+	// Currently there is no way to filter by tag in the game itself,
+	// so this is mostly to make sure the tags aren't empty on old servers if they are added.
+
+	Q_strncpyz( tags, Cvar_String( "g_gametype" ), MAX_STEAMQUERY_TAG_STRING );
+
+	if( Cvar_Value( "g_instagib" ) )
+	{
+		if( tags[0] )
+			Q_strncatz( tags, ",", MAX_STEAMQUERY_TAG_STRING );
+		Q_strncatz( tags, "instagib", MAX_STEAMQUERY_TAG_STRING );
+	}
+
+	// If sv_tags cvar is added, every comma-separated tag from the cvar must be added separately
+	// (so the last tag exceeding MAX_STEAMQUERY_TAG_STRING isn't cut off)
+	// and validated not to contain any characters disallowed in userinfo (CVAR_SERVERINFO).
+}
+
+/**
+ * Responds to a Steam server query.
+ *
+ * @param s       query string
+ * @param socket  response socket
+ * @param address response address
+ * @param inmsg   message for arguments
+ * @return whether the request was handled as a Steam query
+ */
+bool SV_SteamServerQuery( const char *s, const socket_t *socket, const netadr_t *address, msg_t *inmsg )
+{
+#if APP_STEAMID
+	if( sv.state < ss_loading || sv.state > ss_game )
+		return false; // server not running
+
+	if( ( !sv_public->integer && !NET_IsLANAddress( address ) ) || ( sv_maxclients->integer == 1 ) )
+		return false;
+
+	if( !strcmp( s, "i" ) )
+	{
+		// ping
+		const char pingResponse[] = "j00000000000000";
+		Netchan_OutOfBand( socket, address, sizeof( pingResponse ), ( const uint8_t * )pingResponse );
+		return true;
+	}
+
+	if( !strcmp( s, "W" ) || !strcmp( s, "U\xFF\xFF\xFF\xFF" ) )
+	{
+		// challenge - security feature, but since we don't send multiple packets always return 0
+		const uint8_t challengeResponse[] = { 'A', 0, 0, 0, 0 };
+		Netchan_OutOfBand( socket, address, sizeof( challengeResponse ), ( const uint8_t * )challengeResponse );
+		return true;
+	}
+
+	if( !strcmp( s, "TSource Engine Query" ) )
+	{
+		// server info
+		char hostname[MAX_INFO_VALUE];
+		char gamedir[MAX_QPATH];
+		char gamename[128];
+		char version[32];
+		char tags[MAX_STEAMQUERY_TAG_STRING];
+		int i, players = 0, bots = 0, maxclients = 0;
+		int flags = 0x80 | 0x01; // game port | game ID containing app ID
+		client_t *cl;
+		msg_t msg;
+		uint8_t msgbuf[MAX_STEAMQUERY_PACKETLEN - sizeof( int32_t )];
+
+		if( sv_showInfoQueries->integer )
+			Com_Printf( "Steam Info Packet %s\n", NET_AddressToString( address ) );
+
+		Q_strncpyz( hostname, COM_RemoveColorTokens( sv_hostname->string ), sizeof( hostname ) );
+		if( !hostname[0] )
+			Q_strncpyz( hostname, sv_hostname->dvalue, sizeof( hostname ) );
+		Q_strncpyz( gamedir, FS_GameDirectory(), sizeof( gamedir ) );
+
+		Q_strncpyz( gamename, APPLICATION, sizeof( gamename ) );
+		if( Cvar_Value( "g_instagib" ) )
+			Q_strncatz( gamename, " IG", sizeof( gamename ) );
+		if( sv.configstrings[CS_GAMETYPETITLE][0] || sv.configstrings[CS_GAMETYPENAME][0] )
+		{
+			Q_strncatz( gamename, " ", sizeof( gamename ) );
+			Q_strncatz( gamename,
+				sv.configstrings[sv.configstrings[CS_GAMETYPETITLE][0] ? CS_GAMETYPETITLE : CS_GAMETYPENAME],
+				sizeof( gamename ) );
+		}
+
+		for( i = 0; i < sv_maxclients->integer; i++ )
+		{
+			cl = &svs.clients[i];
+			if( cl->state >= CS_CONNECTED )
+			{
+				if( cl->tvclient ) // exclude TV from the max players count
+					continue;
+				if( cl->edict->r.svflags & SVF_FAKECLIENT )
+					bots++;
+				players++;
+			}
+			maxclients++;
+		}
+
+		Q_snprintfz( version, sizeof( version ), "%i.%i.0.0", APP_VERSION_MAJOR, APP_VERSION_MINOR );
+
+		SV_GetSteamTags( tags );
+		if( tags[0] )
+			flags |= 0x20;
+
+		MSG_Init( &msg, msgbuf, sizeof( msgbuf ) );
+		MSG_WriteByte( &msg, 'I' );
+		MSG_WriteByte( &msg, APP_PROTOCOL_VERSION );
+		MSG_WriteString( &msg, hostname );
+		MSG_WriteString( &msg, sv.mapname );
+		MSG_WriteString( &msg, gamedir );
+		MSG_WriteString( &msg, gamename );
+		MSG_WriteShort( &msg, 0 ); // app ID specified later
+		MSG_WriteByte( &msg, min( players, 99 ) );
+		MSG_WriteByte( &msg, min( maxclients, 99 ) );
+		MSG_WriteByte( &msg, min( bots, 99 ) );
+		MSG_WriteByte( &msg, ( dedicated && dedicated->integer ) ? 'd' : 'l' );
+		MSG_WriteByte( &msg, STEAMQUERY_OS );
+		MSG_WriteByte( &msg, Cvar_String( "password" )[0] ? 1 : 0 );
+		MSG_WriteByte( &msg, 0 ); // VAC insecure
+		MSG_WriteString( &msg, version );
+		MSG_WriteByte( &msg, flags );
+		// port
+		MSG_WriteShort( &msg, sv_port->integer );
+		// tags
+		if( flags & 0x20 )
+			MSG_WriteString( &msg, tags );
+		// 64-bit game ID - needed to specify app ID
+		MSG_WriteLong( &msg, APP_STEAMID & 0xffffff );
+		MSG_WriteLong( &msg, 0 );
+		Netchan_OutOfBand( socket, address, msg.cursize, msg.data );
+		return true;
+	}
+
+	if( s[0] == 'U' )
+	{
+		// players
+		msg_t msg;
+		uint8_t msgbuf[MAX_STEAMQUERY_PACKETLEN - sizeof( int32_t )];
+		int i, players = 0;
+		client_t *cl;
+		char name[MAX_NAME_BYTES];
+		unsigned int time = Sys_Milliseconds();
+
+		if( sv_showInfoQueries->integer )
+			Com_Printf( "Steam Players Packet %s\n", NET_AddressToString( address ) );
+
+		MSG_Init( &msg, msgbuf, sizeof( msgbuf ) );
+		MSG_WriteByte( &msg, 'D' );
+		MSG_WriteByte( &msg, 0 );
+
+		for( i = 0; i < sv_maxclients->integer; i++ )
+		{
+			cl = &svs.clients[i];
+			if( ( cl->state < CS_CONNECTED ) || cl->tvclient )
+				continue;
+
+			Q_strncpyz( name, COM_RemoveColorTokens( cl->name ), sizeof( name ) );
+			if( ( msg.cursize + 10 + strlen( name ) ) > sizeof( msgbuf ) )
+				break;
+
+			MSG_WriteByte( &msg, i );
+			MSG_WriteString( &msg, name );
+			MSG_WriteLong( &msg, cl->edict->r.client->r.frags );
+			MSG_WriteFloat( &msg, ( float )( time - cl->lastconnect ) * 0.001f );
+
+			players++;
+			if( players == 99 )
+				break;
+		}
+
+		msgbuf[1] = players;
+		Netchan_OutOfBand( socket, address, msg.cursize, msg.data );
+		return true;
+	}
+
+	if( !strcmp( s, "s" ) )
+	{
+		// master server query, terminated by \n, followed by the challenge
+		int i;
+		bool fromMaster = false;
+		int challenge;
+		char gamedir[MAX_QPATH], basedir[MAX_QPATH], tags[MAX_STEAMQUERY_TAG_STRING];
+		int players = 0, bots = 0, maxclients = 0;
+		client_t *cl;
+		char msg[MAX_STEAMQUERY_PACKETLEN];
+
+		for( i = 0; i < MAX_MASTERS; i++ )
+		{
+			if( sv_masters[i].steam && NET_CompareAddress( address, &sv_masters[i].address ) )
+			{
+				fromMaster = true;
+				break;
+			}
+		}
+		if( !fromMaster )
+			return true;
+
+		if( sv_showInfoQueries->integer )
+			Com_Printf( "Steam Master Server Info Packet %s\n", NET_AddressToString( address ) );
+
+		challenge = MSG_ReadLong( inmsg );
+
+		Q_strncpyz( gamedir, FS_GameDirectory(), sizeof( gamedir ) );
+		Q_strncpyz( basedir, FS_BaseGameDirectory(), sizeof( basedir ) );
+		SV_GetSteamTags( tags );
+
+		for( i = 0; i < sv_maxclients->integer; i++ )
+		{
+			cl = &svs.clients[i];
+			if( cl->state >= CS_CONNECTED )
+			{
+				if( cl->tvclient ) // exclude TV from the max players count
+					continue;
+				if( cl->edict->r.svflags & SVF_FAKECLIENT )
+					bots++;
+				players++;
+			}
+			maxclients++;
+		}
+
+		Q_snprintfz( msg, sizeof( msg ),
+			"0\n\\protocol\\7\\challenge\\%i" // protocol must be 7 to match Source
+			"\\players\\%i\\max\\%i\\bots\\%i"
+			"\\gamedir\\%s\\map\\%s"
+			"\\password\\%i\\os\\%c"
+			"\\lan\\%i\\region\\255"
+			"%s%s"
+			"\\type\\%c\\secure\\0"
+			"\\version\\%i.%i.0.0"
+			"\\product\\%s\n",
+			challenge,
+			min( players, 99 ), min( maxclients, 99 ), min( bots, 99 ),
+			gamedir, sv.mapname,
+			Cvar_String( "password" )[0] ? 1 : 0, STEAMQUERY_OS,
+			sv_public->integer ? 0 : 1,
+			tags[0] ? "\\gametype\\" /* legacy - "gametype", not "tags" */ : "", tags,
+			( dedicated && dedicated->integer ) ? 'd' : 'l',
+			APP_VERSION_MAJOR, APP_VERSION_MINOR,
+			basedir );
+		NET_SendPacket( socket, ( const uint8_t * )msg, strlen( msg ), address );
+
+		return true;
+	}
+
+	if( s[0] == 'O' )
+	{
+		// out of date message
+		static bool printed = false;
+		if( !printed )
+		{
+			int i;
+			for( i = 0; i < MAX_MASTERS; i++ )
+			{
+				if( sv_masters[i].steam && NET_CompareAddress( address, &sv_masters[i].address ) )
+				{
+					Com_Printf( "Server is out of date and cannot be added to the Steam master servers.\n" );
+					printed = true;
+					return true;
+				}
+			}
+		}
+		return true;
+	}
+#endif
+
+	return false;
+}
+
 typedef struct
 {
 	char *name;
@@ -959,6 +1311,9 @@ void SV_ConnectionlessPacket( const socket_t *socket, const netadr_t *address, m
 	MSG_ReadLong( msg );    // skip the -1 marker
 
 	s = MSG_ReadStringLine( msg );
+
+	if( SV_SteamServerQuery( s, socket, address, msg ) )
+		return;
 
 	Cmd_TokenizeString( s );
 

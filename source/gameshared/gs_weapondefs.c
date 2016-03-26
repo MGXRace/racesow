@@ -46,11 +46,11 @@ gs_weapon_definition_t gs_weaponDefs[] =
 
 			//timings (in msecs)
 			WEAPONUP_FRAMETIME,             // weapon up frametime
-			WEAPONDOWN_FRAMETIME,                            // weapon down frametime
+			WEAPONDOWN_FRAMETIME,           // weapon down frametime
 			0,                              // reload frametime
 			0,                              // cooldown frametime
 			0,                              // projectile timeout
-			qfalse,							// smooth refire
+			false,							// smooth refire
 
 			//damages
 			0,                              // damage
@@ -69,7 +69,8 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			//ammo
 			0,                              // weapon pickup amount
 			0,                              // pickup amount
-			0                               // max amount
+			0,                              // max amount
+			0                               // low ammo threshold
 		},
 
 		{
@@ -80,11 +81,11 @@ gs_weapon_definition_t gs_weaponDefs[] =
 
 			//timings (in msecs)
 			WEAPONUP_FRAMETIME,             // weapon up frametime
-			WEAPONDOWN_FRAMETIME,                            // weapon down frametime
+			WEAPONDOWN_FRAMETIME,           // weapon down frametime
 			0,                              // reload frametime
 			0,                              // cooldown frametime
 			0,                              // projectile timeout
-			qfalse,							// smooth refire
+			false,							// smooth refire
 
 			//damages
 			0,                              // damage
@@ -103,12 +104,13 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			//ammo
 			0,                              // weapon pickup amount
 			0,                              // pickup amount
-			0                               // max amount
+			0,                              // max amount
+			0                               // low ammo threshold
 		},
 	},
 
 	{
-		"gunblade",
+		"Gunblade",
 		WEAP_GUNBLADE,
 		{
 			FIRE_MODE_STRONG,
@@ -122,12 +124,12 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			400,							// reload frametime
 			0,								// cooldown frametime
 			5000,							// projectile timeout
-			qfalse,							// smooth refire
+			false,							// smooth refire
 
 			//damages
-			45,								// damage
-			0.5,							// selfdamage ratio
-			100,							// knockback
+			35,								// damage
+			1.0,							// selfdamage ratio
+			10,								// knockback
 			0,								// stun
 			90,								// splash radius
 			8,								// splash minimum damage
@@ -139,9 +141,10 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			0,                              // v_spread
 
 			//ammo
-			2,                              // weapon pickup amount
-			2,								// pickup amount
-			10								// max amount
+			0,                              // weapon pickup amount
+			0,								// pickup amount
+			1,								// max amount
+			0								// low ammo threshold
 		},
 
 		{
@@ -156,10 +159,10 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			800,							// reload frametime
 			0,								// cooldown frametime
 			64,								// projectile timeout  / projectile range for instant weapons
-			qfalse,							// smooth refire
+			false,							// smooth refire
 
 			//damages
-			45,								// damage
+			50,								// damage
 			0,								// selfdamage ratio
 			50,								// knockback
 			0,								// stun
@@ -175,7 +178,8 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			//ammo
 			0,                              // weapon pickup amount
 			0,								// pickup amount
-			0								// max amount
+			0,								// max amount
+			0								// low ammo threshold
 		},
 	},
 
@@ -191,29 +195,30 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			//timings (in msecs)
 			WEAPONUP_FRAMETIME,				// weapon up frametime
 			WEAPONDOWN_FRAMETIME,			// weapon down frametime
-			75,								// reload frametime
+			100,							// reload frametime
 			0,								// cooldown frametime
 			6000,							// projectile timeout
-			qfalse,							// smooth refire
+			false,							// smooth refire
 
 			//damages
-			6.75,							// damage
+			10,								// damage
 			0,								// selfdamage ratio
-			5,								// knockback
-			0,								// stun
+			10,								// knockback
+			50,								// stun
 			0,								// splash radius
 			0,								// splash minimum damage
 			0,                              // splash minimum knockback
 
 			//projectile def
 			INSTANT,						// speed
-			175,							// spread
-			175,                            // v_spread
+			10,								// spread
+			10, 	                        // v_spread
 
 			//ammo
 			50,                             // weapon pickup amount
 			50,								// pickup amount
-			100								// max amount
+			100,							// max amount
+			20								// low ammo threshold
 		},
 
 		{
@@ -225,29 +230,30 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			//timings (in msecs)
 			WEAPONUP_FRAMETIME,				// weapon up frametime
 			WEAPONDOWN_FRAMETIME,			// weapon down frametime
-			75,								// reload frametime
+			100,							// reload frametime
 			0,								// cooldown frametime
 			6000,							// projectile timeout
-			qfalse,							// smooth refire
+			false,							// smooth refire
 
 			//damages
-			6.75,							// damage
+			10,								// damage
 			0,								// selfdamage ratio
-			5,								// knockback
-			0,								// stun
+			10,								// knockback
+			50,								// stun
 			0,								// splash radius
 			0,								// splash minimum damage
 			0,                              // splash minimum knockback
 
 			//projectile def
 			INSTANT,						// speed
-			175,							// spread
-			175,                            // v_spread
+			10,								// spread
+			10, 	                        // v_spread
 
 			//ammo
 			0,                              // weapon pickup amount
 			0,								// pickup amount
-			0								// max amount
+			0,								// max amount
+			0								// low ammo threshold
 		},
 	},
 
@@ -258,7 +264,7 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			FIRE_MODE_STRONG,
 			AMMO_SHELLS,
 			1,								// ammo usage per shot
-			25,								// projectiles fired each shot
+			20,								// projectiles fired each shot
 
 			//timings (in msecs)
 			WEAPONUP_FRAMETIME,				// weapon up frametime
@@ -266,12 +272,12 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			900,							// reload frametime
 			0,								// cooldown frametime
 			8192,							// projectile timeout / projectile range for instant weapons
-			qfalse,							// smooth refire
+			false,							// smooth refire
 
 			//damages
-			4,								// damage
+			5,								// damage
 			0,								// selfdamage ratio (rg cant selfdamage)
-			5,								// knockback
+			7,								// knockback
 			85,								// stun
 			0,								// splash radius
 			0,								// splash minimum damage
@@ -279,13 +285,14 @@ gs_weapon_definition_t gs_weaponDefs[] =
 
 			//projectile def
 			INSTANT,						// speed
-			1500,							// spread
-			500,                            // v_spread
+			160,							// spread
+			90,                             // v_spread
 
 			//ammo
 			10,                             // weapon pickup amount
 			10,								// pickup amount
-			20								// max amount
+			20,								// max amount
+			3								// low ammo threshold
 		},
 
 		{
@@ -300,7 +307,7 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			900,							// reload frametime
 			0,								// cooldown frametime
 			8192,							// projectile timeout / projectile range for instant weapons
-			qfalse,							// smooth refire
+			false,							// smooth refire
 
 			//damages
 			4,								// damage
@@ -313,13 +320,14 @@ gs_weapon_definition_t gs_weaponDefs[] =
 
 			//projectile def
 			INSTANT,						// speed
-			1500,							// spread
-			500,                            // v_spread
+			160,							// spread
+			90,                             // v_spread
 
 			//ammo
 			0,                              // weapon pickup amount
 			0,								// pickup amount
-			0								// max amount
+			0,								// max amount
+			0								// low ammo threshold
 		},
 	},
 
@@ -338,16 +346,16 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			800,							// reload frametime - racesow - basewsw had (0.6 725, 1.0: 675, 1.1: 725)
 			0,								// cooldown frametime
 			1250,							// projectile timeout
-			qfalse,							// smooth refire
+			false,							// smooth refire
 
 			//damages
-			65,								// damage
-			0.85,							// selfdamage ratio
+			80,								// damage
+			1.00,							// selfdamage ratio
 			100,							// knockback
 			1250,							// stun
 			150,							// splash radius
 			15,								// splash minimum damage
-			32,                             // splash minimum knockback
+			32,								// splash minimum knockback
 
 			//projectile def
 			900,							// speed
@@ -357,7 +365,8 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			//ammo
 			10,                             // weapon pickup amount
 			10,								// pickup amount
-			20								// max amount
+			20,								// max amount
+			3								// low ammo threshold
 		},
 
 		{
@@ -372,16 +381,16 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			800,							// reload frametime - racesow - basewsw had (0.6 725, 1.0: 675, 1.1: 725)
 			0,								// cooldown frametime
 			1250,							// projectile timeout
-			qfalse,							// smooth refire
+			false,							// smooth refire
 
 			//damages
-			60,								// damage
-			0.85,							// selfdamage ratio
+			80,								// damage
+			1.00,							// selfdamage ratio
 			100,							// knockback
 			1250,							// stun
 			140,							// splash radius
 			15,								// splash minimum damage
-			8,                              // splash minimum knockback
+			8,								// splash minimum knockback
 
 			//projectile def
 			900,							// speed
@@ -391,7 +400,8 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			//ammo
 			0,                              // weapon pickup amount
 			0,								// pickup amount
-			0								// max amount
+			0,								// max amount
+			0								// low ammo threshold
 		},
 	},
 
@@ -410,16 +420,16 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			850,							// reload frametime - racesow - basewsw had (0.5: 950, 0.6: 925, 1.0: 850, 1.1: 900)
 			0,								// cooldown frametime
 			100000,							// projectile timeout - racesow - basewsw had (0.6: 10000)
-			qfalse,							// smooth refire
+			false,							// smooth refire
 
 			//damages
-			75,								// damage
-			0.85,							// selfdamage ratio
+			80,								// damage
+			1.00,							// selfdamage ratio
 			100,							// knockback
 			1250,							// stun
 			125,							// splash radius
-			8,								// splash minimum damage
-			32,                             // splash minimum knockback
+			15,								// splash minimum damage
+			32,								// splash minimum knockback
 
 			//projectile def
 			1100,							// speed
@@ -427,9 +437,10 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			0,                              // v_spread
 
 			//ammo
-			10,                             // weapon pickup amount
+			5,                              // weapon pickup amount
 			10,								// pickup amount
-			20								// max amount
+			20,								// max amount
+			3								// low ammo threshold
 		},
 
 		{
@@ -444,16 +455,16 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			850,							// reload frametime - racesow - basewsw had (0.5: 950, 0.6: 925, 1.0: 850, 1.1: 900)
 			0,								// cooldown frametime
 			100000,							// projectile timeout - racesow - basewsw had (0.6: 10000)
-			qfalse,							// smooth refire
+			false,							// smooth refire
 
 			//damages
-			70,								// damage
-			0.85,							// selfdamage ratio
-			100,							// knockback
+			80,								// damage
+			1.00,							// selfdamage ratio
+			100,								// knockback
 			1250,							// stun
 			125,							// splash radius
-			6,								// splash minimum damage
-			8,                              // splash minimum knockback
+			15,								// splash minimum damage
+			8,								// splash minimum knockback
 
 			//projectile def
 			1100,							// speed
@@ -463,7 +474,8 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			//ammo
 			0,                              // weapon pickup amount
 			0,								// pickup amount
-			0								// max amount
+			0,								// max amount
+			0								// low ammo threshold
 		},
 	},
 			
@@ -482,10 +494,10 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			100,							// reload frametime
 			0,								// cooldown frametime
 			5000,							// projectile timeout
-			qfalse,							// smooth refire
+			false,							// smooth refire
 
 			//damages
-			14,								// damage
+			15,								// damage
 			0.5,							// selfdamage ratio
 			18,								// knockback
 			200,							// stun
@@ -499,9 +511,10 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			0,                              // v_spread
 
 			//ammo
-			75,                             // weapon pickup amount
-			75,								// pickup amount
-			150								// max amount
+			50,                             // weapon pickup amount
+			100,							// pickup amount
+			150,							// max amount
+			20								// low ammo threshold
 		},
 
 		{
@@ -516,26 +529,27 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			100,							// reload frametime
 			0,								// cooldown frametime
 			5000,							// projectile timeout
-			qfalse,							// smooth refire
+			false,							// smooth refire
 
 			//damages
-			12,								// damage
+			15,								// damage
 			0.5,							// selfdamage ratio
 			14,								// knockback
 			200,							// stun
 			45,								// splash radius
-			0,								// splash minimum damage
-			1,                              // splash minimum knockback
+			5,								// splash minimum damage
+			1,								// splash minimum knockback
 
 			//projectile def
 			2400,							// speed - racesow - basewsw had (1.1: 2600)
-			0,							// spread - racesow - basewsw had (1.1: 90)
-			0,			                                // v_spread
+			0,								// spread - racesow - basewsw had (1.1: 90)
+			0,								// v_spread
 
 			//ammo
 			0,                              // weapon pickup amount
 			0,								// pickup amount
-			0								// max amount
+			0,								// max amount
+			0								// low ammo threshold
 		},
 	},
 
@@ -554,12 +568,12 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			50,								// reload frametime
 			0,								// cooldown frametime
 			850,							// projectile timeout / projectile range for instant weapons
-			qtrue,							// smooth refire
+			true,							// smooth refire
 
 			//damages
-			6.75,							// damage
+			7,								// damage
 			0,								// selfdamage ratio (lg cant damage)
-			12,								// knockback
+			14,								// knockback
 			300,							// stun
 			0,								// splash radius
 			0,								// splash minimum damage
@@ -571,9 +585,10 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			0,                              // v_spread
 
 			//ammo
-			75,                             // weapon pickup amount
-			75,								// pickup amount
-			150								// max amount
+			50,                             // weapon pickup amount
+			100,							// pickup amount
+			150,							// max amount
+			20								// low ammo threshold
 		},
 
 		{
@@ -583,17 +598,17 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			1,								// projectiles fired each shot
 
 			//timings (in msecs)
-			WEAPONUP_FRAMETIME,				// weapon up frametime
-			WEAPONDOWN_FRAMETIME,			// weapon down frametime
+			WEAPONUP_FRAMETIME,             // weapon up frametime
+			WEAPONDOWN_FRAMETIME,           // weapon down frametime
 			50,								// reload frametime
 			0,								// cooldown frametime
 			850,							// projectile timeout / projectile range for instant weapons
-			qtrue,							// smooth refire
+			true,							// smooth refire
 
 			//damages
-			6.5,							// damage
+			7,								// damage
 			0,								// selfdamage ratio (lg cant damage)
-			12,								// knockback
+			14,								// knockback
 			300,							// stun
 			0,								// splash radius
 			0,								// splash minimum damage
@@ -607,7 +622,8 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			//ammo
 			0,                              // weapon pickup amount
 			0,								// pickup amount
-			0								// max amount
+			0,								// max amount
+			0								// low ammo threshold
 		},
 	},
 
@@ -626,7 +642,42 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			1250,							// reload frametime
 			0,								// cooldown frametime
 			900,							// min damage range
-			qfalse,							// smooth refire
+			false,							// smooth refire
+
+			//damages
+			75,								// damage
+			0,  							// selfdamage ratio
+			80,								// knockback
+			1000,							// stun
+			0,								// splash radius
+			75,								// minimum damage
+			35,								// minimum knockback
+
+			//projectile def
+			INSTANT,						// speed
+			0,								// spread
+			0,                              // v_spread
+
+			//ammo
+			5,                              // weapon pickup amount
+			10,								// pickup amount
+			10,								// max amount
+			3								// low ammo threshold
+		},
+
+		{
+			FIRE_MODE_WEAK,
+			AMMO_WEAK_BOLTS,
+			1,								// ammo usage per shot
+			1,								// projectiles fired each shot
+
+			//timings (in msecs)
+			WEAPONUP_FRAMETIME,				// weapon up frametime
+			WEAPONDOWN_FRAMETIME,			// weapon down frametime
+			1250,							// reload frametime
+			0,								// cooldown frametime
+			900,							// min damage range
+			false,							// smooth refire
 
 			//damages
 			75,								// damage
@@ -643,43 +694,10 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			0,                              // v_spread
 
 			//ammo
-			5,                              // weapon pickup amount
-			5,								// pickup amount
-			10								// max amount
-		},
-
-		{
-			FIRE_MODE_WEAK,
-			AMMO_WEAK_BOLTS,
-			1,								// ammo usage per shot
-			1,								// projectiles fired each shot
-
-			//timings (in msecs)
-			WEAPONUP_FRAMETIME,				// weapon up frametime
-			WEAPONDOWN_FRAMETIME,			// weapon down frametime
-			1250,							// reload frametime
-			0,								// cooldown frametime
-			1024,							// min damage range
-			qfalse,							// smooth refire
-
-			//damages
-			60,								// damage
-			0,  							// selfdamage ratio (eb cant selfdamage)
-			40,								// knockback
-			1000,							// stun
-			0,								// splash radius
-			60,								// minimum damage
-			35,								// minimum knockback
-
-			//projectile def
-			6000,							// speed
-			0,								// spread
-			0,                              // v_spread
-
-			//ammo
 			0,                              // weapon pickup amount
 			0,								// pickup amount
-			0								// max amount
+			0,								// max amount
+			0								// low ammo threshold
 		},
 	},
 
@@ -698,7 +716,7 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			1300,							// reload frametime
 			0,								// cooldown frametime
 			8024,							// range
-			qfalse,							// smooth refire
+			false,							// smooth refire
 
 			//damages
 			200,							// damage
@@ -717,7 +735,8 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			//ammo
 			5,                              // weapon pickup amount
 			5,								// pickup amount
-			5								// max amount
+			5,								// max amount
+			0								// low ammo threshold
 		},
 
 		{
@@ -732,10 +751,10 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			1300,							// reload frametime
 			0,								// cooldown frametime
 			8024,							// range
-			qfalse,							// smooth refire
+			false,							// smooth refire
 
 			//damages
-			125,							// damage
+			200,							// damage
 			0.1,							// selfdamage ratio (ig cant damage)
 			95,								// knockback
 			1000,							// stun
@@ -751,7 +770,8 @@ gs_weapon_definition_t gs_weaponDefs[] =
 			//ammo
 			5,                              // weapon pickup amount
 			5,								// pickup amount
-			15								// max amount
+			15,								// max amount
+			0								// low ammo threshold
 		},
 	},
 };

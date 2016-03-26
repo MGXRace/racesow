@@ -127,7 +127,7 @@ void G_Gametype_GENERIC_SetUpMatch( void )
 	G_Match_FreeBodyQueue();
 
 	G_AnnouncerSound( NULL, trap_SoundIndex( va( S_ANNOUNCER_COUNTDOWN_FIGHT_1_to_2, ( rand()&1 )+1 ) ), GS_MAX_TEAMS, false, NULL );
-	G_CenterPrintMsg( NULL, "FIGHT!\n" );
+	G_CenterPrintMsg( NULL, "FIGHT!" );
 }
 
 void G_Gametype_GENERIC_SetUpEndMatch( void )
@@ -284,7 +284,7 @@ void G_Gametype_GENERIC_ClientRespawn( edict_t *self, int old_team, int new_team
 			{
 				weapondef = GS_GetWeaponDef( WEAP_GUNBLADE );
 				client->ps.inventory[WEAP_GUNBLADE] = 1;
-				client->ps.inventory[AMMO_GUNBLADE] = weapondef->firedef.ammo_max;;
+				client->ps.inventory[AMMO_GUNBLADE] = 1;
 				client->ps.inventory[AMMO_WEAK_GUNBLADE] = 0;
 			}
 		}
@@ -337,7 +337,7 @@ void G_Gametype_GENERIC_PlayerKilled( edict_t *targ, edict_t *attacker, edict_t 
 		}
 
 		// drop ammo pack (won't drop anything if player doesn't have any strong ammo)
-		Drop_Item( targ, GS_FindItemByTag( AMMO_PACK_WEAK ) );
+		Drop_Item( targ, GS_FindItemByTag( AMMO_PACK ) );
 	}
 }
 
@@ -386,10 +386,10 @@ void G_Gametype_GENERIC_ScoreEvent( gclient_t *client, const char *score_event, 
 
 static void G_Gametype_GENERIC_Init( void )
 {
-	trap_ConfigString( CS_GAMETYPETITLE, "Gametype failed to load" );
-	trap_ConfigString( CS_GAMETYPEVERSION, "0.0" );
-	trap_ConfigString( CS_GAMETYPEAUTHOR, "Picmip Studios" );
-	trap_Cvar_ForceSet( "g_gametype", "error" );
+	trap_ConfigString( CS_GAMETYPETITLE, "Generic Deathmatch" );
+	trap_ConfigString( CS_GAMETYPEVERSION, "1.0" );
+	trap_ConfigString( CS_GAMETYPEAUTHOR, "Warsow Development Team" );
+	trap_Cvar_ForceSet( "g_gametype", "generic" );
 
 	level.gametype.spawnableItemsMask = ( IT_WEAPON|IT_AMMO|IT_ARMOR|IT_POWERUP|IT_HEALTH );
 	level.gametype.respawnableItemsMask = ( IT_WEAPON|IT_AMMO|IT_ARMOR|IT_POWERUP|IT_HEALTH );
@@ -400,6 +400,7 @@ static void G_Gametype_GENERIC_Init( void )
 
 	level.gametype.isTeamBased = false;
 	level.gametype.isRace = false;
+	level.gametype.isTutorial = false;
 	level.gametype.inverseScore = false;
 	level.gametype.hasChallengersQueue = false;
 	level.gametype.maxPlayersPerTeam = 0;
@@ -417,7 +418,7 @@ static void G_Gametype_GENERIC_Init( void )
 	level.gametype.canForceModels = true;
 	level.gametype.canShowMinimap = false;
 	level.gametype.teamOnlyMinimap = true;
-	level.gametype.spawnpoint_radius = 256;
+	level.gametype.spawnpointRadius = 256;
 
 	level.gametype.canShowMinimap = false;
 	level.gametype.teamOnlyMinimap = true;
@@ -432,7 +433,7 @@ static void G_Gametype_GENERIC_Init( void )
 	// !racesow
 
 	if( GS_Instagib() )
-		level.gametype.spawnpoint_radius *= 2;
+		level.gametype.spawnpointRadius *= 2;
 
 	trap_ConfigString( CS_SCB_PLAYERTAB_LAYOUT, "%n 164 %i 64 %l 48 %p 18 %p 18" );
 	trap_ConfigString( CS_SCB_PLAYERTAB_TITLES, "Name Score Ping C R" );
@@ -529,14 +530,14 @@ bool G_Match_CheckExtendPlayTime( void )
 					G_AnnouncerSound( NULL, trap_SoundIndex( S_ANNOUNCER_OVERTIME_OVERTIME ), GS_MAX_TEAMS, true, NULL );
 
 				G_PrintMsg( NULL, "Match tied. Timelimit extended by %i minutes!\n", g_match_extendedtime->integer );
-				G_CenterPrintMsg( NULL, "%i MINUTE OVERTIME\n", g_match_extendedtime->integer );
+				G_CenterPrintFormatMsg( NULL, "%s MINUTE OVERTIME\n", va( "%i", g_match_extendedtime->integer ), NULL );
 				gs.gameState.longstats[GAMELONG_MATCHDURATION] = (unsigned int)( ( fabs( g_match_extendedtime->value ) * 60 ) * 1000 );
 			}
 			else
 			{
 				G_AnnouncerSound( NULL, trap_SoundIndex( va( S_ANNOUNCER_OVERTIME_SUDDENDEATH_1_to_2, ( rand()&1 )+1 ) ), GS_MAX_TEAMS, true, NULL );
 				G_PrintMsg( NULL, "Match tied. Sudden death!\n" );
-				G_CenterPrintMsg( NULL, "SUDDEN DEATH\n" );
+				G_CenterPrintMsg( NULL, "SUDDEN DEATH" );
 				gs.gameState.longstats[GAMELONG_MATCHDURATION] = 0;
 			}
 
@@ -733,7 +734,7 @@ static void G_Match_CheckStateAbort( void )
 	{
 		if( any ) {
 			G_PrintMsg( NULL, "Not enough players left. Countdown aborted.\n" );
-			G_CenterPrintMsg( NULL, "COUNTDOWN ABORTED\n" );
+			G_CenterPrintMsg( NULL, "COUNTDOWN ABORTED" );
 		}
 		G_Match_Autorecord_Cancel();
 		G_Match_LaunchState( MATCH_STATE_WARMUP );
@@ -745,7 +746,7 @@ static void G_Match_CheckStateAbort( void )
 	{
 		if( any ) {
 			G_PrintMsg( NULL, "Not enough players left. Match aborted.\n" );
-			G_CenterPrintMsg( NULL, "MATCH ABORTED\n" );
+			G_CenterPrintMsg( NULL, "MATCH ABORTED" );
 		}
 		G_EndMatch();
 	}
@@ -773,6 +774,18 @@ void G_Match_LaunchState( int matchState )
 
 	GS_GamestatSetFlag( GAMESTAT_FLAG_MATCHEXTENDED, false );
 	GS_GamestatSetFlag( GAMESTAT_FLAG_WAITING, false );
+	
+	if( matchState == MATCH_STATE_POSTMATCH ) {
+		level.finalMatchDuration = game.serverTime - GS_MatchStartTime();
+	}
+
+    if( ( matchState == MATCH_STATE_POSTMATCH && GS_RaceGametype() )
+        || ( matchState != MATCH_STATE_POSTMATCH && gs.gameState.stats[GAMESTAT_MATCHSTATE] == MATCH_STATE_POSTMATCH ) )
+	{
+		// entering postmatch in race or leaving postmatch in normal gt
+		G_Match_SendReport();
+		trap_MM_GameState( false );
+	}
 
 	switch( matchState )
 	{
@@ -827,15 +840,7 @@ void G_Match_LaunchState( int matchState )
 
 	case MATCH_STATE_POSTMATCH:
 		{
-			short lastState = gs.gameState.stats[GAMESTAT_MATCHSTATE];
 			gs.gameState.stats[GAMESTAT_MATCHSTATE] = MATCH_STATE_POSTMATCH;
-
-			if( lastState == MATCH_STATE_PLAYTIME || GS_RaceGametype() )
-			{
-				G_Match_SendReport();
-				trap_MM_GameState( false );
-			}
-
 			gs.gameState.longstats[GAMELONG_MATCHDURATION] = (unsigned int)fabs( g_postmatch_timelimit->value * 1000 ); // postmatch time in seconds
 			gs.gameState.longstats[GAMELONG_MATCHSTART] = game.serverTime;
 
@@ -1269,13 +1274,13 @@ void G_Match_CheckReadys( void )
 
 	if( allready == true && GS_MatchState() != MATCH_STATE_COUNTDOWN )
 	{
-		G_PrintMsg( NULL, "All players are ready.  Match starting!\n" );
+		G_PrintMsg( NULL, "All players are ready. Match starting!\n" );
 		G_Match_LaunchState( MATCH_STATE_COUNTDOWN );
 	}
 	else if( allready == false && GS_MatchState() == MATCH_STATE_COUNTDOWN )
 	{
 		G_PrintMsg( NULL, "Countdown aborted.\n" );
-		G_CenterPrintMsg( NULL, "COUNTDOWN ABORTED\n" );
+		G_CenterPrintMsg( NULL, "COUNTDOWN ABORTED" );
 		G_Match_Autorecord_Cancel();
 		G_Match_LaunchState( MATCH_STATE_WARMUP );
 	}
@@ -1619,6 +1624,7 @@ static bool G_EachNewSecond( void )
 static void G_CheckNumBots( void )
 {
 	edict_t	*ent;
+	int desiredNumBots;
 
 	if( level.spawnedTimeStamp + 5000 > game.realtime )
 		return;
@@ -1630,8 +1636,14 @@ static void G_CheckNumBots( void )
 	if( g_numbots->integer > gs.maxclients )
 		trap_Cvar_Set( "g_numbots", va( "%i", gs.maxclients ) );
 
-	if( g_numbots->integer < game.numBots )
-	{   // kick one bot
+	if( level.gametype.numBots > gs.maxclients )
+		level.gametype.numBots = gs.maxclients;
+
+	desiredNumBots = level.gametype.numBots ? level.gametype.numBots : g_numbots->integer;
+
+	if( desiredNumBots < game.numBots )
+	{
+		// kick one bot
 		for( ent = game.edicts + gs.maxclients; PLAYERNUM( ent ) >= 0; ent-- )
 		{
 			if( !ent->r.inuse || !( ent->r.svflags & SVF_FAKECLIENT ) )
@@ -1645,9 +1657,9 @@ static void G_CheckNumBots( void )
 		return;
 	}
 
-	if( g_numbots->integer > game.numBots )
+	if( desiredNumBots > game.numBots )
 	{                                     // add a bot if there is room
-		for( ent = game.edicts + 1; PLAYERNUM( ent ) < gs.maxclients && game.numBots < g_numbots->integer; ent++ )
+		for( ent = game.edicts + 1; PLAYERNUM( ent ) < gs.maxclients && game.numBots < desiredNumBots; ent++ )
 		{
 			if( !ent->r.inuse && trap_GetClientState( PLAYERNUM( ent ) ) == CS_FREE )
 				BOT_SpawnBot( NULL );
@@ -1753,7 +1765,7 @@ static void G_CheckEvenTeam( void )
 			edict_t	*e = game.edicts + teamlist[uneven_team].playerIndices[i];
 			if( !e->r.inuse )
 				continue;
-			G_CenterPrintMsg( e, "Teams are uneven. Please switch into another team.\n" ); // FIXME: need more suitable message :P
+			G_CenterPrintMsg( e, "Teams are uneven. Please switch into another team." ); // FIXME: need more suitable message :P
 			G_PrintMsg( e, "%sTeams are uneven. Please switch into another team.\n", S_COLOR_CYAN ); // FIXME: need more suitable message :P
 		}
 		// FIXME: switch team forcibly?
@@ -1865,6 +1877,7 @@ void G_Gametype_SetDefaults( void )
 
     level.gametype.isTeamBased = false;
     level.gametype.isRace = false;
+	level.gametype.isTutorial = false;
     level.gametype.inverseScore = false;
     level.gametype.hasChallengersQueue = false;
     level.gametype.maxPlayersPerTeam = 0;
@@ -1887,8 +1900,12 @@ void G_Gametype_SetDefaults( void )
     level.gametype.canShowMinimap = false;
     level.gametype.teamOnlyMinimap = true;
 	level.gametype.customDeadBodyCam = false;
+	level.gametype.removeInactivePlayers = true;
 
-    level.gametype.spawnpoint_radius = 64;
+    level.gametype.spawnpointRadius = 64;
+
+	level.gametype.numBots = 0;
+	level.gametype.dummyBots = false;
 
     level.gametype.mmCompatible = false;
 }
@@ -1899,6 +1916,7 @@ void G_Gametype_SetDefaults( void )
 void G_Gametype_Init( void )
 {
 	bool changed = false;
+	const char *mapGametype;
 
 	g_gametypes_list = trap_Cvar_Get( "g_gametypes_list", "", CVAR_NOSET|CVAR_ARCHIVE );
 	G_Gametype_GenerateGametypesList(); // fill the g_gametypes_list cvar
@@ -1924,6 +1942,11 @@ void G_Gametype_Init( void )
 	g_allow_selfdamage = trap_Cvar_Get( "g_allow_selfdamage", "1", CVAR_ARCHIVE );
 	g_allow_teamdamage = trap_Cvar_Get( "g_allow_teamdamage", "1", CVAR_ARCHIVE );
 	g_allow_bunny = trap_Cvar_Get( "g_allow_bunny", "1", CVAR_ARCHIVE|CVAR_READONLY );
+
+	// map-specific gametype
+	mapGametype = G_asCallMapGametype();
+	if( mapGametype[0] && G_Gametype_Exists( mapGametype ) )
+		trap_Cvar_Set( g_gametype->name, mapGametype );
 
 	// update latched gametype change
 	if( g_gametype->latched_string )
@@ -1967,8 +1990,6 @@ void G_Gametype_Init( void )
 		trap_Cbuf_Execute();
 	}
 
-	GS_SetGametypeName( g_gametype->string );
-
 	// fixme: we are doing this twice because the gametype may check for GS_Instagib
 	G_CheckCvars(); // update GS_Instagib, GS_FallDamage, etc
 
@@ -1978,7 +1999,9 @@ void G_Gametype_Init( void )
 	if( !GT_asLoadScript( g_gametype->string ) )
 		G_Gametype_GENERIC_Init();
 
-	trap_ConfigString( CS_GAMETYPENAME, gs.gametypeName );
+	GS_SetGametypeName( g_gametype->string );
+
+	trap_ConfigString( CS_GAMETYPENAME, g_gametype->string );
 
 	G_CheckCvars(); // update GS_Instagib, GS_FallDamage, etc
 

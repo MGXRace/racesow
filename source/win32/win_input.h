@@ -18,6 +18,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 
+#include <stdbool.h>
+
 // Raw input includes
 #ifndef WINUSERAPI
 #define WINUSERAPI
@@ -145,6 +147,12 @@ WINUSERAPI BOOL WINAPI RegisterRawInputDevices(PCRAWINPUTDEVICE,UINT,UINT);
 extern int mouse_buttons;
 extern int mouse_wheel_type;
 
+void IN_Activate( bool active );
+
 void IN_MouseEvent( int mstate );
 
 void IN_RawInput_MouseRead( HANDLE in_device_handle );
+
+void IN_WinIME_Init( void );
+void IN_WinIME_AssociateContext( void );
+void IN_WinIME_Shutdown( void );

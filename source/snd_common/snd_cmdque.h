@@ -23,8 +23,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #define SND_COMMANDS_BUFSIZE	0x100000
 
-typedef struct qbufQueue_s sndQueue_t;
-typedef unsigned (*queueCmdHandler_t)( const void * );
+#define SND_SPATIALIZE_ENTS_MAX 8
+
+typedef struct qbufPipe_s sndCmdPipe_t;
+typedef unsigned (*pipeCmdHandler_t)( const void * );
 
 enum
 {
@@ -52,9 +54,17 @@ enum
 	SND_CMD_RAW_SAMPLES,
 	SND_CMD_POSITIONED_RAW_SAMPLES,
 	SND_CMD_STUFFCMD,
+	SND_CMD_SET_MUL_ENTITY_SPATIALIZATION,
 
 	SND_CMD_NUM_CMDS
 };
+
+typedef struct 
+{
+	int entnum;
+	float origin[3];
+	float velocity[3];
+} smdCmdSpatialization_t;
 
 typedef struct
 {
@@ -78,6 +88,8 @@ typedef struct
 typedef struct
 {
 	int id;
+	int clear;
+	int stopMusic;
 } sndCmdStop_t;
 
 typedef struct
@@ -156,6 +168,7 @@ typedef struct
 	int id;
 	char intro[64];
 	char loop[64];
+	int mode;
 } sndCmdStartBackgroundTrack_t;
 
 typedef struct
@@ -208,8 +221,8 @@ typedef struct
 	unsigned int rate;
 	unsigned short width;
 	unsigned short channels;
-	qbyte *data;
-	qboolean music;
+	uint8_t *data;
+	bool music;
 } sndRawSamplesCmd_t;
 
 typedef struct
@@ -222,7 +235,7 @@ typedef struct
 	unsigned int rate; 
 	unsigned short width;
 	unsigned short channels;
-	qbyte *data;
+	uint8_t *data;
 } sndPositionedRawSamplesCmd_t;
 
 typedef struct
@@ -231,46 +244,58 @@ typedef struct
 	char text[80];
 } sndStuffCmd_t;
 
-sndQueue_t *S_CreateSoundQueue( void );
-void S_DestroySoundQueue( sndQueue_t **pqueue );
-int S_ReadEnqueuedCmds( sndQueue_t *queue, queueCmdHandler_t *cmdHandlers );
-void S_FinishSoundQueue( sndQueue_t *queue );
+typedef struct
+{
+	int id;
+	unsigned numents;
+	int entnum[SND_SPATIALIZE_ENTS_MAX];
+	float origin[SND_SPATIALIZE_ENTS_MAX][3];
+	float velocity[SND_SPATIALIZE_ENTS_MAX][3];
+} sndCmdSetMulEntitySpatialization_t;
 
-void S_IssueInitCmd( sndQueue_t *queue, void *hwnd, int maxents, qboolean verbose );
-void S_IssueShutdownCmd( sndQueue_t *queue, qboolean verbose );
-void S_IssueClearCmd( sndQueue_t *queue );
-void S_IssueStopAllSoundsCmd( sndQueue_t *queue );
-void S_IssueFreeSfxCmd( sndQueue_t *queue, int sfx );
-void S_IssueLoadSfxCmd( sndQueue_t *queue, int sfx );
-void S_IssueSetAttenuationCmd( sndQueue_t *queue, int model, 
+sndCmdPipe_t *S_CreateSoundCmdPipe( void );
+void S_DestroySoundCmdPipe( sndCmdPipe_t **pqueue );
+int S_ReadEnqueuedCmds( sndCmdPipe_t *queue, pipeCmdHandler_t *cmdHandlers );
+void S_WaitEnqueuedCmds( qbufPipe_t *queue, int (*read)( qbufPipe_t *, unsigned( ** )(const void *), bool ), 
+	unsigned (**cmdHandlers)( const void * ), unsigned timeout_msec );
+void S_FinishSoundCmdPipe( sndCmdPipe_t *queue );
+
+void S_IssueInitCmd( sndCmdPipe_t *queue, void *hwnd, int maxents, bool verbose );
+void S_IssueShutdownCmd( sndCmdPipe_t *queue, bool verbose );
+void S_IssueClearCmd( sndCmdPipe_t *queue );
+void S_IssueStopAllSoundsCmd( sndCmdPipe_t *queue, bool clear, bool stopMusic );
+void S_IssueFreeSfxCmd( sndCmdPipe_t *queue, int sfx );
+void S_IssueLoadSfxCmd( sndCmdPipe_t *queue, int sfx );
+void S_IssueSetAttenuationCmd( sndCmdPipe_t *queue, int model, 
 	float maxdistance, float refdistance );
-void S_IssueSetEntitySpatializationCmd( sndQueue_t *queue, int entnum, 
-	const vec3_t origin, const vec3_t velocity );
-void S_IssueSetListenerCmd( sndQueue_t *queue, const vec3_t origin, 
-	const vec3_t velocity, const mat3_t axis, qboolean avidump );
-void S_IssueStartLocalSoundCmd( sndQueue_t *queue, int sfx );
-void S_IssueStartFixedSoundCmd( sndQueue_t *queue, int sfx, const vec3_t origin,
+void S_IssueSetEntitySpatializationCmd( sndCmdPipe_t *queue, const smdCmdSpatialization_t *spat );
+void S_IssueSetListenerCmd( sndCmdPipe_t *queue, const vec3_t origin, 
+	const vec3_t velocity, const mat3_t axis, bool avidump );
+void S_IssueStartLocalSoundCmd( sndCmdPipe_t *queue, int sfx );
+void S_IssueStartFixedSoundCmd( sndCmdPipe_t *queue, int sfx, const vec3_t origin,
 	int channel, float fvol, float attenuation );
-void S_IssueStartGlobalSoundCmd( sndQueue_t *queue, int sfx, int channel, 
+void S_IssueStartGlobalSoundCmd( sndCmdPipe_t *queue, int sfx, int channel, 
 	float fvol );
-void S_IssueStartRelativeSoundCmd( sndQueue_t *queue, int sfx, int entnum, 
+void S_IssueStartRelativeSoundCmd( sndCmdPipe_t *queue, int sfx, int entnum, 
 	int channel, float fvol, float attenuation );
-void S_IssueStartBackgroundTrackCmd( sndQueue_t *queue, const char *intro,
-	const char *loop );
-void S_IssueStopBackgroundTrackCmd( sndQueue_t *queue );
-void S_IssueLockBackgroundTrackCmd( sndQueue_t *queue, qboolean lock );
-void S_IssueAddLoopSoundCmd( sndQueue_t *queue, int sfx, int entnum,
+void S_IssueStartBackgroundTrackCmd( sndCmdPipe_t *queue, const char *intro,
+	const char *loop, int mode );
+void S_IssueStopBackgroundTrackCmd( sndCmdPipe_t *queue );
+void S_IssueLockBackgroundTrackCmd( sndCmdPipe_t *queue, bool lock );
+void S_IssueAddLoopSoundCmd( sndCmdPipe_t *queue, int sfx, int entnum,
 	float fvol, float attenuation );
-void S_IssueAdvanceBackgroundTrackCmd( sndQueue_t *queue, int val );
-void S_IssuePauseBackgroundTrackCmd( sndQueue_t *queue );
-void S_IssueActivateCmd( sndQueue_t *queue, qboolean active );
-void S_IssueAviDemoCmd( sndQueue_t *queue, qboolean begin );
-void S_IssueRawSamplesCmd( sndQueue_t *queue, unsigned int samples, 
+void S_IssueAdvanceBackgroundTrackCmd( sndCmdPipe_t *queue, int val );
+void S_IssuePauseBackgroundTrackCmd( sndCmdPipe_t *queue );
+void S_IssueActivateCmd( sndCmdPipe_t *queue, bool active );
+void S_IssueAviDemoCmd( sndCmdPipe_t *queue, bool begin );
+void S_IssueRawSamplesCmd( sndCmdPipe_t *queue, unsigned int samples, 
 	unsigned int rate, unsigned short width, unsigned short channels, 
-	qbyte *data, qboolean music );
-void S_IssuePositionedRawSamplesCmd( sndQueue_t *queue, int entnum, 
+	uint8_t *data, bool music );
+void S_IssuePositionedRawSamplesCmd( sndCmdPipe_t *queue, int entnum, 
 	float fvol, float attenuation, unsigned int samples, unsigned int rate, 
-	unsigned short width, unsigned short channels, qbyte *data );
-void S_IssueStuffCmd( sndQueue_t *queue, const char *text );
+	unsigned short width, unsigned short channels, uint8_t *data );
+void S_IssueStuffCmd( sndCmdPipe_t *queue, const char *text );
+void S_IssueSetMulEntitySpatializationCmd( sndCmdPipe_t *queue, unsigned numEnts,
+	const smdCmdSpatialization_t *spat );
 
 #endif // SND_CMDQUEUE_H

@@ -152,7 +152,7 @@ static void CG_ParseTagMask( struct model_s *model, int bonenum, char *name, flo
 */
 static bool CG_ParseAnimationScript( pmodelinfo_t *pmodelinfo, char *filename )
 {
-	qbyte *buf;
+	uint8_t *buf;
 	char *ptr, *token;
 	int rounder, counter, i;
 	bool debug = true;
@@ -177,7 +177,7 @@ static bool CG_ParseAnimationScript( pmodelinfo_t *pmodelinfo, char *filename )
 		return false;
 	}
 
-	buf = ( qbyte * )CG_Malloc( length + 1 );
+	buf = ( uint8_t * )CG_Malloc( length + 1 );
 	length = trap_FS_Read( buf, length, filenum );
 	trap_FS_FCloseFile( filenum );
 	if( !length )
@@ -191,7 +191,7 @@ static bool CG_ParseAnimationScript( pmodelinfo_t *pmodelinfo, char *filename )
 	ptr = ( char * )buf;
 	while( ptr )
 	{
-		token = COM_ParseExt( &ptr, qtrue );
+		token = COM_ParseExt( &ptr, true );
 		if( !token[0] )
 			break;
 
@@ -203,7 +203,7 @@ static bool CG_ParseAnimationScript( pmodelinfo_t *pmodelinfo, char *filename )
 			{
 				if( debug ) CG_Printf( "Script: %s:", token );
 
-				token = COM_ParseExt( &ptr, qfalse );
+				token = COM_ParseExt( &ptr, false );
 				if( !token[0] )  //Error (fixme)
 					break;
 
@@ -239,18 +239,18 @@ static bool CG_ParseAnimationScript( pmodelinfo_t *pmodelinfo, char *filename )
 			// Rotation bone
 			else if( !Q_stricmp( token, "rotationbone" ) )
 			{
-				token = COM_ParseExt( &ptr, qfalse );
+				token = COM_ParseExt( &ptr, false );
 				if( !token[0] ) break; //Error (fixme)
 
 				if( !Q_stricmp( token, "upper" ) )
 				{
-					token = COM_ParseExt( &ptr, qfalse );
+					token = COM_ParseExt( &ptr, false );
 					if( !token[0] ) break; //Error (fixme)
 					CG_ParseRotationBone( pmodelinfo, token, UPPER );
 				}
 				else if( !Q_stricmp( token, "head" ) )
 				{
-					token = COM_ParseExt( &ptr, qfalse );
+					token = COM_ParseExt( &ptr, false );
 					if( !token[0] ) break; //Error (fixme)
 					CG_ParseRotationBone( pmodelinfo, token, HEAD );
 				}
@@ -263,20 +263,20 @@ static bool CG_ParseAnimationScript( pmodelinfo_t *pmodelinfo, char *filename )
 			// Root animation bone
 			else if( !Q_stricmp( token, "rootanim" ) )
 			{
-				token = COM_ParseExt( &ptr, qfalse );
+				token = COM_ParseExt( &ptr, false );
 				if( !token[0] ) break;
 
 				if( !Q_stricmp( token, "upper" ) )
 				{
-					rootanims[UPPER] = CG_FindBoneNum( CG_SkeletonForModel( pmodelinfo->model ), COM_ParseExt( &ptr, qfalse ) );
+					rootanims[UPPER] = CG_FindBoneNum( CG_SkeletonForModel( pmodelinfo->model ), COM_ParseExt( &ptr, false ) );
 				}
 				else if( !Q_stricmp( token, "head" ) )
 				{
-					rootanims[HEAD] = CG_FindBoneNum( CG_SkeletonForModel( pmodelinfo->model ), COM_ParseExt( &ptr, qfalse ) );
+					rootanims[HEAD] = CG_FindBoneNum( CG_SkeletonForModel( pmodelinfo->model ), COM_ParseExt( &ptr, false ) );
 				}
 				else if( !Q_stricmp( token, "lower" ) )
 				{
-					rootanims[LOWER] = CG_FindBoneNum( CG_SkeletonForModel( pmodelinfo->model ), COM_ParseExt( &ptr, qfalse ) );
+					rootanims[LOWER] = CG_FindBoneNum( CG_SkeletonForModel( pmodelinfo->model ), COM_ParseExt( &ptr, false ) );
 					//we parse it so it makes no error, but we ignore it later on
 					CG_Printf( "Script: WARNING: Ignored rootanim lower: Valid names are: 'upper', 'head' (lower is always skeleton root)\n" );
 				}
@@ -291,7 +291,7 @@ static bool CG_ParseAnimationScript( pmodelinfo_t *pmodelinfo, char *filename )
 			{
 				int bonenum;
 
-				token = COM_ParseExt( &ptr, qfalse );
+				token = COM_ParseExt( &ptr, false );
 				if( !token[0] )
 					break; //Error
 
@@ -301,19 +301,19 @@ static bool CG_ParseAnimationScript( pmodelinfo_t *pmodelinfo, char *filename )
 					char maskname[MAX_QPATH];
 					float forward, right, up, pitch, yaw, roll;
 
-					token = COM_ParseExt( &ptr, qfalse );
+					token = COM_ParseExt( &ptr, false );
 					if( !token[0] )
 					{
 						CG_Printf( "Script: ERROR: missing maskname in tagmask for bone %i\n", bonenum );
 						break; //Error
 					}
 					Q_strncpyz( maskname, token, sizeof( maskname ) );
-					forward = atof( COM_ParseExt( &ptr, qfalse ) );
-					right = atof( COM_ParseExt( &ptr, qfalse ) );
-					up = atof( COM_ParseExt( &ptr, qfalse ) );
-					pitch = atof( COM_ParseExt( &ptr, qfalse ) );
-					yaw = atof( COM_ParseExt( &ptr, qfalse ) );
-					roll = atof( COM_ParseExt( &ptr, qfalse ) );
+					forward = atof( COM_ParseExt( &ptr, false ) );
+					right = atof( COM_ParseExt( &ptr, false ) );
+					up = atof( COM_ParseExt( &ptr, false ) );
+					pitch = atof( COM_ParseExt( &ptr, false ) );
+					yaw = atof( COM_ParseExt( &ptr, false ) );
+					roll = atof( COM_ParseExt( &ptr, false ) );
 					CG_ParseTagMask( pmodelinfo->model, bonenum, maskname, forward, right, up, pitch, yaw, roll );
 				}
 				else if( debug )
@@ -642,10 +642,10 @@ void CG_AddShellEffects( entity_t *ent, int effects )
 void CG_SetOutlineColor( byte_vec4_t outlineColor, byte_vec4_t color )
 {
 	float darken = 0.25f;
-	outlineColor[0] = ( qbyte )( color[0] * darken );
-	outlineColor[1] = ( qbyte )( color[1] * darken );
-	outlineColor[2] = ( qbyte )( color[2] * darken );
-	outlineColor[3] = ( qbyte )( 255 );
+	outlineColor[0] = ( uint8_t )( color[0] * darken );
+	outlineColor[1] = ( uint8_t )( color[1] * darken );
+	outlineColor[2] = ( uint8_t )( color[2] * darken );
+	outlineColor[3] = ( uint8_t )( 255 );
 }
 
 /*
@@ -690,10 +690,10 @@ static float CG_OutlineScaleForDist( entity_t *e, float maxdist, float scale )
 /*
 * CG_AddColoredOutLineEffect
 */
-void CG_AddColoredOutLineEffect( entity_t *ent, int effects, qbyte r, qbyte g, qbyte b, qbyte a )
+void CG_AddColoredOutLineEffect( entity_t *ent, int effects, uint8_t r, uint8_t g, uint8_t b, uint8_t a )
 {
 	float scale;
-	qbyte *RGBA;
+	uint8_t *RGBA;
 
 	if( effects & EF_QUAD )
 	{
@@ -778,15 +778,15 @@ void CG_AddColoredOutLineEffect( entity_t *ent, int effects, qbyte r, qbyte g, q
 	}
 
 	if( effects & EF_GODMODE )
-		Vector4Set( RGBA, 255, 255, 255, 255 );
+		Vector4Set( RGBA, 255, 255, 255, a );
 	else if( effects & EF_QUAD )
-		Vector4Set( RGBA, 255, 255, 0, 255 );
+		Vector4Set( RGBA, 255, 255, 0, a );
 	else if( effects & EF_SHELL )
-		Vector4Set( RGBA, 125, 200, 255, 255 );
+		Vector4Set( RGBA, 125, 200, 255, a );
 	else if( effects & EF_REGEN )
-		Vector4Set( RGBA, 255, 0, 0, 255 );
+		Vector4Set( RGBA, 255, 0, 0, a );
 	else
-		Vector4Set( RGBA, ( qbyte )r, ( qbyte )g, ( qbyte )b, ( qbyte )a );
+		Vector4Set( RGBA, ( uint8_t )r, ( uint8_t )g, ( uint8_t )b, ( uint8_t )a );
 }
 
 /*
@@ -1031,8 +1031,7 @@ void CG_UpdatePlayerModelEnt( centity_t *cent )
 	cent->ent.renderfx = cent->renderfx;
 
 	pmodel = &cg_entPModels[cent->current.number];
-	pmodel->pmodelinfo = CG_PModelForCentity( cent );
-	pmodel->skin = CG_SkinForCentity( cent );
+	CG_PModelForCentity( cent, &pmodel->pmodelinfo, &pmodel->skin );
 
 	CG_PlayerColorForEntity( cent->current.number, cent->ent.shaderRGBA );
 

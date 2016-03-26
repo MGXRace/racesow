@@ -30,9 +30,9 @@ static void Irc_Client_Messagemode_f(void);
 static void Irc_Client_Messagemode2_f(void);
 
 // key event (for chat)
-static void Irc_Client_KeyEvent_f(int key, qboolean *key_down);
-static void Irc_Client_KeyEvent2_f(int key, qboolean *key_down);
-static void Irc_Client_CharEvent_f(qwchar key);
+static void Irc_Client_KeyEvent_f(int key, bool *key_down);
+static void Irc_Client_KeyEvent2_f(int key, bool *key_down);
+static void Irc_Client_CharEvent_f(wchar_t key);
 
 // dynvar listeners
 static void Irc_Client_Draw_f(void *frametick);
@@ -87,7 +87,7 @@ static int	irc_messagemode_target_buflen = 0;
 
 void Irc_Client_Connected_f(void *connected) {
 
-	qboolean *c = (qboolean *) connected;
+	bool *c = (bool *) connected;
 	if (!dedicated)
 		dedicated = IRC_IMPORT.Cvar_Get("dedicated", "1", CVAR_NOSET);
 
@@ -653,7 +653,7 @@ static void Irc_Client_Messagemode2_f(void) {
 	}
 }
 
-static void Irc_Client_KeyEvent_f(int key, qboolean *key_down) {
+static void Irc_Client_KeyEvent_f(int key, bool *key_down) {
 	assert(reading_from_keyboard == IRC_MESSAGEMODE_CHANMSG);
 	switch (key) {
 		case K_ENTER:
@@ -687,7 +687,7 @@ static void Irc_Client_KeyEvent_f(int key, qboolean *key_down) {
 	}
 }
 
-static void Irc_Client_KeyEvent2_f(int key, qboolean *key_down) {
+static void Irc_Client_KeyEvent2_f(int key, bool *key_down) {
 	switch (reading_from_keyboard) {
 		case IRC_MESSAGEMODE_PRIVMSG_TARGET:
 			switch (key) {
@@ -760,7 +760,7 @@ static void Irc_Client_KeyEvent2_f(int key, qboolean *key_down) {
 	}
 }
 
-static void Irc_Client_CharEvent_f(qwchar key) {
+static void Irc_Client_CharEvent_f(wchar_t key) {
 	char *buf = NULL;
 	int *buflen = NULL;
 	switch (reading_from_keyboard) {

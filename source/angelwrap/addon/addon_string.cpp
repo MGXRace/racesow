@@ -59,11 +59,11 @@ asstring_t *objectString_FactoryBuffer( const char *buffer, unsigned int length 
 const asstring_t *objectString_ConstFactoryBuffer( const char *buffer, unsigned int length )
 {
 	asstring_t *object;
-	qbyte *rawmem;
+	uint8_t *rawmem;
 	unsigned int size = (length + 1) & ~CONST_STRING_BITFLAG;
 
 	length = size - 1;
-	rawmem = new qbyte[sizeof( asstring_t ) + size];
+	rawmem = new uint8_t[sizeof( asstring_t ) + size];
 	object = ( asstring_t * )rawmem;
 	object->asRefCount = 1;
 	object->buffer = ( char * )( object + 1 );
@@ -209,7 +209,7 @@ void objectString_Release( asstring_t *obj )
 		}
 		else
 		{
-			qbyte *rawmem = ( qbyte * )obj;
+			uint8_t *rawmem = ( uint8_t * )obj;
 			delete[] rawmem;
 		}
 	}
@@ -504,11 +504,11 @@ static asstring_t *objectString_Replace( const asstring_t &assearch, const asstr
 	std::string replace(asreplace.buffer);
 	std::string subject(self->buffer);
 
-    size_t pos = 0;
-    while ((pos = subject.find(search, pos)) != std::string::npos) {
-         subject.replace(pos, search.length(), replace);
-         pos += replace.length();
-    }
+	size_t pos = 0;
+	while ((pos = subject.find(search, pos)) != std::string::npos) {
+		subject.replace(pos, search.length(), replace);
+		pos += replace.length();
+	}
 
 	return objectString_FactoryBuffer( subject.c_str(), subject.size() );
 }
@@ -519,6 +519,8 @@ void PreRegisterStringAddon( asIScriptEngine *engine )
 
 	// register the string type
 	r = engine->RegisterObjectType( "String", sizeof( asstring_t ), asOBJ_REF ); assert( r >= 0 );
+
+	(void)sizeof(r); // hush the compiler
 }
 
 void RegisterStringAddon( asIScriptEngine *engine )
@@ -599,4 +601,6 @@ void RegisterStringAddon( asIScriptEngine *engine )
 	r = engine->RegisterObjectMethod( "String", "bool isNumerical() const", asFUNCTION( objectString_IsNumeric ), asCALL_CDECL_OBJLAST ); assert( r >= 0 );
 	r = engine->RegisterObjectMethod( "String", "bool isNumeric() const", asFUNCTION( objectString_IsNumeric ), asCALL_CDECL_OBJLAST ); assert( r >= 0 );
 	r = engine->RegisterObjectMethod( "String", "bool isAlphaNumerical() const", asFUNCTION( objectString_IsAlphaNumerical ), asCALL_CDECL_OBJLAST ); assert( r >= 0 );
+
+	(void)sizeof(r); // hush the compiler
 }

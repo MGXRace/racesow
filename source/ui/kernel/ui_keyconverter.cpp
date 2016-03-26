@@ -11,18 +11,12 @@
 #include "kernel/ui_keyconverter.h"
 #include <Rocket/Core/Input.h>
 
+namespace WSWUI {
+
 using namespace Rocket::Core::Input;
 
-KeyConverter::KeyConverter()
-{
-	// TODO Auto-generated constructor stub
-
-}
-
-KeyConverter::~KeyConverter()
-{
-	// TODO Auto-generated destructor stub
-}
+/* Special punctuation characters */
+const char * KeyConverter::oem_keys = ";=,-./`[\\]'";
 
 int KeyConverter::getModifiers( void )
 {
@@ -33,6 +27,8 @@ int KeyConverter::getModifiers( void )
 		mod |= KM_CTRL;
 	if( trap::Key_IsDown( K_LSHIFT ) || trap::Key_IsDown( K_RSHIFT ) )
 		mod |= KM_SHIFT;
+	else
+		mod |= KM_NUMLOCK;
 
 	return mod;
 }
@@ -43,6 +39,11 @@ int KeyConverter::toRocketKey( int key )
 		return KI_0 + ( key - '0' );
 	if( key >= 'a' && key <= 'z' )
 		return KI_A + ( key - 'a' );
+
+	for( unsigned i = 0; i < sizeof(oem_keys) - 1; ++i ) {
+		if( key == oem_keys[i] )
+			return KI_OEM_1 + i;
+	}
 
 	switch( key )
 	{
@@ -120,6 +121,8 @@ int KeyConverter::fromRocketKey( int key )
 		return '0' + ( key - KI_0 );
 	if( key >= KI_A && key <= KI_Z )
 		return 'a' + ( key - KI_A );
+	if( key >= KI_OEM_1 && key <= KI_OEM_7 )
+		return oem_keys[key - KI_OEM_1];
 
 	switch( key )
 	{
@@ -204,24 +207,14 @@ int KeyConverter::specialChar( int c )
 	return 0;
 }
 
-int KeyConverter::toRocketMouse( int btn )
+int KeyConverter::toRocketWheel( int wheel )
 {
-	// Rocket uses 0-..
-	return btn - K_MOUSE1;
+	return ( wheel == K_MWHEELUP ? -1 : ( wheel == K_MWHEELDOWN ? 1 : 0 ) );
 }
 
-int KeyConverter::fromRocketMouse( int btn )
-{
-	// Rocket uses 0-...
-	return K_MOUSE1 + btn;
-}
-
-int  KeyConverter::toRocketWheel( int wheel )
-{
-	return ( wheel == K_MWHEELUP ? KI_MWHEELUP : ( wheel == K_MWHEELDOWN ? KI_MWHEELDOWN : 0 ) );
-}
-
-int  KeyConverter::fromRocketWheel( int wheel )
+int KeyConverter::fromRocketWheel( int wheel )
 {
 	return ( wheel > 0 ? K_MWHEELDOWN : ( wheel < 0 ? K_MWHEELUP : 0 ) );
+}
+
 }

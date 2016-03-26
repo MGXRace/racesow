@@ -41,7 +41,7 @@ cg_lightStyle_t	cg_lightStyle[MAX_LIGHTSTYLES];
 /*
 * CG_ClearLightStyles
 */
-static void CG_ClearLightStyles( void )
+void CG_ClearLightStyles( void )
 {
 	memset( cg_lightStyle, 0, sizeof( cg_lightStyle ) );
 }
@@ -238,10 +238,10 @@ static void CG_AddBlobShadow( vec3_t origin, vec3_t dir, float orient, float rad
 	if( b < 0 ) b = 0;else if( b > 1 ) b = 255;else b *= 255;
 	if( a < 0 ) a = 0;else if( a > 1 ) a = 255;else a *= 255;
 
-	color[0] = ( qbyte )( r );
-	color[1] = ( qbyte )( g );
-	color[2] = ( qbyte )( b );
-	color[3] = ( qbyte )( a );
+	color[0] = ( uint8_t )( r );
+	color[1] = ( uint8_t )( g );
+	color[2] = ( uint8_t )( b );
+	color[3] = ( uint8_t )( a );
 	c = *( int * )color;
 
 	radius = 0.5f / radius;
@@ -436,10 +436,10 @@ void CG_AddFragmentedDecal( vec3_t origin, vec3_t dir, float orient, float radiu
 	if( b < 0 ) b = 0;else if( b > 1 ) b = 255;else b *= 255;
 	if( a < 0 ) a = 0;else if( a > 1 ) a = 255;else a *= 255;
 
-	color[0] = ( qbyte )( r );
-	color[1] = ( qbyte )( g );
-	color[2] = ( qbyte )( b );
-	color[3] = ( qbyte )( a );
+	color[0] = ( uint8_t )( r );
+	color[1] = ( uint8_t )( g );
+	color[2] = ( uint8_t )( b );
+	color[3] = ( uint8_t )( a );
 	c = *( int * )color;
 
 	radius = 0.5f / radius;
@@ -509,7 +509,7 @@ typedef struct particle_s
 	struct shader_s	*shader;
 } cparticle_t;
 
-#define	PARTICLE_GRAVITY    250
+#define	PARTICLE_GRAVITY    500
 
 #define MAX_PARTICLES	    2048
 
@@ -649,7 +649,7 @@ void CG_AddLinearTrail( centity_t *cent, float lifetime )
 * 
 * Wall impact puffs
 */
-void CG_ParticleEffect( vec3_t org, vec3_t dir, float r, float g, float b, int count )
+void CG_ParticleEffect( const vec3_t org, const vec3_t dir, float r, float g, float b, int count )
 {
 	int j;
 	cparticle_t *p;
@@ -662,7 +662,7 @@ void CG_ParticleEffect( vec3_t org, vec3_t dir, float r, float g, float b, int c
 		count = MAX_PARTICLES - cg_numparticles;
 	for( p = &particles[cg_numparticles], cg_numparticles += count; count > 0; count--, p++ )
 	{
-		CG_InitParticle( p, 1, 1, r + random()*0.1, g + random()*0.1, b + random()*0.1, NULL );
+		CG_InitParticle( p, 0.75, 1, r + random()*0.1, g + random()*0.1, b + random()*0.1, NULL );
 
 		d = rand() & 31;
 		for( j = 0; j < 3; j++ )
@@ -680,7 +680,7 @@ void CG_ParticleEffect( vec3_t org, vec3_t dir, float r, float g, float b, int c
 /*
 * CG_ParticleEffect2
 */
-void CG_ParticleEffect2( vec3_t org, vec3_t dir, float r, float g, float b, int count )
+void CG_ParticleEffect2( const vec3_t org, const vec3_t dir, float r, float g, float b, int count )
 {
 	int j;
 	float d;
@@ -693,7 +693,7 @@ void CG_ParticleEffect2( vec3_t org, vec3_t dir, float r, float g, float b, int 
 		count = MAX_PARTICLES - cg_numparticles;
 	for( p = &particles[cg_numparticles], cg_numparticles += count; count > 0; count--, p++ )
 	{
-		CG_InitParticle( p, 1, 1, r, g, b, NULL );
+		CG_InitParticle( p, 0.75, 1, r, g, b, NULL );
 
 		d = rand()&7;
 		for( j = 0; j < 3; j++ )
@@ -711,7 +711,7 @@ void CG_ParticleEffect2( vec3_t org, vec3_t dir, float r, float g, float b, int 
 /*
 * CG_ParticleExplosionEffect
 */
-void CG_ParticleExplosionEffect( vec3_t org, vec3_t dir, float r, float g, float b, int count )
+void CG_ParticleExplosionEffect( const vec3_t org, const vec3_t dir, float r, float g, float b, int count )
 {
 	int j;
 	cparticle_t *p;
@@ -724,13 +724,13 @@ void CG_ParticleExplosionEffect( vec3_t org, vec3_t dir, float r, float g, float
 		count = MAX_PARTICLES - cg_numparticles;
 	for( p = &particles[cg_numparticles], cg_numparticles += count; count > 0; count--, p++ )
 	{
-		CG_InitParticle( p, 1, 1, r + random()*0.1, g + random()*0.1, b + random()*0.1, NULL );
+		CG_InitParticle( p, 0.75, 1, r + random()*0.1, g + random()*0.1, b + random()*0.1, NULL );
 
 		d = rand() & 31;
 		for( j = 0; j < 3; j++ )
 		{
 			p->org[j] = org[j] + ( ( rand()&7 ) - 4 ) + d * dir[j];
-			p->vel[j] = crandom() * 200;
+			p->vel[j] = crandom() * 400;
 		}
 
 		//p->accel[0] = p->accel[1] = 0;
@@ -743,7 +743,7 @@ void CG_ParticleExplosionEffect( vec3_t org, vec3_t dir, float r, float g, float
 /*
 * CG_BlasterTrail
 */
-void CG_BlasterTrail( vec3_t start, vec3_t end )
+void CG_BlasterTrail( const vec3_t start, const vec3_t end )
 {
 	int j, count;
 	vec3_t move, vec;
@@ -782,7 +782,7 @@ void CG_BlasterTrail( vec3_t start, vec3_t end )
 /*
 * CG_ElectroWeakTrail
 */
-void CG_ElectroWeakTrail( vec3_t start, vec3_t end, vec4_t color )
+void CG_ElectroWeakTrail( const vec3_t start, const vec3_t end, const vec4_t color )
 {
 	int j, count;
 	vec3_t move, vec;
@@ -824,10 +824,10 @@ void CG_ElectroWeakTrail( vec3_t start, vec3_t end, vec4_t color )
 }
 
 /*
-* CG_ImpactPufParticles
+* CG_ImpactPuffParticles
 * Wall impact puffs
 */
-void CG_ImpactPuffParticles( vec3_t org, vec3_t dir, int count, float scale, float r, float g, float b, float a, struct shader_s *shader )
+void CG_ImpactPuffParticles( const vec3_t org, const vec3_t dir, int count, float scale, float r, float g, float b, float a, struct shader_s *shader )
 {
 	int j;
 	float d;
@@ -856,9 +856,41 @@ void CG_ImpactPuffParticles( vec3_t org, vec3_t dir, int count, float scale, flo
 }
 
 /*
+* CG_HighVelImpactPuffParticles
+* High velocity wall impact puffs
+*/
+void CG_HighVelImpactPuffParticles( const vec3_t org, const vec3_t dir, int count, float scale, float r, float g, float b, float a, struct shader_s *shader )
+{
+	int j;
+	float d;
+	cparticle_t *p;
+
+	if( !cg_particles->integer )
+		return;
+
+	if( cg_numparticles + count > MAX_PARTICLES )
+		count = MAX_PARTICLES - cg_numparticles;
+	for( p = &particles[cg_numparticles], cg_numparticles += count; count > 0; count--, p++ )
+	{
+		CG_InitParticle( p, scale, a, r, g, b, shader );
+
+		d = rand() & 15;
+		for( j = 0; j < 3; j++ )
+		{
+			p->org[j] = org[j] + ( ( rand()&7 ) - 4 ) + d * dir[j];
+			p->vel[j] = dir[j] * 180 + crandom() * 40;
+		}
+
+		p->accel[0] = p->accel[1] = 0;
+		p->accel[2] = -PARTICLE_GRAVITY * 2;
+		p->alphavel = -5.0 / ( 0.5 + random() * 0.3 );
+	}
+}
+
+/*
 * CG_ElectroIonsTrail
 */
-void CG_ElectroIonsTrail( vec3_t start, vec3_t end )
+void CG_ElectroIonsTrail( const vec3_t start, const vec3_t end, const vec4_t color )
 {
 #define MAX_BOLT_IONS 48
 	int i, count;
@@ -886,7 +918,7 @@ void CG_ElectroIonsTrail( vec3_t start, vec3_t end )
 		count = MAX_PARTICLES - cg_numparticles;
 	for( p = &particles[cg_numparticles], cg_numparticles += count; count > 0; count--, p++ )
 	{
-		CG_InitParticle( p, 1.2f, 1, 0.8f + crandom()*0.1, 0.8f + crandom()*0.1, 0.8f + crandom()*0.1, NULL );
+		CG_InitParticle( p, 0.65f, color[3], color[0] + crandom()*0.1, color[1] + crandom()*0.1, color[2] + crandom()*0.1, NULL );
 
 		for( i = 0; i < 3; i++ )
 		{
@@ -899,12 +931,49 @@ void CG_ElectroIonsTrail( vec3_t start, vec3_t end )
 	}
 }
 
+void CG_ElectroIonsTrail2( const vec3_t start, const vec3_t end, const vec4_t color )
+{
+#define MAX_RING_IONS 96
+	int count;
+	vec3_t move, vec;
+	float len;
+	float dec2 = 8.0f;
+	cparticle_t *p;
+
+	VectorSubtract( end, start, vec );
+	len = VectorNormalize( vec );
+	count = (int)( len / dec2 ) + 1;
+	if( count > MAX_RING_IONS )
+	{
+		count = MAX_RING_IONS;
+		dec2 = len / count;
+	}
+
+	VectorScale( vec, dec2, vec );
+	VectorCopy( start, move );
+
+	if( cg_numparticles + count > MAX_PARTICLES )
+		count = MAX_PARTICLES - cg_numparticles;
+	// Ring rail eb particles
+	for( p = &particles[cg_numparticles], cg_numparticles += count; count > 0; count--, p++ )
+	{
+		CG_InitParticle( p, 0.65f, color[3], color[0] + crandom()*0.1, color[1] + crandom()*0.1, color[2] + crandom()*0.1, NULL );
+
+		p->alphavel = -1.0 / ( 0.6 + random()*0.6 );
+
+		VectorCopy( move, p->org );
+		VectorClear( p->accel );
+		VectorClear( p->vel );
+		VectorAdd( move, vec, move );
+	}
+}
+
 #define	BEAMLENGTH	    16
 
 /*
 * CG_FlyParticles
 */
-static void CG_FlyParticles( vec3_t origin, int count )
+static void CG_FlyParticles( const vec3_t origin, int count )
 {
 	int i, j;
 	float angle, sp, sy, cp, cy;
@@ -963,7 +1032,7 @@ static void CG_FlyParticles( vec3_t origin, int count )
 /*
 * CG_FlyEffect
 */
-void CG_FlyEffect( centity_t *ent, vec3_t origin )
+void CG_FlyEffect( centity_t *ent, const vec3_t origin )
 {
 	int n;
 	int count;
@@ -998,9 +1067,6 @@ void CG_FlyEffect( centity_t *ent, vec3_t origin )
 
 	CG_FlyParticles( origin, count );
 }
-
-// wsw specific particle effects below here
-//============================================================
 
 /*
 * CG_AddParticles
@@ -1044,10 +1110,10 @@ void CG_AddParticles( void )
 		org[1] = p->org[1] + p->vel[1]*time + p->accel[1]*time2;
 		org[2] = p->org[2] + p->vel[2]*time + p->accel[2]*time2;
 
-		color[0] = (qbyte)( bound( 0, p->color[0], 1.0f ) * 255 );
-		color[1] = (qbyte)( bound( 0, p->color[1], 1.0f ) * 255 );
-		color[2] = (qbyte)( bound( 0, p->color[2], 1.0f ) * 255 );
-		color[3] = (qbyte)( bound( 0, alpha, 1.0f ) * 255 );
+		color[0] = (uint8_t)( bound( 0, p->color[0], 1.0f ) * 255 );
+		color[1] = (uint8_t)( bound( 0, p->color[1], 1.0f ) * 255 );
+		color[2] = (uint8_t)( bound( 0, p->color[2], 1.0f ) * 255 );
+		color[3] = (uint8_t)( bound( 0, alpha, 1.0f ) * 255 );
 
 		corner[0] = org[0];
 		corner[1] = org[1] - 0.5f * p->scale;
@@ -1097,6 +1163,5 @@ void CG_ClearEffects( void )
 	CG_ClearFragmentedDecals();
 	CG_ClearParticles();
 	CG_ClearDlights();
-	CG_ClearLightStyles();
 	CG_ClearShadeBoxes();
 }

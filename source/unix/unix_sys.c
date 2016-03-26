@@ -22,7 +22,9 @@ which defines HAVE_STRCASECMP if SDL.h isn't called first, causing a bunch of wa
 FIXME:  This will be remidied once a native Mac port is complete
 */
 #if defined ( __APPLE__ ) && !defined ( DEDICATED_ONLY )
-#include <SDL/SDL.h>
+#include <SDL.h>
+#include <CoreFoundation/CoreFoundation.h>
+#include <sys/param.h>
 #endif
 
 #include <signal.h>
@@ -34,8 +36,6 @@ FIXME:  This will be remidied once a native Mac port is complete
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdio.h>
-#include <sys/ipc.h>
-#include <sys/shm.h>
 #include <string.h>
 #include <ctype.h>
 #include <sys/wait.h>
@@ -50,13 +50,14 @@ FIXME:  This will be remidied once a native Mac port is complete
 #include "../qcommon/qcommon.h"
 #include "glob.h"
 
+#if !defined(USE_SDL2) || defined(DEDICATED_ONLY)
+
 cvar_t *nostdout;
-static qboolean nostdout_backup_val = qfalse;
+bool nostdout_backup_val = false;
 
 unsigned sys_frame_time;
 
 uid_t saved_euid;
-qboolean stdin_active = qtrue;
 
 // =======================================================================
 // General routines
@@ -86,6 +87,7 @@ static void signal_handler( int sig )
 	case 1:
 #ifndef DEDICATED_ONLY
 		printf( "Received signal %d, exiting...\n", sig );
+		SV_Shutdown( "Received signal, exiting...\n" );
 		CL_Shutdown();
 		_exit( 1 );
 		break;
@@ -113,82 +115,7 @@ static void InitSig( void )
 	signal( SIGSEGV, signal_handler );
 	signal( SIGTERM, signal_handler );
 	signal( SIGINT, signal_handler );
-}
-
-static void Sys_AnsiColorPrint( const char *msg )
-{
-	static char buffer[2096];
-	int         length = 0;
-	static int  q3ToAnsi[ 8 ] =
-	{
-		30, // COLOR_BLACK
-		31, // COLOR_RED
-		32, // COLOR_GREEN
-		33, // COLOR_YELLOW
-		34, // COLOR_BLUE
-		36, // COLOR_CYAN
-		35, // COLOR_MAGENTA
-		0   // COLOR_WHITE
-	};
-
-	while( *msg )
-	{
-		char c = *msg;
-		int colorindex;
-
-		int gc = Q_GrabCharFromColorString( &msg, &c, &colorindex );
-		if( gc == GRABCHAR_COLOR || (gc == GRABCHAR_CHAR && c == '\n') )
-		{
-			// First empty the buffer
-			if( length > 0 )
-			{
-				buffer[length] = '\0';
-				fputs( buffer, stdout );
-				length = 0;
-			}
-
-			if( c == '\n' )
-			{
-				// Issue a reset and then the newline
-				fputs( "\033[0m\n", stdout );
-			}
-			else
-			{
-				// Print the color code
-				Q_snprintfz( buffer, sizeof( buffer ), "\033[%dm", q3ToAnsi[ colorindex ] );
-				fputs( buffer, stdout );
-			}
-		}
-		else if( gc == GRABCHAR_END )
-			break;
-		else
-		{
-			if( length >= sizeof( buffer ) - 1 )
-				break;
-			buffer[length++] = c;
-		}
-	}
-
-	// Empty anything still left in the buffer
-	if( length > 0 )
-	{
-		buffer[length] = '\0';
-		fputs( buffer, stdout );
-	}
-}
-
-void Sys_ConsoleOutput( char *string )
-{
-	if( nostdout && nostdout->integer )
-		return;
-	if( nostdout_backup_val )
-		return;
-
-#if 0
-	fputs( string, stdout );
-#else
-	Sys_AnsiColorPrint( string );
-#endif
+	signal( SIGPIPE, SIG_IGN );
 }
 
 /*
@@ -198,10 +125,10 @@ void Sys_Quit( void )
 {
 	// Qcommon_Shutdown is going destroy the cvar, so backup its value now
 	// and invalidate the pointer
-	nostdout_backup_val = (nostdout && nostdout->integer ? qtrue : qfalse);
+	nostdout_backup_val = (nostdout && nostdout->integer ? true : false);
 	nostdout = NULL;
 
-	fcntl( 0, F_SETFL, fcntl( 0, F_GETFL, 0 ) & ~FNDELAY );
+	fcntl( 0, F_SETFL, fcntl( 0, F_GETFL, 0 ) & ~O_NONBLOCK );
 
 	Qcommon_Shutdown();
 
@@ -227,82 +154,19 @@ void Sys_InitDynvars( void )
 */
 void Sys_Error( const char *format, ... )
 {
-	static qboolean	recursive = qfalse;
-	va_list	argptr;
+	va_list argptr;
 	char string[1024];
 
 	// change stdin to non blocking
-	fcntl( 0, F_SETFL, fcntl( 0, F_GETFL, 0 ) & ~FNDELAY );
+	fcntl( 0, F_SETFL, fcntl( 0, F_GETFL, 0 ) & ~O_NONBLOCK );
 
 	va_start( argptr, format );
 	Q_vsnprintfz( string, sizeof( string ), format, argptr );
 	va_end( argptr );
 
-	if( recursive )
-	{
-		fprintf( stderr, "Recursive Sys_Error: %s\n", string );
-		_exit( 1 );
-	}
-
-	recursive = qtrue;
-
 	fprintf( stderr, "Error: %s\n", string );
 
-	CL_Shutdown();
-	Qcommon_Shutdown();
-
 	_exit( 1 );
-}
-
-/*
-* Sys_Microseconds
-*/
-static unsigned long sys_secbase;
-quint64 Sys_Microseconds( void )
-{
-	struct timeval tp;
-	struct timezone tzp;
-
-	gettimeofday( &tp, &tzp );
-
-	if( !sys_secbase )
-	{
-		sys_secbase = tp.tv_sec;
-		return tp.tv_usec;
-	}
-
-	// TODO handle the wrap
-	return (quint64)( tp.tv_sec - sys_secbase )*1000000 + tp.tv_usec;
-}
-
-/*
-* Sys_Milliseconds
-*/
-unsigned int Sys_Milliseconds( void )
-{
-	return Sys_Microseconds() / 1000;
-}
-
-/*
-* Sys_XTimeToSysTime
-* 
-* Sub-frame timing of events returned by X
-* Ported from Quake III Arena source code.
-*/
-int Sys_XTimeToSysTime( unsigned long xtime )
-{
-	int ret, time, test;
-
-	// some X servers (like suse 8.1's) report weird event times
-	// if the game is loading, resolving DNS, etc. we are also getting old events
-	// so we only deal with subframe corrections that look 'normal'
-	ret = xtime - (unsigned long)(sys_secbase * 1000);
-	time = Sys_Milliseconds();
-	test = time - ret;
-
-	if( test < 0 || test > 30 ) // in normal conditions I've never seen this go above
-		return time;
-	return ret;
 }
 
 /*
@@ -311,47 +175,6 @@ int Sys_XTimeToSysTime( unsigned long xtime )
 void Sys_Sleep( unsigned int millis )
 {
 	usleep( millis * 1000 );
-}
-
-static void floating_point_exception_handler( int whatever )
-{
-	signal( SIGFPE, floating_point_exception_handler );
-}
-
-char *Sys_ConsoleInput( void )
-{
-	static char text[256];
-	int len;
-	fd_set fdset;
-	struct timeval timeout;
-
-	if( !dedicated || !dedicated->integer )
-		return NULL;
-
-	if( !stdin_active )
-		return NULL;
-
-	FD_ZERO( &fdset );
-	FD_SET( 0, &fdset ); // stdin
-	timeout.tv_sec = 0;
-	timeout.tv_usec = 0;
-	if( select( 1, &fdset, NULL, NULL, &timeout ) == -1 || !FD_ISSET( 0, &fdset ) )
-		return NULL;
-
-	len = read( 0, text, sizeof( text ) );
-	if( len == 0 )
-	{           // eof!
-		Com_Printf( "EOF from stdin, console input disabled...\n" );
-		stdin_active = qfalse;
-		return NULL;
-	}
-
-	if( len < 1 )
-		return NULL;
-
-	text[len-1] = 0; // rip off the /n and terminate
-
-	return text;
 }
 
 /*
@@ -391,32 +214,7 @@ void Sys_SendKeyEvents( void )
 	sys_frame_time = Sys_Milliseconds();
 }
 
-#ifdef DEDICATED_ONLY
-
-/*
-* Sys_GetClipboardData
-*/
-char *Sys_GetClipboardData( qboolean primary )
-{
-	return NULL;
-}
-
-/*
-* Sys_SetClipboardData
-*/
-qboolean Sys_SetClipboardData( char *data )
-{
-	return qfalse;
-}
-
-/*
-* Sys_FreeClipboardData
-*/
-void Sys_FreeClipboardData( char *data )
-{
-}
-
-#endif
+#endif // !defined(USE_SDL2) || defined(DEDICATED_ONLY)
 
 #ifndef __APPLE__
 /*
@@ -424,6 +222,12 @@ void Sys_FreeClipboardData( char *data )
 * OSX systems have their own function defined
 * in mac_sys.m.
 */
+
+bool Sys_IsBrowserAvailable( void )
+{
+	return true;
+}
+
 void Sys_OpenURLInBrowser( const char *url )
 {
     int r;
@@ -436,6 +240,14 @@ void Sys_OpenURLInBrowser( const char *url )
     }
 }
 #endif
+
+/*
+* Sys_GetCurrentProcessId
+*/
+int Sys_GetCurrentProcessId( void )
+{
+	return getpid();
+}
 
 /*
 * Sys_GetPreferredLanguage
@@ -453,10 +265,6 @@ const char *Sys_GetPreferredLanguage( void )
 
 	setlocale( LC_ALL, "C" );
 
-	p = strchr( lang, '-' );
-	if( p ) { *p = '\0'; }
-	p = strchr( lang, '_' );
-	if( p ) { *p = '\0'; }
 	p = strchr( lang, '.' );
 	if( p ) { *p = '\0'; }
 
@@ -469,6 +277,23 @@ const char *Sys_GetPreferredLanguage( void )
 	return Q_strlwr( lang );
 }
 
+#if !defined(USE_SDL2) || defined(DEDICATED_ONLY)
+
+/*
+* Sys_AcquireWakeLock
+*/
+void *Sys_AcquireWakeLock( void )
+{
+	return NULL;
+}
+
+/*
+* Sys_ReleaseWakeLock
+*/
+void Sys_ReleaseWakeLock( void *wl )
+{
+}
+
 /*****************************************************************************/
 
 int main( int argc, char **argv )
@@ -478,22 +303,25 @@ int main( int argc, char **argv )
 	InitSig();
 
 #if defined ( __MACOSX__ ) && !defined (DEDICATED_ONLY)
-	SDL_Init( 0 );
-	SDL_EnableUNICODE( SDL_ENABLE );
+	char resourcesPath[MAXPATHLEN];
+	CFURLGetFileSystemRepresentation(CFBundleCopyResourcesDirectoryURL(CFBundleGetMainBundle()), 1, (UInt8 *)resourcesPath, MAXPATHLEN);
+	chdir(resourcesPath);
+	
+	SDL_Init( SDL_INIT_VIDEO );
 #endif
 
 	Qcommon_Init( argc, argv );
 
-	fcntl( 0, F_SETFL, fcntl( 0, F_GETFL, 0 ) | FNDELAY );
+	fcntl( 0, F_SETFL, fcntl( 0, F_GETFL, 0 ) | O_NONBLOCK );
 
 	nostdout = Cvar_Get( "nostdout", "0", 0 );
 	if( !nostdout->integer )
 	{
-		fcntl( 0, F_SETFL, fcntl( 0, F_GETFL, 0 ) | FNDELAY );
+		fcntl( 0, F_SETFL, fcntl( 0, F_GETFL, 0 ) | O_NONBLOCK );
 	}
 
 	oldtime = Sys_Milliseconds();
-	while( qtrue )
+	while( true )
 	{
 		// find time spent rendering last frame
 		do
@@ -515,3 +343,5 @@ int main( int argc, char **argv )
 	SDL_Quit();
 #endif
 }
+
+#endif // !defined(USE_SDL2) || defined(DEDICATED_ONLY)

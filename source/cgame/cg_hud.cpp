@@ -37,6 +37,30 @@ cvar_t *cg_showminimap;
 cvar_t *cg_showitemtimers;
 cvar_t *cg_placebo;
 cvar_t *cg_strafeHUD;
+cvar_t *cg_touch_flip;
+cvar_t *cg_touch_scale;
+cvar_t *cg_touch_showMoveDir;
+cvar_t *cg_touch_zoomThres;
+cvar_t *cg_touch_zoomTime;
+
+static int cg_hud_touch_buttons, cg_hud_touch_upmove;
+static unsigned int cg_hud_touch_zoomSeq, cg_hud_touch_zoomLastTouch;
+static int cg_hud_touch_zoomX, cg_hud_touch_zoomY;
+
+enum
+{
+	TOUCHAREA_HUD_MOVE = TOUCHAREA_HUD,
+	TOUCHAREA_HUD_VIEW,
+	TOUCHAREA_HUD_JUMP,
+	TOUCHAREA_HUD_CROUCH,
+	TOUCHAREA_HUD_ATTACK,
+	TOUCHAREA_HUD_SPECIAL,
+	TOUCHAREA_HUD_CLASSACTION,
+	TOUCHAREA_HUD_DROPITEM,
+	TOUCHAREA_HUD_SCORES,
+	TOUCHAREA_HUD_WEAPON,
+	TOUCHAREA_HUD_QUICKMENU
+};
 
 //=============================================================================
 
@@ -96,6 +120,13 @@ static const constant_numeric_t cg_numeric_constants[] = {
 	{ "NOGUN", 0 },
 	{ "GUN", 1 },
 
+	// player movement types
+	{ "PMOVE_TYPE_NORMAL", PM_NORMAL },
+	{ "PMOVE_TYPE_SPECTATOR", PM_SPECTATOR },
+	{ "PMOVE_TYPE_GIB", PM_GIB },
+	{ "PMOVE_TYPE_FREEZE", PM_FREEZE },
+	{ "PMOVE_TYPE_CHASECAM", PM_CHASECAM },
+
 	{ NULL, 0 }
 };
 
@@ -116,24 +147,29 @@ static int CG_GetStatEnemyTeam( const void *parameter )
 static int CG_GetLongStatValue( const void *parameter )
 {
 	int result;
-	assert( (qintptr)parameter >= 0 && (qintptr)( parameter ) + 1 < MAX_STATS );
+	assert( (intptr_t)parameter >= 0 && (intptr_t)( parameter ) + 1 < MAX_STATS );
 
-	result = ( cg.predictedPlayerState.stats[(qintptr)parameter] & 0xFFFF ) << 16;
-	result |= ( cg.predictedPlayerState.stats[(qintptr)(parameter)+1] & 0xFFFF );
+	result = ( cg.predictedPlayerState.stats[(intptr_t)parameter] & 0xFFFF ) << 16;
+	result |= ( cg.predictedPlayerState.stats[(intptr_t)(parameter)+1] & 0xFFFF );
 	return result;
 }
 // !racesow
 
 static int CG_GetStatValue( const void *parameter )
 {
-	assert( (qintptr)parameter >= 0 && (qintptr)parameter < MAX_STATS );
+	assert( (intptr_t)parameter >= 0 && (intptr_t)parameter < MAX_STATS );
 
-	return cg.predictedPlayerState.stats[(qintptr)parameter];
+	return cg.predictedPlayerState.stats[(intptr_t)parameter];
 }
 
 static int CG_GetRaceStatValue( const void *parameter )
 {
 	return CG_GetStatValue( parameter );
+}
+
+static int CG_GetLayoutStatFlag( const void *parameter )
+{
+	return ( cg.predictedPlayerState.stats[STAT_LAYOUTS] & (intptr_t)parameter ) ? 1 : 0;
 }
 
 static int CG_GetPOVnum( const void *parameter )
@@ -179,7 +215,7 @@ static int CG_GetFPS( const void *parameter )
 
 	frameTimes[cg.frameCount & FPSSAMPLESMASK] = cg.realFrameTime;
 
-	if( cg_showFPS->integer != 2 )
+	if( cg_showFPS->integer != 1 )
 	{
 		for( avFrameTime = 0.0f, i = 0; i < FPSSAMPLESCOUNT; i++ )
 		{
@@ -204,7 +240,7 @@ static int CG_GetFPS( const void *parameter )
 
 static int CG_GetPowerupTime( const void *parameter )
 {
-	int powerup = (qintptr)parameter;
+	int powerup = (intptr_t)parameter;
 	return cg.predictedPlayerState.inventory[powerup];
 }
 
@@ -245,6 +281,11 @@ static int CG_RaceGameType( const void *parameter )
 	return GS_RaceGametype();
 }
 
+static int CG_TutorialGameType( const void *parameter )
+{
+	return GS_TutorialGametype();
+}
+
 static int CG_Paused( const void *parameter )
 {
 	return GS_MatchPaused();
@@ -278,7 +319,7 @@ static int CG_GetCvar( const void *parameter )
 static int CG_GetDamageIndicatorDirValue( const void *parameter )
 {
 	float frac = 0;
-	int index = (qintptr)parameter;
+	int index = (intptr_t)parameter;
 
 	if( cg.damageBlends[index] > cg.time && !cg.view.thirdperson )
 	{
@@ -295,7 +336,7 @@ static int CG_GetCurrentWeaponInventoryData( const void *parameter )
 	firedef_t *firedef;
 	int result;
 
-	switch( (qintptr)parameter )
+	switch( (intptr_t)parameter )
 	{
 	case 0: // AMMO_ITEM
 	default:
@@ -308,9 +349,53 @@ static int CG_GetCurrentWeaponInventoryData( const void *parameter )
 	case 2: // WEAK AMMO COUNT
 		result = cg.predictedPlayerState.inventory[weapondef->firedef_weak.ammo_id];
 		break;
+	case 3: // LOW AMMO THRESHOLD
+		result = weapondef->firedef.ammo_low;
+		break;
 	}
 
 	return result;
+}
+
+/**
+ * Returns whether the weapon should be displayed in the weapon list on the HUD
+ * (if the player either has the weapon ammo for it).
+ *
+ * @param weapon weapon item ID
+ * @return whether to display the weapon
+ */
+static bool CG_IsWeaponInList( int weapon )
+{
+	bool hasWeapon = ( cg.predictedPlayerState.inventory[weapon] != 0 );
+	bool hasAmmo = ( cg.predictedPlayerState.inventory[weapon - WEAP_GUNBLADE + AMMO_GUNBLADE] ||
+		cg.predictedPlayerState.inventory[weapon - WEAP_GUNBLADE + AMMO_WEAK_GUNBLADE] );
+
+	if( weapon == WEAP_GUNBLADE ) // gunblade always has 1 ammo when it's strong, but the player doesn't necessarily have it
+		return hasWeapon;
+
+	return hasWeapon || hasAmmo;
+}
+
+static int CG_GetWeaponCount( const void *parameter )
+{
+	int i, n = 0;
+	for( i = 0; i < WEAP_TOTAL-1; i++ )
+	{
+		if( CG_IsWeaponInList( WEAP_GUNBLADE + i ) )
+			n++;
+	}
+	return n;
+}
+
+static int CG_GetPmoveType( const void *parameter )
+{
+	// the real pmove type of the client, which is chasecam or spectator when playing a demo
+	return cg.frame.playerState.pmove.pm_type;
+}
+
+static int CG_IsDemoPlaying( const void *parameter )
+{
+	return ( cgs.demoPlaying ? 1 : 0 );
 }
 
 static int CG_DownloadInProgress( const void *parameter )
@@ -332,7 +417,7 @@ static int CG_GetShowItemTimers( const void *parameter )
 
 static int CG_GetItemTimer( const void *parameter )
 {
-	int num = (qintptr)parameter;
+	int num = (intptr_t)parameter;
 	centity_t *cent;
 
 	cent = CG_GetItemTimerEnt( num );
@@ -343,7 +428,7 @@ static int CG_GetItemTimer( const void *parameter )
 
 static int CG_GetItemTimerCount( const void *parameter )
 {
-	int num = (qintptr)parameter;
+	int num = (intptr_t)parameter;
 	centity_t *cent;
 
 	cent = CG_GetItemTimerEnt( num );
@@ -354,7 +439,7 @@ static int CG_GetItemTimerCount( const void *parameter )
 
 static int CG_GetItemTimerLocation( const void *parameter )
 {
-	int num = (qintptr)parameter;
+	int num = (intptr_t)parameter;
 	centity_t *cent;
 
 	cent = CG_GetItemTimerEnt( num );
@@ -365,13 +450,18 @@ static int CG_GetItemTimerLocation( const void *parameter )
 
 static int CG_GetItemTimerTeam( const void *parameter )
 {
-	int num = (qintptr)parameter;
+	int num = (intptr_t)parameter;
 	centity_t *cent;
 
 	cent = CG_GetItemTimerEnt( num );
 	if( !cent )
 		return 0;
 	return max( (int)cent->current.modelindex-1, 0 );
+}
+
+static int CG_InputDeviceSupported( const void *parameter )
+{
+	return ( trap_IN_SupportedDevices() & ( ( intptr_t )parameter ) ) ? 1 : 0;
 }
 
 // ch : backport some of racesow hud elements
@@ -400,7 +490,7 @@ int race_jump = 0; // racesow
 
 static int CG_GetRaceVars( const void* parameter )
 {
-	int index = (qintptr)parameter;
+	int index = (intptr_t)parameter;
 	int iNum;
 	vec3_t hor_vel, view_dir, an;
 
@@ -555,6 +645,64 @@ static int CG_GetAccel( const void* parameter )
 	return (int)accel;
 }
 
+static int CG_GetTouchFlip( const void *parameter )
+{
+	return cg_touch_flip->integer ? -1 : 1;
+}
+
+static int CG_GetTouchButtonPressed( const void *parameter )
+{
+	return ( cg_hud_touch_buttons & ( intptr_t )parameter ) ? 1 : 0;
+}
+
+static int CG_GetTouchUpmove( const void *parameter )
+{
+	return cg_hud_touch_upmove;
+}
+
+static int CG_GetTouchMovementDirection( const void *parameter )
+{
+	vec3_t movement;
+
+	VectorSet( movement, 0.0f, 0.0f, 0.0f );
+	CG_AddTouchMovement( movement );
+	if( !movement[0] && !movement[1] )
+		return STAT_NOTSET;
+
+	if( movement[0] > 0.0f )
+	{
+		if( !movement[1] )
+			return 0;
+		return ( movement[1] > 0.0f ) ? 45 : -45;
+	}
+	else if( movement[0] < 0.0f )
+	{
+		if( !movement[1] )
+			return 180;
+		return 180 - ( ( movement[1] > 0.0f ) ? 45 : -45 );
+	}
+	else
+	{
+		return ( movement[1] > 0.0f ) ? 90 : -90;
+	}
+}
+
+static int CG_GetScoreboardShown( const void *parameter )
+{
+	return CG_IsScoreboardShown() ? 1 : 0;
+}
+
+static int CG_GetQuickMenuState( const void *parameter )
+{
+	if( trap_SCR_IsQuickMenuShown() )
+		return 2;
+
+	if( trap_SCR_HaveQuickMenu() )
+		return 1;
+
+	return 0;
+}
+
 typedef struct
 {
 	const char *name;
@@ -608,13 +756,20 @@ static const reference_numeric_t cg_numeric_references[] =
 	{ "MESSAGE_ALPHA", CG_GetStatValue, (void *)STAT_MESSAGE_ALPHA },
 	{ "MESSAGE_BETA", CG_GetStatValue, (void *)STAT_MESSAGE_BETA },
 
+	{ "IMAGE_CLASSACTION1", CG_GetStatValue, (void *)STAT_IMAGE_CLASSACTION1 },
+	{ "IMAGE_CLASSACTION2", CG_GetStatValue, (void *)STAT_IMAGE_CLASSACTION2 },
+	{ "IMAGE_DROP_ITEM", CG_GetStatValue, (void *)STAT_IMAGE_DROP_ITEM },
+
 	// inventory grabs
 	{ "AMMO_ITEM", CG_GetCurrentWeaponInventoryData, (void *)0 },
 	{ "AMMO", CG_GetCurrentWeaponInventoryData, (void *)1 },
 	{ "WEAK_AMMO", CG_GetCurrentWeaponInventoryData, (void *)2 },
+	{ "LOW_AMMO", CG_GetCurrentWeaponInventoryData, (void *)3 },
+	{ "WEAPON_COUNT", CG_GetWeaponCount, NULL },
 
 	// other
 	{ "CHASING", CG_GetPOVnum, NULL },
+	{ "SPECDEAD", CG_GetLayoutStatFlag, (void *)STAT_LAYOUT_SPECDEAD },
 	{ "ARMOR_ITEM", CG_GetArmorItem, NULL },
 	{ "SPEED", CG_GetSpeed, NULL },
 	{ "SPEED_VERTICAL", CG_GetSpeedVertical, NULL },
@@ -626,11 +781,17 @@ static const reference_numeric_t cg_numeric_references[] =
 	{ "TEAMBASED", CG_GetTeamBased, NULL },
 	{ "INDIVIDUAL", CG_InvidualGameType, NULL },
 	{ "RACE", CG_RaceGameType, NULL },
+	{ "TUTORIAL", CG_TutorialGameType, NULL },
 	{ "PAUSED", CG_Paused, NULL },
 	{ "ZOOM", CG_GetZoom, NULL },
 	{ "VIDWIDTH", CG_GetVidWidth, NULL },
 	{ "VIDHEIGHT", CG_GetVidHeight, NULL },
 	{ "STUNNED", CG_GetStunned, NULL },
+	{ "SCOREBOARD", CG_GetScoreboardShown, NULL },
+	{ "PMOVE_TYPE", CG_GetPmoveType, NULL },
+	{ "DEMOPLAYING", CG_IsDemoPlaying, NULL },
+	{ "INSTANTRESPAWN", CG_GetLayoutStatFlag, (void *)STAT_LAYOUT_INSTANTRESPAWN },
+	{ "QUICKMENU", CG_GetQuickMenuState, NULL },
 
 	{ "POWERUP_QUAD_TIME", CG_GetPowerupTime, (void *)POWERUP_QUAD },
 	{ "POWERUP_WARSHELL_TIME", CG_GetPowerupTime, (void *)POWERUP_SHELL },
@@ -697,11 +858,17 @@ static const reference_numeric_t cg_numeric_references[] =
 	{ "SHOW_R_SPEEDS", CG_GetCvar, "r_speeds" },
 	{ "SHOW_ITEM_TIMERS", CG_GetShowItemTimers, "cg_showItemTimers" },
 	{ "SHOW_STRAFE", CG_GetCvar, "cg_strafeHUD" },
+	{ "SHOW_TOUCH_MOVEDIR", CG_GetCvar, "cg_touch_showMoveDir" },
 
 	{ "DOWNLOAD_IN_PROGRESS", CG_DownloadInProgress, NULL },
 	{ "DOWNLOAD_PERCENT", CG_GetCvar, "cl_download_percent" },
 
 	{ "CHAT_MODE", CG_GetCvar, "con_messageMode" },
+	{ "SOFTKEYBOARD", CG_InputDeviceSupported, (void *)IN_DEVICE_SOFTKEYBOARD },
+	{ "TOUCHSCREEN", CG_InputDeviceSupported, (void *)IN_DEVICE_TOUCHSCREEN },
+
+	{ "TOUCH_FLIP", CG_GetTouchFlip, NULL },
+	{ "TOUCH_SCALE", CG_GetCvar, "cg_touch_scale" },
 
 	{ "ITEM_TIMER0", CG_GetItemTimer, (void *)0 },
 	{ "ITEM_TIMER0_COUNT", CG_GetItemTimerCount, (void *)0 },
@@ -736,6 +903,11 @@ static const reference_numeric_t cg_numeric_references[] =
 	{ "ITEM_TIMER7_LOCATION", CG_GetItemTimerLocation, (void *)7 },
 	{ "ITEM_TIMER7_TEAM", CG_GetItemTimerTeam, (void *)7 },
 
+	{ "TOUCH_ATTACK", CG_GetTouchButtonPressed, (void *)BUTTON_ATTACK },
+	{ "TOUCH_SPECIAL", CG_GetTouchButtonPressed, (void *)BUTTON_SPECIAL },
+	{ "TOUCH_UPMOVE", CG_GetTouchUpmove, NULL },
+	{ "TOUCH_MOVEDIR", CG_GetTouchMovementDirection, NULL },
+
 	{ NULL, NULL, NULL }
 };
 
@@ -765,7 +937,7 @@ static int cg_obituaries_current = -1;
 void CG_SC_PrintObituary( const char *format, ... )
 {
 	va_list	argptr;
-	char msg[1024];
+	char msg[GAMECHAT_STRING_SIZE];
 
 	va_start( argptr, format );
 	Q_vsnprintfz( msg, sizeof( msg ), format, argptr );
@@ -774,6 +946,15 @@ void CG_SC_PrintObituary( const char *format, ... )
 	trap_Print( msg );
 	
 	CG_StackChatString( &cg.chat, msg );
+}
+
+/*
+* CG_SC_ResetObituaries
+*/
+void CG_SC_ResetObituaries( void )
+{
+	memset( cg_obituaries, 0, sizeof( cg_obituaries ) );
+	cg_obituaries_current = -1;
 }
 
 /*
@@ -836,25 +1017,33 @@ void CG_SC_Obituary( void )
 				current->type = OBITUARY_TEAM;
 				if( cg_showObituaries->integer & CG_OBITUARY_CONSOLE )
 				{
-					CG_LocalPrint( false, "%s%s%s %s %s%s %s%s%s\n", S_COLOR_RED, "TEAMKILL:", S_COLOR_WHITE, victim->name,
+					CG_LocalPrint( "%s%s%s %s %s%s %s%s%s\n", S_COLOR_RED, "TEAMFRAG:", S_COLOR_WHITE, victim->name,
 					           S_COLOR_WHITE, message, attacker->name, S_COLOR_WHITE, message2 );
 				}
 
 				if( ISVIEWERENTITY( attackerNum ) && ( cg_showObituaries->integer & CG_OBITUARY_CENTER ) )
 				{
-					CG_CenterPrintToUpper( va( "%s%s%s %s\n", S_COLOR_RED, "YOU TEAMFRAGGED", S_COLOR_WHITE, victim->name ) );
+					char name[MAX_NAME_BYTES + 2];
+					Q_strncpyz( name, victim->name, sizeof( name ) );
+					Q_strupr( name );
+					Q_strncatz( name, S_COLOR_WHITE, sizeof( name ) );
+					CG_CenterPrint( va( CG_TranslateString( "YOU TEAMFRAGGED %s" ), name ) );
 				}
 			}
 			else // good kill
 			{
 				current->type = OBITUARY_NORMAL;
 				if( cg_showObituaries->integer & CG_OBITUARY_CONSOLE )
-					CG_LocalPrint( false, "%s %s%s %s%s%s\n", victim->name, S_COLOR_WHITE, message, attacker->name, S_COLOR_WHITE,
+					CG_LocalPrint( "%s %s%s %s%s%s\n", victim->name, S_COLOR_WHITE, message, attacker->name, S_COLOR_WHITE,
 					           message2 );
 
 				if( ISVIEWERENTITY( attackerNum ) && ( cg_showObituaries->integer & CG_OBITUARY_CENTER ) )
 				{
-					CG_CenterPrintToUpper( va( "%s%s %s\n", S_COLOR_WHITE, "YOU FRAGGED", victim->name ) );
+					char name[MAX_NAME_BYTES + 2];
+					Q_strncpyz( name, victim->name, sizeof( name ) );
+					Q_strupr( name );
+					Q_strncatz( name, S_COLOR_WHITE, sizeof( name ) );
+					CG_CenterPrint( va( CG_TranslateString( "YOU FRAGGED %s" ), name ) );
 				}
 			}
 		}
@@ -862,14 +1051,14 @@ void CG_SC_Obituary( void )
 		{
 			current->type = OBITUARY_SUICIDE;
 			if( cg_showObituaries->integer & CG_OBITUARY_CONSOLE )
-				CG_LocalPrint( false, "%s %s%s\n", victim->name, S_COLOR_WHITE, message );
+				CG_LocalPrint( "%s %s%s\n", victim->name, S_COLOR_WHITE, message );
 		}
 	}
 	else // world accidents
 	{
 		current->type = OBITUARY_ACCIDENT;
 		if( cg_showObituaries->integer & CG_OBITUARY_CONSOLE )
-			CG_LocalPrint( false, "%s %s%s\n", victim->name, S_COLOR_WHITE, message );
+			CG_LocalPrint( "%s %s%s\n", victim->name, S_COLOR_WHITE, message );
 	}
 }
 
@@ -877,7 +1066,7 @@ static void CG_DrawObituaries( int x, int y, int align, struct qfontface_s *font
                                int internal_align, unsigned int icon_size )
 {
 	int i, num, skip, next, w, num_max;
-	size_t line_height;
+	unsigned line_height;
 	int xoffset, yoffset;
 	obituary_t *obr;
 	struct shader_s *pic;
@@ -886,7 +1075,7 @@ static void CG_DrawObituaries( int x, int y, int align, struct qfontface_s *font
 	if( !( cg_showObituaries->integer & CG_OBITUARY_HUD ) )
 		return;
 
-	line_height = max( trap_SCR_strHeight( font ), icon_size );
+	line_height = max( (unsigned)trap_SCR_FontHeight( font ), icon_size );
 	num_max = height / line_height;
 
 	if( width < (int)icon_size || !num_max )
@@ -942,8 +1131,10 @@ static void CG_DrawObituaries( int x, int y, int align, struct qfontface_s *font
 		switch( obr->mod )
 		{
 		case MOD_GUNBLADE_W:
-		case MOD_GUNBLADE_S:
 			pic = CG_MediaShader( cgs.media.shaderWeaponIcon[WEAP_GUNBLADE-1] );
+			break;
+		case MOD_GUNBLADE_S:
+			pic = CG_MediaShader( cgs.media.shaderGunbladeBlastIcon );
 			break;
 		case MOD_MACHINEGUN_W:
 		case MOD_MACHINEGUN_S:
@@ -990,9 +1181,9 @@ static void CG_DrawObituaries( int x, int y, int align, struct qfontface_s *font
 
 		w = 0;
 		if( obr->type != OBITUARY_ACCIDENT )
-			w += min( trap_SCR_strWidth( obr->attacker, font, 0 ), ( width - icon_size * cgs.vidWidth/800 ) / 2 );
-		w += icon_size * cgs.vidWidth/800;
-		w += min( trap_SCR_strWidth( obr->victim, font, 0 ), ( width - icon_size * cgs.vidWidth/800 ) / 2 );
+			w += min( trap_SCR_strWidth( obr->attacker, font, 0 ), ( width - icon_size ) / 2 );
+		w += icon_size;
+		w += min( trap_SCR_strWidth( obr->victim, font, 0 ), ( width - icon_size ) / 2 );
 
 		if( internal_align == 1 )
 		{
@@ -1012,7 +1203,7 @@ static void CG_DrawObituaries( int x, int y, int align, struct qfontface_s *font
 
 		if( obr->type != OBITUARY_ACCIDENT )
 		{
-			if( GS_TeamBasedGametype() )
+			if( ( obr->attacker_team == TEAM_ALPHA ) || ( obr->attacker_team == TEAM_BETA ) )
 			{
 				CG_TeamColor( obr->attacker_team, teamcolor );
 			}
@@ -1020,15 +1211,13 @@ static void CG_DrawObituaries( int x, int y, int align, struct qfontface_s *font
 			{
 				Vector4Set( teamcolor, 255, 255, 255, 255 );
 			}
-			trap_SCR_DrawStringWidth( x + xoffset, y + yoffset + ( line_height - trap_SCR_strHeight( font ) ) / 2,
-			                          ALIGN_LEFT_TOP, COM_RemoveColorTokensExt( obr->attacker, qtrue ), ( width - icon_size * cgs.vidWidth/800 ) / 2,
+			trap_SCR_DrawStringWidth( x + xoffset, y + yoffset + ( line_height - trap_SCR_FontHeight( font ) ) / 2,
+			                          ALIGN_LEFT_TOP, COM_RemoveColorTokensExt( obr->attacker, true ), ( width - icon_size ) / 2,
 			                          font, teamcolor );
-			xoffset += min( trap_SCR_strWidth( obr->attacker, font, 0 ), ( width - icon_size * cgs.vidWidth/800 ) / 2 );
+			xoffset += min( trap_SCR_strWidth( obr->attacker, font, 0 ), ( width - icon_size ) / 2 );
 		}
-		trap_R_DrawStretchPic( x + xoffset, y + yoffset + ( line_height - icon_size ) / 2, icon_size * cgs.vidWidth/800,
-		                       icon_size * cgs.vidHeight/600, 0, 0, 1, 1, colorWhite, pic );
-		xoffset += icon_size * cgs.vidWidth/800;
-		if( GS_TeamBasedGametype() )
+
+		if( ( obr->victim_team == TEAM_ALPHA ) || ( obr->victim_team == TEAM_BETA ) )
 		{
 			CG_TeamColor( obr->victim_team, teamcolor );
 		}
@@ -1036,9 +1225,11 @@ static void CG_DrawObituaries( int x, int y, int align, struct qfontface_s *font
 		{
 			Vector4Set( teamcolor, 255, 255, 255, 255 );
 		}
-		trap_SCR_DrawStringWidth( x + xoffset, y + yoffset + ( (int) line_height ) / 2, ALIGN_LEFT_MIDDLE,
-		                          COM_RemoveColorTokensExt( obr->victim, qtrue ), ( width - icon_size * cgs.vidWidth/800 ) / 2, font, teamcolor );
-		xoffset += min( trap_SCR_strWidth( obr->victim, font, 0 ), ( width - icon_size * cgs.vidWidth/800 ) / 2 );
+		trap_SCR_DrawStringWidth( x + xoffset + icon_size, y + yoffset + line_height / 2, ALIGN_LEFT_MIDDLE,
+		                          COM_RemoveColorTokensExt( obr->victim, true ), ( width - icon_size ) / 2, font, teamcolor );
+
+		trap_R_DrawStretchPic( x + xoffset, y + yoffset + ( line_height - icon_size ) / 2, icon_size,
+		                       icon_size, 0, 0, 1, 1, colorWhite, pic );
 
 		yoffset += line_height;
 	}
@@ -1047,12 +1238,15 @@ static void CG_DrawObituaries( int x, int y, int align, struct qfontface_s *font
 
 //=============================================================================
 
-static void CG_DrawAwards( int x, int y, int align, struct qfontface_s *font, vec4_t basecolor )
+#define AWARDS_OVERSHOOT_DURATION 0.2f
+#define AWARDS_OVERSHOOT_FREQUENCY 6.0f
+#define AWARDS_OVERSHOOT_DECAY 10.0f
+
+static void CG_DrawAwards( int x, int y, int align, struct qfontface_s *font, vec4_t color )
 {
 	int i, count, current;
 	int yoffset;
-	vec4_t color;
-	float frac;
+	int s_x, e_x, m_x;
 
 	if( !cg_showAwards->integer )
 		return;
@@ -1076,32 +1270,27 @@ static void CG_DrawAwards( int x, int y, int align, struct qfontface_s *font, ve
 	if( !count )
 		return;
 
-	y = CG_VerticalAlignForHeight( y, align, trap_SCR_strHeight( font ) * MAX_AWARD_LINES );
+	y = CG_VerticalAlignForHeight( y, align, trap_SCR_FontHeight( font ) * MAX_AWARD_LINES );
+
+	s_x = CG_HorizontalMovementForAlign( align ) < 0 ? cgs.vidWidth : 0;
+	e_x = x;
 
 	for( i = count; i > 0; i-- )
 	{
-		unsigned int fadeTime;
+		float moveTime;
+		const char *str;
 
 		current = ( cg.award_head - i ) % MAX_AWARD_LINES;
+		str = cg.award_lines[ current ];
 
-		yoffset = trap_SCR_strHeight( font ) * ( MAX_AWARD_LINES - i );
+		yoffset = trap_SCR_FontHeight( font ) * ( MAX_AWARD_LINES - i );
+		moveTime = ( cg.time - cg.award_times[ current ] ) / 1000.0f;
 
-		Vector4Copy( basecolor, color );
+		m_x = LinearMovementWithOvershoot( s_x, e_x, 
+			AWARDS_OVERSHOOT_DURATION, AWARDS_OVERSHOOT_FREQUENCY, AWARDS_OVERSHOOT_DECAY, 
+			moveTime );
 
-		fadeTime = MAX_AWARD_DISPLAYTIME * 0.66;
-		if( cg.time - cg.award_times[ current ] < fadeTime )
-		{
-			frac = 1.0f;
-		}
-		else
-		{
-			frac = 1.0f - ( (float)( ( cg.time - cg.award_times[ current ] ) - fadeTime ) / (float)( MAX_AWARD_DISPLAYTIME - fadeTime ) );
-			clamp( frac, 0.0f, 1.0f );
-		}
-
-		color[3] *= frac;
-
-		trap_SCR_DrawStringWidth( x, y + yoffset, align % 3, cg.award_lines[ current ], 0, font, color );
+		trap_SCR_DrawStringWidth( m_x, y + yoffset, align, str, 0, font, color );
 	}
 }
 
@@ -1115,16 +1304,100 @@ static bool CG_IsWeaponSelected( int weapon )
 	return ( weapon == cg.predictedPlayerState.stats[STAT_PENDING_WEAPON] );
 }
 
+static struct shader_s *CG_GetWeaponIcon( int weapon )
+{
+	int currentWeapon = cg.predictedPlayerState.stats[STAT_WEAPON];
+	int weaponState = cg.predictedPlayerState.weaponState;
+
+	if( weapon == WEAP_GUNBLADE && cg.predictedPlayerState.inventory[AMMO_GUNBLADE] )
+	{
+		if( currentWeapon != WEAP_GUNBLADE || ( weaponState != WEAPON_STATE_REFIRESTRONG && weaponState != WEAPON_STATE_REFIRE ) )
+		{
+			return CG_MediaShader( cgs.media.shaderGunbladeBlastIcon );
+		}
+	}
+
+	if( weapon == WEAP_INSTAGUN )
+	{
+		if( currentWeapon == WEAP_INSTAGUN && weaponState == WEAPON_STATE_REFIRESTRONG )
+		{
+			int chargeTime = GS_GetWeaponDef( WEAP_INSTAGUN )->firedef.reload_time;
+			int chargeTimeStep = chargeTime / 3;
+			if( chargeTimeStep > 0 )
+			{
+				int charge = ( chargeTime - cg.predictedPlayerState.stats[STAT_WEAPON_TIME] ) / chargeTimeStep;
+				clamp( charge, 0, 2 );
+				return CG_MediaShader( cgs.media.shaderInstagunChargeIcon[charge] );
+			}
+		}
+	}
+
+	return CG_MediaShader( cgs.media.shaderWeaponIcon[weapon - WEAP_GUNBLADE] );
+}
+
+static int cg_touch_dropWeapon;
+static float cg_touch_dropWeaponTime;
+
+/**
+ * Offset for the weapon icon when dropping the weapon on the touch HUD.
+ */
+static float cg_touch_dropWeaponX, cg_touch_dropWeaponY;
+
+/**
+ * Resets touch weapon dropping if needed.
+ */
+static void CG_CheckTouchWeaponDrop( void )
+{
+	if( !cg_touch_dropWeapon ||
+		!GS_CanDropWeapon() ||
+		( cg.frame.playerState.pmove.pm_type != PM_NORMAL ) ||
+		!( cg.predictedPlayerState.inventory[cg_touch_dropWeapon] ) )
+	{
+		cg_touch_dropWeapon = 0;
+		cg_touch_dropWeaponTime = 0.0f;
+		return;
+	}
+
+	if( cg_touch_dropWeaponTime > 1.0f )
+	{
+		gsitem_t *item = GS_FindItemByTag( cg_touch_dropWeapon );
+		if( item )
+			trap_Cmd_ExecuteText( EXEC_NOW, va( "drop \"%s\"", item->name ) );
+		cg_touch_dropWeapon = 0;
+		cg_touch_dropWeaponTime = 0.0f;
+	}
+}
+
+/**
+ * Sets the weapon to drop by holding its icon on the touch HUD.
+ *
+ * @param weaponTag tag of the weapon item to drop
+ */
+static void CG_SetTouchWeaponDrop( int weaponTag )
+{
+	cg_touch_dropWeapon = weaponTag;
+	cg_touch_dropWeaponTime = 0.0f;
+	CG_CheckTouchWeaponDrop();
+}
+
+/**
+ * Touch release handler for the weapon icons.
+ */
+static void CG_WeaponUpFunc( int id, unsigned int time )
+{
+	CG_SetTouchWeaponDrop( 0 );
+}
+
 /*
 * CG_DrawWeaponIcons
 */
-static void CG_DrawWeaponIcons( int x, int y, int offx, int offy, int iw, int ih, int align )
+static void CG_DrawWeaponIcons( int x, int y, int offx, int offy, int iw, int ih, int align, bool touch )
 {
 	int curx, cury, curw, curh;
 	int i, j, n;
 	float fj, fn;
-	vec4_t color;
 	bool selected_weapon;
+	vec4_t colorTrans = { 1.0f, 1.0f, 1.0f, 0.5f };
 
 	if( !cg_weaponlist || !cg_weaponlist->integer )
 		return;
@@ -1147,8 +1420,6 @@ static void CG_DrawWeaponIcons( int x, int y, int offx, int offy, int iw, int ih
 			n++;
 	}
 
-	VectorCopy( colorWhite, color );
-
 	for( i = j = 0; i < WEAP_TOTAL-1; i++ )
 	{
 		// racesow - only consider ammo count if not infinite ammo
@@ -1159,36 +1430,61 @@ static void CG_DrawWeaponIcons( int x, int y, int offx, int offy, int iw, int ih
 		// !racesow
 
 		selected_weapon = CG_IsWeaponSelected( WEAP_GUNBLADE+i );
-		if( !selected_weapon )
-			color[3] = 1.0;
-		else
-			color[3] = 0.5;
 
 		fj = (float)j;
 		fn = (float)n;
 		curx = CG_HorizontalAlignForWidth( x + (int)( offx * ( fj - fn / 2.0f ) ), align, curw );
 		cury = CG_VerticalAlignForHeight( y + (int)( offy * ( fj - fn / 2.0f ) ), align, curh );
 
-		if( cg.predictedPlayerState.inventory[WEAP_GUNBLADE+i] )
+		if( touch )
 		{
-			// wsw : pb : display a little box around selected weapon in weaponlist
-			if( selected_weapon )
+			if( cg.predictedPlayerState.inventory[WEAP_GUNBLADE+i] )
 			{
-				if( customWeaponSelectPic )
-					trap_R_DrawStretchPic( curx, cury, curw, curh, 0, 0, 1, 1, color, trap_R_RegisterPic( customWeaponSelectPic ) );
-				else
-					trap_R_DrawStretchPic( curx, cury, curw, curh, 0, 0, 1, 1, color, CG_MediaShader( cgs.media.shaderSelect ) );
+				if( CG_TouchArea( TOUCHAREA_HUD_WEAPON | ( i << TOUCHAREA_SUB_SHIFT ), curx, cury, curw, curh, CG_WeaponUpFunc ) >= 0 )
+				{
+					if( !selected_weapon )
+					{
+						gsitem_t *item = GS_FindItemByTag( WEAP_GUNBLADE+i );
+						if( item )
+							trap_Cmd_ExecuteText( EXEC_NOW, va( "use %s", item->name ) ); // without quotes!
+					}
+					if( i ) // don't drop gunblade
+						CG_SetTouchWeaponDrop( WEAP_GUNBLADE+i );
+					break;
+				}
 			}
-			if( customWeaponPics[i] )
-				trap_R_DrawStretchPic( curx, cury, curw, curh, 0, 0, 1, 1, color, trap_R_RegisterPic( customWeaponPics[i] ) );
-			else
-				trap_R_DrawStretchPic( curx, cury, curw, curh, 0, 0, 1, 1, color, CG_MediaShader( cgs.media.shaderWeaponIcon[i] ) );
 		}
 		else
-			if( customNoGunWeaponPics[i] )
-				trap_R_DrawStretchPic( curx, cury, curw, curh, 0, 0, 1, 1, color, trap_R_RegisterPic( customNoGunWeaponPics[i] ) );
+		{
+			if( cg.predictedPlayerState.inventory[WEAP_GUNBLADE+i] )
+			{
+				// swipe the weapon icon
+				if( cg_touch_dropWeapon == WEAP_GUNBLADE+i )
+				{
+					float dropOffset = ( bound( 0.75f, cg_touch_dropWeaponTime, 1.0f ) - 0.75f ) * 4.0f;
+					curx += cg_touch_dropWeaponX * dropOffset;
+					cury += cg_touch_dropWeaponY * dropOffset;
+				}
+
+				// wsw : pb : display a little box around selected weapon in weaponlist
+				if( selected_weapon )
+				{
+					if( customWeaponSelectPic )
+						trap_R_DrawStretchPic( curx, cury, curw, curh, 0, 0, 1, 1, colorTrans, trap_R_RegisterPic( customWeaponSelectPic ) );
+					else
+						trap_R_DrawStretchPic( curx, cury, curw, curh, 0, 0, 1, 1, colorTrans, CG_MediaShader( cgs.media.shaderSelect ) );
+				}
+				if( customWeaponPics[i] )
+					trap_R_DrawStretchPic( curx, cury, curw, curh, 0, 0, 1, 1, colorWhite, trap_R_RegisterPic( customWeaponPics[i] ) );
+				else
+					trap_R_DrawStretchPic( curx, cury, curw, curh, 0, 0, 1, 1, colorWhite, CG_GetWeaponIcon( WEAP_GUNBLADE + i ) );
+			}
 			else
-				trap_R_DrawStretchPic( curx, cury, curw, curh, 0, 0, 1, 1, color, CG_MediaShader( cgs.media.shaderNoGunWeaponIcon[i] ) );
+				if( customNoGunWeaponPics[i] )
+					trap_R_DrawStretchPic( curx, cury, curw, curh, 0, 0, 1, 1, colorWhite, trap_R_RegisterPic( customNoGunWeaponPics[i] ) );
+				else
+					trap_R_DrawStretchPic( curx, cury, curw, curh, 0, 0, 1, 1, colorWhite, CG_MediaShader( cgs.media.shaderNoGunWeaponIcon[i] ) );
+		}
 		j++;
 	}
 }
@@ -1227,7 +1523,7 @@ static void CG_DrawWeaponAmmos( int x, int y, int offx, int offy, int fontsize, 
 
 	for( i = 0; i < WEAP_TOTAL-1; i++ )
 	{
-		if( ( cg.predictedPlayerState.inventory[WEAP_GUNBLADE+i] || cg.predictedPlayerState.inventory[AMMO_GUNBLADE+i] || cg.predictedPlayerState.inventory[AMMO_WEAK_GUNBLADE+i] ) )
+		if( CG_IsWeaponInList( WEAP_GUNBLADE + i ) )
 			n++;
 	}
 
@@ -1236,23 +1532,124 @@ static void CG_DrawWeaponAmmos( int x, int y, int offx, int offy, int fontsize, 
 	for( i = j = 0; i < WEAP_TOTAL-1; i++ )
 	{
 		// if player doesn't have this weapon, skip it
-		if( !( cg.predictedPlayerState.inventory[WEAP_GUNBLADE+i] || cg.predictedPlayerState.inventory[AMMO_GUNBLADE+i] || cg.predictedPlayerState.inventory[AMMO_WEAK_GUNBLADE+i] ) )
+		if( !CG_IsWeaponInList( WEAP_GUNBLADE + i ) )
 			continue;
 
-		if( CG_IsWeaponSelected( WEAP_GUNBLADE+i ) )
-			color[3] = 1.0;
-		else
-			color[3] = 0.5;
+		if( i ) // skip gunblade because it uses a different icon instead of the ammo count
+		{
+			if( CG_IsWeaponSelected( WEAP_GUNBLADE+i ) )
+				color[3] = 1.0;
+			else
+				color[3] = 0.5;
 
-		fj = (float)j;
-		fn = (float)n;
-		curx = x + (int)( offx * ( fj - fn / 2.0f ) );
-		cury = y + (int)( offy * ( fj - fn / 2.0f ) );
+			fj = (float)j;
+			fn = (float)n;
+			curx = x + (int)( offx * ( fj - fn / 2.0f ) );
+			cury = y + (int)( offy * ( fj - fn / 2.0f ) );
 
-		if( cg.predictedPlayerState.inventory[i+startammo] )
-			CG_DrawHUDNumeric( curx, cury, align, color, curwh, curwh, cg.predictedPlayerState.inventory[i+startammo] );
+			if( cg_touch_dropWeapon == WEAP_GUNBLADE+i )
+			{
+				float dropOffset = ( bound( 0.75f, cg_touch_dropWeaponTime, 1.0f ) - 0.75f ) * 4.0f;
+				curx += cg_touch_dropWeaponX * dropOffset;
+				cury += cg_touch_dropWeaponY * dropOffset;
+			}
+
+			if( cg.predictedPlayerState.inventory[i+startammo] )
+				CG_DrawHUDNumeric( curx, cury, align, color, curwh, curwh, cg.predictedPlayerState.inventory[i+startammo] );
+		}
 		j++;
 	}
+}
+
+static float cg_hud_weaponcrosstime;
+
+/*
+* CG_DrawWeaponCrossQuarter
+*/
+static void CG_DrawWeaponCrossQuarter( int ammopass, int quarter, int x, int y, int dirx, int diry, int iw, int ih, int ammoofs, int ammosize )
+{
+	int i;
+	int first = quarter << 1;
+	int w[2], count = 0, t;
+	vec4_t color, colorTrans;
+
+	x += dirx * iw - ( iw >> 1 );
+	y += diry * ih - ( ih >> 1 );
+
+	for( i = 0; i < 2; i++ )
+	{
+		if( !cg.predictedPlayerState.inventory[WEAP_GUNBLADE + first + i] )
+		{
+			continue;
+		}
+		if( ( first + i ) /* show uncharged gunblade */ &&
+			!cg.predictedPlayerState.inventory[AMMO_GUNBLADE + first + i] &&
+			!cg.predictedPlayerState.inventory[AMMO_WEAK_GUNBLADE + first + i] )
+		{
+			continue;
+		}
+
+		w[count] = first + i;
+		count++;
+	}
+
+	if( !count )
+		return;
+
+	if( ( count == 2 ) && !CG_IsWeaponSelected( WEAP_GUNBLADE + w[0] ) &&
+		( CG_IsWeaponSelected( WEAP_GUNBLADE + w[1] ) || ( cg.lastCrossWeapons & ( 1 << quarter ) ) ) )
+	{
+		t = w[0];
+		w[0] = w[1];
+		w[1] = t;
+	}
+
+	VectorCopy( colorWhite, color );
+	color[3] = cg_hud_weaponcrosstime * 4.0f;
+	clamp_high( color[3], 1.0f );
+	VectorCopy( colorWhite, colorTrans );
+	colorTrans[3] = color[3] * 0.5f;
+
+	if( !ammopass && CG_IsWeaponSelected( WEAP_GUNBLADE + w[0] ) )
+	{
+		if( customWeaponSelectPic )
+			trap_R_DrawStretchPic( x, y, iw, ih, 0.0f, 0.0f, 1.0f, 1.0f, colorTrans, trap_R_RegisterPic( customWeaponSelectPic ) );
+		else
+			trap_R_DrawStretchPic( x, y, iw, ih, 0.0f, 0.0f, 1.0f, 1.0f, colorTrans, CG_MediaShader( cgs.media.shaderSelect ) );
+	}
+
+	for( i = 0; i < count; i++ )
+	{
+		if( !ammopass )
+		{
+			if( customWeaponPics[w[i]] )
+				trap_R_DrawStretchPic( x, y, iw, ih, 0.0f, 0.0f, 1.0f, 1.0f, color, trap_R_RegisterPic( customWeaponPics[w[i]] ) );
+			else
+				trap_R_DrawStretchPic( x, y, iw, ih, 0.0f, 0.0f, 1.0f, 1.0f, color, CG_GetWeaponIcon( WEAP_GUNBLADE + w[i] ) );
+		}
+
+		if( ammopass && w[i] /* don't show 1 for charged gunblade */ && cg.predictedPlayerState.inventory[AMMO_GUNBLADE + w[i]] )
+		{
+			CG_DrawHUDNumeric( x + ( iw >> 1 ), y + ( ih >> 1 ) + ammoofs, ALIGN_CENTER_MIDDLE,
+				CG_IsWeaponSelected( WEAP_GUNBLADE + w[i] ) ? color : colorTrans, ammosize, ammosize,
+				cg.predictedPlayerState.inventory[AMMO_GUNBLADE + w[i]] );
+		}
+
+		x += dirx * iw;
+		y += diry * ih;
+	}
+}
+
+static void CG_CheckWeaponCross( void )
+{
+	if( cg.frame.playerState.pmove.pm_type != PM_NORMAL )
+		cg_hud_weaponcrosstime = 0.0f;
+}
+
+void CG_ShowWeaponCross( void )
+{
+	cg_hud_weaponcrosstime = 0.6f;
+	CG_CheckWeaponCross();
 }
 
 //=============================================================================
@@ -1467,6 +1864,10 @@ static struct qfontface_s *layout_cursor_font;
 static char layout_cursor_font_name[MAX_QPATH];
 static int layout_cursor_font_size;
 static int layout_cursor_font_style;
+struct qfontface_s *(*layout_cursor_font_regfunc)( const char *, int , unsigned int );
+static bool layout_cursor_font_dirty = true;
+
+static struct qfontface_s *CG_GetLayoutCursorFont( void );
 
 enum
 {
@@ -1489,15 +1890,15 @@ static bool CG_LFuncDrawTimer( struct cg_layoutnode_s *commandnode, struct cg_la
 		return true;
 
 	// stat is in milliseconds/100.0f
-	// racesow - milliseconds / 10.0f
-	min = milli/6000;
-	milli -= min*6000;
-	sec = milli/100;
-	milli -= sec*100;
+	// racesow - milliseconds / 1.0f
+	min = milli/60000;
+	milli -= min*60000;
+	sec = milli/1000;
+	milli -= sec*1000;
 	// we want MM:SS:m
-	Q_snprintfz( time, sizeof( time ), "%02d:%02d.%02d", min, sec, milli );
+	Q_snprintfz( time, sizeof( time ), "%02d:%02d.%03d", min, sec, milli );
 	// !racesow
-	trap_SCR_DrawString( layout_cursor_x, layout_cursor_y, layout_cursor_align, time, layout_cursor_font, layout_cursor_color );
+	trap_SCR_DrawString( layout_cursor_x, layout_cursor_y, layout_cursor_align, time, CG_GetLayoutCursorFont(), layout_cursor_color );
 	return true;
 }
 
@@ -1516,17 +1917,17 @@ static bool CG_LFuncDrawPicVar( struct cg_layoutnode_s *commandnode, struct cg_l
 	lastimg  = (int)( CG_GetNumericArg( &argumentnode ) );
 
 	if( min > max )
-	{            // swap min and max and count downwards
-		max ^= min;
-		min ^= max;
-		max ^= min;
+	{	// swap min and max and count downwards
+		int t = min;
+		min = max;
+		max = t;
 		cnt = -cnt;
 	}
 	if( firstimg > lastimg )
-	{                     // swap firstimg and lastimg and count the other way around
-		firstimg ^= lastimg;
-		lastimg  ^= firstimg;
-		firstimg ^= lastimg;
+	{	// swap firstimg and lastimg and count the other way around
+		int t = firstimg;
+		firstimg = lastimg;
+		lastimg = t;
 		cnt = -cnt;
 	}
 
@@ -1628,6 +2029,43 @@ static bool CG_LFuncDrawPicByName( struct cg_layoutnode_s *commandnode, struct c
 	return true;
 }
 
+static bool CG_LFuncDrawSubPicByName( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	int x, y;
+	struct shader_s *shader;
+	float s1, t1, s2, t2;
+
+	x = CG_HorizontalAlignForWidth( layout_cursor_x, layout_cursor_align, layout_cursor_width );
+	y = CG_VerticalAlignForHeight( layout_cursor_y, layout_cursor_align, layout_cursor_height );
+
+	shader = trap_R_RegisterPic( CG_GetStringArg( &argumentnode ) );
+
+	s1 = CG_GetNumericArg( &argumentnode );
+	t1 = CG_GetNumericArg( &argumentnode );
+	s2 = CG_GetNumericArg( &argumentnode );
+	t2 = CG_GetNumericArg( &argumentnode );
+
+	trap_R_DrawStretchPic( x, y, layout_cursor_width, layout_cursor_height, s1, t1, s2, t2, layout_cursor_color, shader );
+	return true;
+}
+
+static bool CG_LFuncDrawRotatedPicByName( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	int x, y;
+	struct shader_s *shader;
+	float angle;
+
+	x = CG_HorizontalAlignForWidth( layout_cursor_x, layout_cursor_align, layout_cursor_width );
+	y = CG_VerticalAlignForHeight( layout_cursor_y, layout_cursor_align, layout_cursor_height );
+
+	shader = trap_R_RegisterPic( CG_GetStringArg( &argumentnode ) );
+
+	angle = CG_GetNumericArg( &argumentnode );
+
+	trap_R_DrawRotatedStretchPic( x, y, layout_cursor_width, layout_cursor_height, 0, 0, 1, 1, angle, layout_cursor_color, shader );
+	return true;
+}
+
 static bool CG_LFuncDrawModelByIndex( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
 {
 	struct model_s *model;
@@ -1700,6 +2138,28 @@ static bool CG_LFuncCursor( struct cg_layoutnode_s *commandnode, struct cg_layou
 	return true;
 }
 
+static bool CG_LFuncCursorX( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	float x;
+
+	x = CG_GetNumericArg( &argumentnode );
+	x = SCALE_X( x );
+
+	layout_cursor_x = Q_rint( x );
+	return true;
+}
+
+static bool CG_LFuncCursorY( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	float y;
+
+	y = CG_GetNumericArg( &argumentnode );
+	y = SCALE_Y( y );
+
+	layout_cursor_y = Q_rint( y );
+	return true;
+}
+
 static bool CG_LFuncMoveCursor( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
 {
 	float x, y;
@@ -1724,6 +2184,28 @@ static bool CG_LFuncSize( struct cg_layoutnode_s *commandnode, struct cg_layoutn
 	y = SCALE_Y( y );
 
 	layout_cursor_width = Q_rint( x );
+	layout_cursor_height = Q_rint( y );
+	return true;
+}
+
+static bool CG_LFuncSizeWidth( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	float x;
+
+	x = CG_GetNumericArg( &argumentnode );
+	x = SCALE_X( x );
+
+	layout_cursor_width = Q_rint( x );
+	return true;
+}
+
+static bool CG_LFuncSizeHeight( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	float y;
+
+	y = CG_GetNumericArg( &argumentnode );
+	y = SCALE_Y( y );
+
 	layout_cursor_height = Q_rint( y );
 	return true;
 }
@@ -1774,19 +2256,26 @@ static bool CG_LFuncAlign( struct cg_layoutnode_s *commandnode, struct cg_layout
 	return true;
 }
 
-static bool CG_LFuncFontFamilyExt( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, 
-	int numArguments, struct qfontface_s *(*register_font)( const char *, int , unsigned int ) )
+static struct qfontface_s *CG_GetLayoutCursorFont( void )
 {
 	struct qfontface_s *font;
 
-	font = register_font( layout_cursor_font_name, layout_cursor_font_style, layout_cursor_font_size );
-	if( font )
-	{
-		layout_cursor_font = font;
-		return true;
+	if( !layout_cursor_font_dirty ) {
+		return layout_cursor_font;
+	}
+	if( !layout_cursor_font_regfunc ) {
+		layout_cursor_font_regfunc = trap_SCR_RegisterFont;
 	}
 
-	return false;
+	font = layout_cursor_font_regfunc( layout_cursor_font_name, layout_cursor_font_style, layout_cursor_font_size );
+	if( font ) {
+		layout_cursor_font = font;
+	} else {
+		layout_cursor_font = cgs.fontSystemSmall;
+	}
+	layout_cursor_font_dirty = false;
+
+	return layout_cursor_font;
 }
 
 static bool CG_LFuncFontFamily( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
@@ -1801,52 +2290,46 @@ static bool CG_LFuncFontFamily( struct cg_layoutnode_s *commandnode, struct cg_l
 	{
 		Q_strncpyz( layout_cursor_font_name, fontname, sizeof( layout_cursor_font_name ) );
 	}
+	layout_cursor_font_dirty = true;
+	layout_cursor_font_regfunc = trap_SCR_RegisterFont;
 
-	return CG_LFuncFontFamilyExt( commandnode, argumentnode, numArguments, trap_SCR_RegisterFont );
+	return true;
 }
 
 static bool CG_LFuncSpecialFontFamily( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
 {
 	const char *fontname = CG_GetStringArg( &argumentnode );
+
 	Q_strncpyz( layout_cursor_font_name, fontname, sizeof( layout_cursor_font_name ) );
-	return CG_LFuncFontFamilyExt( commandnode, argumentnode, numArguments, trap_SCR_RegisterSpecialFont );
+	layout_cursor_font_regfunc = trap_SCR_RegisterSpecialFont;
+	layout_cursor_font_dirty = true;
+
+	return true;
 }
 
 static bool CG_LFuncFontSize( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
 {
-	struct qfontface_s *font;
-	const char *fontsize = CG_GetStringArg( &argumentnode );
+	struct cg_layoutnode_s *charnode = argumentnode;
+	const char *fontsize = CG_GetStringArg( &charnode );
 
 	if( !Q_stricmp( fontsize, "con_fontsystemsmall" ) )
-	{
 		layout_cursor_font_size = cgs.fontSystemSmallSize;
-	}
 	else if( !Q_stricmp( fontsize, "con_fontsystemmedium" ) )
-	{
 		layout_cursor_font_size = cgs.fontSystemMediumSize;
-	}
 	else if( !Q_stricmp( fontsize, "con_fontsystembig" ) )
-	{
 		layout_cursor_font_size = cgs.fontSystemBigSize;
-	}
 	else
-	{
-		layout_cursor_font_size = atoi( fontsize );
-	}
+		layout_cursor_font_size = (int)ceilf( CG_GetNumericArg( &argumentnode ) );
 
-	font = trap_SCR_RegisterFont( layout_cursor_font_name, layout_cursor_font_style, layout_cursor_font_size );
-	if( font )
-	{
-		layout_cursor_font = font;
-		return true;
-	}
+	clamp_low( layout_cursor_font_size, 1 );
 
-	return false;
+	layout_cursor_font_dirty = true;
+
+	return true;
 }
 
 static bool CG_LFuncFontStyle( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
 {
-	struct qfontface_s *font;
 	const char *fontstyle = CG_GetStringArg( &argumentnode );
 
 	if( !Q_stricmp( fontstyle, "normal" ) )
@@ -1868,16 +2351,12 @@ static bool CG_LFuncFontStyle( struct cg_layoutnode_s *commandnode, struct cg_la
 	else
 	{
 		CG_Printf( "WARNING 'CG_LFuncFontStyle' Unknown font style '%s'", fontstyle );
+		return false;
 	}
 
-	font = trap_SCR_RegisterFont( layout_cursor_font_name, layout_cursor_font_style, layout_cursor_font_size );
-	if( font )
-	{
-		layout_cursor_font = font;
-		return true;
-	}
+	layout_cursor_font_dirty = true;
 
-	return false;
+	return true;
 }
 
 static bool CG_LFuncDrawObituaries( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
@@ -1885,49 +2364,75 @@ static bool CG_LFuncDrawObituaries( struct cg_layoutnode_s *commandnode, struct 
 	int internal_align = (int)CG_GetNumericArg( &argumentnode );
 	int icon_size = (int)CG_GetNumericArg( &argumentnode );
 
-	CG_DrawObituaries( layout_cursor_x, layout_cursor_y, layout_cursor_align, layout_cursor_font, layout_cursor_color,
-	                   layout_cursor_width, layout_cursor_height, internal_align, icon_size );
+	CG_DrawObituaries( layout_cursor_x, layout_cursor_y, layout_cursor_align, CG_GetLayoutCursorFont(), layout_cursor_color,
+	                   layout_cursor_width, layout_cursor_height, internal_align, icon_size * cgs.vidHeight / 600 );
 	return true;
 }
 
 static bool CG_LFuncDrawAwards( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
 {
-	CG_DrawAwards( layout_cursor_x, layout_cursor_y, layout_cursor_align, layout_cursor_font, layout_cursor_color );
+	CG_DrawAwards( layout_cursor_x, layout_cursor_y, layout_cursor_align, CG_GetLayoutCursorFont(), layout_cursor_color );
 	return true;
 }
 
 static bool CG_LFuncDrawClock( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
 {
-	CG_DrawClock( layout_cursor_x, layout_cursor_y, layout_cursor_align, layout_cursor_font, layout_cursor_color );
+	CG_DrawClock( layout_cursor_x, layout_cursor_y, layout_cursor_align, CG_GetLayoutCursorFont(), layout_cursor_color );
 	return true;
 }
+
+#define HELPMESSAGE_OVERSHOOT_DURATION 0.2f
+#define HELPMESSAGE_OVERSHOOT_FREQUENCY 6.0f
+#define HELPMESSAGE_OVERSHOOT_DECAY 10.0f
 
 static bool CG_LFuncDrawHelpMessage( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
 {
 	// hide this one when scoreboard is up
-	if( !( cg.predictedPlayerState.stats[STAT_LAYOUTS] & STAT_LAYOUT_SCOREBOARD ) )
+	if( !CG_IsScoreboardShown() )
 	{
 		if( !cgs.demoPlaying )
 		{
 			int i;
 			int y = layout_cursor_y;
-			int font_height = trap_SCR_strHeight( layout_cursor_font );
+			int font_height = trap_SCR_FontHeight( CG_GetLayoutCursorFont() );
 			const char *helpmessage = "";
+			vec4_t color;
+			bool showhelp = cg_showhelp->integer || GS_TutorialGametype();
+
+			// scale alpha to text appears more faint if the player's moving
+			Vector4Copy( layout_cursor_color, color );
 
 			for( i = 0; i < 3; i++ )
 			{
-				size_t len;
+				int x = layout_cursor_x;
 
 				switch( i )
 				{
 				case 0:
-					helpmessage = ( cg_showhelp->integer && cg.matchmessage ? cg.matchmessage : "" );
+					helpmessage = "";
+					if( showhelp ) {
+						if( cg.helpmessage && cg.helpmessage[0] ) {
+							int s_x, e_x;
+							float moveTime = ( cg.time - cg.helpmessage_time ) / 1000.0f;
+
+							s_x = CG_HorizontalMovementForAlign( layout_cursor_align ) < 0 ? cgs.vidWidth : 0;
+							e_x = x;
+
+							x = LinearMovementWithOvershoot( s_x, e_x, 
+								HELPMESSAGE_OVERSHOOT_DURATION, HELPMESSAGE_OVERSHOOT_FREQUENCY, HELPMESSAGE_OVERSHOOT_DECAY, 
+								moveTime );
+
+							helpmessage = cg.helpmessage;
+						}
+						else if( cg.matchmessage ) {
+							helpmessage = cg.matchmessage;
+						}
+					}
 					break;
 				case 1:
 					if( !cg.motd )
 						return true;
 					helpmessage = CG_TranslateString( "Message of the day:" );
-					y += font_height;
 					break;
 				case 2:
 					helpmessage = cg.motd;
@@ -1938,26 +2443,8 @@ static bool CG_LFuncDrawHelpMessage( struct cg_layoutnode_s *commandnode, struct
 
 				if( helpmessage[0] )
 				{
-					do
-					{
-						len = trap_SCR_DrawStringWidth( layout_cursor_x, y, layout_cursor_align, 
-							helpmessage, layout_cursor_width, layout_cursor_font, layout_cursor_color );
-						if( !len )
-						{
-							if( *helpmessage == '\r' || *helpmessage == '\n' )
-								len = 1;
-							else
-								break;
-						}
-						if( helpmessage[len-1] == '\n' )
-						{
-							y += font_height;
-						}
-						helpmessage += len;
-					}
-					while( helpmessage[0] );
-
-					y += font_height;
+					y += trap_SCR_DrawMultilineString( x, y, helpmessage, layout_cursor_align,
+						layout_cursor_width, 0, CG_GetLayoutCursorFont(), color ) * font_height;
 				}
 			}
 		}
@@ -1973,7 +2460,7 @@ static bool CG_LFuncDrawTeamMates( struct cg_layoutnode_s *commandnode, struct c
 
 static bool CG_LFuncDrawPointed( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
 {
-	CG_DrawPlayerNames( layout_cursor_font, layout_cursor_color );
+	CG_DrawPlayerNames( CG_GetLayoutCursorFont(), layout_cursor_color );
 	return true;
 }
 
@@ -1984,7 +2471,7 @@ static bool CG_LFuncDrawString( struct cg_layoutnode_s *commandnode, struct cg_l
 	if( !string || !string[0] )
 		return false;
 	trap_SCR_DrawString( layout_cursor_x, layout_cursor_y, layout_cursor_align, 
-		CG_TranslateString( string ), layout_cursor_font, layout_cursor_color );
+		CG_TranslateString( string ), CG_GetLayoutCursorFont(), layout_cursor_color );
 	return true;
 }
 
@@ -2012,7 +2499,7 @@ static bool CG_LFuncDrawStringRepeat_x( const char *string, int num_draws )
 	}
 	temps[pos] = '\0';
 
-	trap_SCR_DrawString( layout_cursor_x, layout_cursor_y, layout_cursor_align, temps, layout_cursor_font, layout_cursor_color );
+	trap_SCR_DrawString( layout_cursor_x, layout_cursor_y, layout_cursor_align, temps, CG_GetLayoutCursorFont(), layout_cursor_color );
 
 	return true;
 }
@@ -2048,7 +2535,7 @@ static bool CG_LFuncDrawItemNameFromIndex( struct cg_layoutnode_s *commandnode, 
 	if( !item || !item->name )
 		return false;
 	trap_SCR_DrawString( layout_cursor_x, layout_cursor_y, layout_cursor_align, 
-		CG_TranslateString( item->name ), layout_cursor_font, layout_cursor_color );
+		CG_TranslateString( item->name ), CG_GetLayoutCursorFont(), layout_cursor_color );
 	return true;
 }
 
@@ -2061,7 +2548,7 @@ static bool CG_LFuncDrawConfigstring( struct cg_layoutnode_s *commandnode, struc
 		CG_Printf( "WARNING 'CG_LFuncDrawConfigstring' Bad stat_string index" );
 		return false;
 	}
-	trap_SCR_DrawString( layout_cursor_x, layout_cursor_y, layout_cursor_align, cgs.configStrings[index], layout_cursor_font, layout_cursor_color );
+	trap_SCR_DrawString( layout_cursor_x, layout_cursor_y, layout_cursor_align, cgs.configStrings[index], CG_GetLayoutCursorFont(), layout_cursor_color );
 	return true;
 }
 
@@ -2074,7 +2561,7 @@ static bool CG_LFuncDrawPlayername( struct cg_layoutnode_s *commandnode, struct 
 
 	if( ( index >= 0 && index < gs.maxclients ) && cgs.clientInfo[index].name[0] )
 	{
-		trap_SCR_DrawString( layout_cursor_x, layout_cursor_y, layout_cursor_align, cgs.clientInfo[index].name, layout_cursor_font, layout_cursor_color );
+		trap_SCR_DrawString( layout_cursor_x, layout_cursor_y, layout_cursor_align, cgs.clientInfo[index].name, CG_GetLayoutCursorFont(), layout_cursor_color );
 		return true;
 	}
 	return false;
@@ -2110,7 +2597,7 @@ static bool CG_LFuncDrawNumeric2( struct cg_layoutnode_s *commandnode, struct cg
 {
 	int value = (int)CG_GetNumericArg( &argumentnode );
 
-	trap_SCR_DrawString( layout_cursor_x, layout_cursor_y, layout_cursor_align, va( "%i", value ), layout_cursor_font, layout_cursor_color );
+	trap_SCR_DrawString( layout_cursor_x, layout_cursor_y, layout_cursor_align, va( "%i", value ), CG_GetLayoutCursorFont(), layout_cursor_color );
 	return true;
 }
 
@@ -2135,6 +2622,20 @@ static bool CG_LFuncDrawPicBar( struct cg_layoutnode_s *commandnode, struct cg_l
 	return true;
 }
 
+static bool CG_LFuncDrawWeaponIcon( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	int weapon = cg.predictedPlayerState.stats[STAT_WEAPON];
+	int x, y;
+
+	if( weapon < WEAP_GUNBLADE || weapon >= WEAP_TOTAL )
+		return false;
+
+	x = CG_HorizontalAlignForWidth( layout_cursor_x, layout_cursor_align, layout_cursor_width );
+	y = CG_VerticalAlignForHeight( layout_cursor_y, layout_cursor_align, layout_cursor_height );
+	trap_R_DrawStretchPic( x, y, layout_cursor_width, layout_cursor_height, 0, 0, 1, 1, layout_cursor_color, CG_GetWeaponIcon( weapon ) );
+	return true;
+}
+
 static bool CG_LFuncCustomWeaponIcons( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
 {
 	int weapon = (int)CG_GetNumericArg( &argumentnode );
@@ -2151,13 +2652,25 @@ static bool CG_LFuncCustomWeaponIcons( struct cg_layoutnode_s *commandnode, stru
 	return true;
 }
 
+static bool CG_LFuncResetCustomWeaponIcons( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	int weapon;
+	for( weapon = 0; weapon < WEAP_TOTAL-1; weapon++ )
+	{
+		customWeaponPics[weapon] = NULL;
+		customNoGunWeaponPics[weapon] = NULL;
+	}
+	customWeaponSelectPic = NULL;
+	return true;
+}
+
 static bool CG_LFuncCustomWeaponSelect( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
 {
 	customWeaponSelectPic = CG_GetStringArg( &argumentnode );
 	return true;
 }
 
-static bool CG_LFuncDrawWeaponIcons( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+static void CG_LFuncsWeaponIcons( struct cg_layoutnode_s *argumentnode, bool touch )
 {
 	int offx, offy, w, h;
 
@@ -2166,8 +2679,53 @@ static bool CG_LFuncDrawWeaponIcons( struct cg_layoutnode_s *commandnode, struct
 	w = (int)( CG_GetNumericArg( &argumentnode ) * cgs.vidWidth/800 );
 	h = (int)( CG_GetNumericArg( &argumentnode ) * cgs.vidHeight/600 );
 
-	CG_DrawWeaponIcons( layout_cursor_x, layout_cursor_y, offx, offy, w, h, layout_cursor_align );
+	CG_DrawWeaponIcons( layout_cursor_x, layout_cursor_y, offx, offy, w, h, layout_cursor_align, touch );
+}
 
+static bool CG_LFuncDrawWeaponIcons( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	CG_LFuncsWeaponIcons( argumentnode, false );
+	return true;
+}
+
+static bool CG_LFuncTouchWeaponIcons( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	CG_LFuncsWeaponIcons( argumentnode, true );
+	return true;
+}
+
+static bool CG_LFuncSetTouchWeaponDropOffset( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	float x, y;
+
+	x = CG_GetNumericArg( &argumentnode );
+	x = SCALE_X( x );
+	y = CG_GetNumericArg( &argumentnode );
+	y = SCALE_Y( y );
+
+	cg_touch_dropWeaponX = Q_rint( x );
+	cg_touch_dropWeaponY = Q_rint( y );
+	return true;
+}
+
+static bool CG_LFuncDrawWeaponCross( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	int ammoofs = (int)( CG_GetNumericArg( &argumentnode ) * cgs.vidHeight/600 );
+	int ammosize = (int)( CG_GetNumericArg( &argumentnode ) * cgs.vidHeight/600 );
+	int ammopass;
+
+	if( cg_hud_weaponcrosstime > 0.0f )
+	{
+		for( ammopass = 0; ammopass < 2; ammopass++ )
+		{
+			CG_DrawWeaponCrossQuarter( ammopass, 0, layout_cursor_x, layout_cursor_y,  0, -1, layout_cursor_width, layout_cursor_height, ammoofs, ammosize );
+			CG_DrawWeaponCrossQuarter( ammopass, 1, layout_cursor_x, layout_cursor_y,  1,  0, layout_cursor_width, layout_cursor_height, ammoofs, ammosize );
+			CG_DrawWeaponCrossQuarter( ammopass, 2, layout_cursor_x, layout_cursor_y,  0,  1, layout_cursor_width, layout_cursor_height, ammoofs, ammosize );
+			CG_DrawWeaponCrossQuarter( ammopass, 3, layout_cursor_x, layout_cursor_y, -1,  0, layout_cursor_width, layout_cursor_height, ammoofs, ammosize );
+			if( ammosize <= 0 )
+				break;
+		}
+	}
 	return true;
 }
 
@@ -2199,7 +2757,7 @@ static bool CG_LFuncDrawLocationName( struct cg_layoutnode_s *commandnode, struc
 
 	trap_GetConfigString( CS_LOCATIONS + loc_tag, string, sizeof( string ) );
 
-	trap_SCR_DrawString( layout_cursor_x, layout_cursor_y, layout_cursor_align, string, layout_cursor_font, layout_cursor_color );
+	trap_SCR_DrawString( layout_cursor_x, layout_cursor_y, layout_cursor_align, CG_TranslateString( string ), CG_GetLayoutCursorFont(), layout_cursor_color );
 	return true;
 }
 
@@ -2231,7 +2789,7 @@ static bool CG_LFuncDrawWeaponStrongAmmo( struct cg_layoutnode_s *commandnode, s
 
 static bool CG_LFuncDrawTeamInfo( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
 {
-	CG_DrawTeamInfo( layout_cursor_x, layout_cursor_y, layout_cursor_align, layout_cursor_font, layout_cursor_color );
+	CG_DrawTeamInfo( layout_cursor_x, layout_cursor_y, layout_cursor_align, CG_GetLayoutCursorFont(), layout_cursor_color );
 	return true;
 }
 
@@ -2264,8 +2822,215 @@ static bool CG_LFuncDrawChat( struct cg_layoutnode_s *commandnode, struct cg_lay
 	padding_y = (int)( CG_GetNumericArg( &argumentnode ) )*cgs.vidHeight/600;
 	shader = trap_R_RegisterPic( CG_GetStringArg( &argumentnode ) );
 
-	CG_DrawChat( &cg.chat, layout_cursor_x, layout_cursor_y, layout_cursor_font_name, layout_cursor_font, 
+	CG_DrawChat( &cg.chat, layout_cursor_x, layout_cursor_y, layout_cursor_font_name, CG_GetLayoutCursorFont(), layout_cursor_font_size,
 		layout_cursor_width, layout_cursor_height, padding_x, padding_y, layout_cursor_color, shader );
+	return true;
+}
+
+static void CG_MoveUpFunc( int id, unsigned int time )
+{
+	CG_SetTouchpad( TOUCHPAD_MOVE, -1 );
+}
+
+static bool CG_LFuncTouchMove( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	int touch = CG_TouchArea( TOUCHAREA_HUD_MOVE,
+		CG_HorizontalAlignForWidth( layout_cursor_x, layout_cursor_align, layout_cursor_width ),
+		CG_VerticalAlignForHeight( layout_cursor_y, layout_cursor_align, layout_cursor_height ),
+		layout_cursor_width, layout_cursor_height, CG_MoveUpFunc );
+	if( touch >= 0 )
+		CG_SetTouchpad( TOUCHPAD_MOVE, touch );
+	return true;
+}
+
+static void CG_ViewUpFunc( int id, unsigned int time )
+{
+	CG_SetTouchpad( TOUCHPAD_VIEW, -1 );
+
+	if( cg_hud_touch_zoomSeq )
+	{
+		cg_touch_t &touch = cg_touches[id];
+
+		float scale = 600.0f / ( float )cgs.vidHeight;
+		if( !time || ( (int)( time - cg_hud_touch_zoomLastTouch ) > cg_touch_zoomTime->integer ) ||
+			( abs( touch.x - cg_hud_touch_zoomX ) * scale > cg_touch_zoomThres->value ) ||
+			( abs( touch.y - cg_hud_touch_zoomY ) * scale > cg_touch_zoomThres->value ) )
+		{
+			cg_hud_touch_zoomSeq = 0;
+		}
+
+		if( cg_hud_touch_zoomSeq == 1 )
+		{
+			cg_hud_touch_zoomSeq = 2;
+			cg_hud_touch_zoomLastTouch = time;
+			cg_hud_touch_zoomX = touch.x;
+			cg_hud_touch_zoomY = touch.y;
+		}
+		else if( cg_hud_touch_zoomSeq == 3 )
+		{
+			cg_hud_touch_zoomSeq = 0;
+			cg_hud_touch_buttons ^= BUTTON_ZOOM; // toggle zoom after a double tap
+		}
+	}
+}
+
+static bool CG_LFuncTouchView( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	int touchID = CG_TouchArea( TOUCHAREA_HUD_VIEW,
+		CG_HorizontalAlignForWidth( layout_cursor_x, layout_cursor_align, layout_cursor_width ),
+		CG_VerticalAlignForHeight( layout_cursor_y, layout_cursor_align, layout_cursor_height ),
+		layout_cursor_width, layout_cursor_height, CG_ViewUpFunc );
+	if( touchID >= 0 )
+	{
+		CG_SetTouchpad( TOUCHPAD_VIEW, touchID );
+
+		cg_touch_t &touch = cg_touches[touchID];
+		if( cg_hud_touch_zoomSeq )
+		{
+			float scale = 600.0f / ( float )cgs.vidHeight;
+			if( ( ( int )( touch.time - cg_hud_touch_zoomLastTouch ) > cg_touch_zoomTime->integer ) ||
+				( abs( touch.x - cg_hud_touch_zoomX ) * scale > cg_touch_zoomThres->value ) ||
+				( abs( touch.y - cg_hud_touch_zoomY ) * scale > cg_touch_zoomThres->value ) )
+			{
+				cg_hud_touch_zoomSeq = 0;
+			}
+		}
+		if( !cg_hud_touch_zoomSeq || ( cg_hud_touch_zoomSeq == 2 ) )
+		{
+			cg_hud_touch_zoomSeq++;
+			cg_hud_touch_zoomLastTouch = touch.time;
+			cg_hud_touch_zoomX = touch.x;
+			cg_hud_touch_zoomY = touch.y;
+		}
+	}
+
+	return true;
+}
+
+static void CG_UpmoveUpFunc( int id, unsigned int time )
+{
+	cg_hud_touch_upmove = 0;
+}
+
+static bool CG_LFuncTouchJump( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	if( CG_TouchArea( TOUCHAREA_HUD_JUMP,
+		CG_HorizontalAlignForWidth( layout_cursor_x, layout_cursor_align, layout_cursor_width ),
+		CG_VerticalAlignForHeight( layout_cursor_y, layout_cursor_align, layout_cursor_height ),
+		layout_cursor_width, layout_cursor_height, CG_UpmoveUpFunc ) >= 0 )
+	{
+		cg_hud_touch_upmove = 1;
+	}
+	return true;
+}
+
+static bool CG_LFuncTouchCrouch( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	if( CG_TouchArea( TOUCHAREA_HUD_CROUCH,
+		CG_HorizontalAlignForWidth( layout_cursor_x, layout_cursor_align, layout_cursor_width ),
+		CG_VerticalAlignForHeight( layout_cursor_y, layout_cursor_align, layout_cursor_height ),
+		layout_cursor_width, layout_cursor_height, CG_UpmoveUpFunc ) >= 0 )
+	{
+		cg_hud_touch_upmove = -1;
+	}
+	return true;
+}
+
+static void CG_AttackUpFunc( int id, unsigned int time )
+{
+	cg_hud_touch_buttons &= ~BUTTON_ATTACK;
+}
+
+static bool CG_LFuncTouchAttack( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	if( CG_TouchArea( TOUCHAREA_HUD_ATTACK,
+		CG_HorizontalAlignForWidth( layout_cursor_x, layout_cursor_align, layout_cursor_width ),
+		CG_VerticalAlignForHeight( layout_cursor_y, layout_cursor_align, layout_cursor_height ),
+		layout_cursor_width, layout_cursor_height, CG_AttackUpFunc ) >= 0 )
+	{
+		cg_hud_touch_buttons |= BUTTON_ATTACK;
+	}
+	return true;
+}
+
+static void CG_SpecialUpFunc( int id, unsigned int time )
+{
+	cg_hud_touch_buttons &= ~BUTTON_SPECIAL;
+}
+
+static bool CG_LFuncTouchSpecial( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	if( CG_TouchArea( TOUCHAREA_HUD_SPECIAL,
+		CG_HorizontalAlignForWidth( layout_cursor_x, layout_cursor_align, layout_cursor_width ),
+		CG_VerticalAlignForHeight( layout_cursor_y, layout_cursor_align, layout_cursor_height ),
+		layout_cursor_width, layout_cursor_height, CG_SpecialUpFunc ) >= 0 )
+	{
+		cg_hud_touch_buttons |= BUTTON_SPECIAL;
+	}
+	return true;
+}
+
+static bool CG_LFuncTouchClassAction( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	if( CG_TouchArea( TOUCHAREA_HUD_CLASSACTION,
+		CG_HorizontalAlignForWidth( layout_cursor_x, layout_cursor_align, layout_cursor_width ),
+		CG_VerticalAlignForHeight( layout_cursor_y, layout_cursor_align, layout_cursor_height ),
+		layout_cursor_width, layout_cursor_height, NULL ) >= 0 )
+	{
+		trap_Cmd_ExecuteText( EXEC_NOW, va( "classAction%i", ( int )CG_GetNumericArg( &argumentnode ) ) );
+	}
+	return true;
+}
+
+static bool CG_LFuncTouchDropItem( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	if( CG_TouchArea( TOUCHAREA_HUD_DROPITEM,
+		CG_HorizontalAlignForWidth( layout_cursor_x, layout_cursor_align, layout_cursor_width ),
+		CG_VerticalAlignForHeight( layout_cursor_y, layout_cursor_align, layout_cursor_height ),
+		layout_cursor_width, layout_cursor_height, NULL ) >= 0 )
+	{
+		trap_Cmd_ExecuteText( EXEC_NOW, va( "drop \"%s\"", CG_GetStringArg( &argumentnode ) ) );
+	}
+	return true;
+}
+
+static void CG_ScoresUpFunc( int id, unsigned int time )
+{
+	CG_ScoresOff_f();
+}
+
+static bool CG_LFuncTouchScores( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	if( CG_TouchArea( TOUCHAREA_HUD_SCORES,
+		CG_HorizontalAlignForWidth( layout_cursor_x, layout_cursor_align, layout_cursor_width ),
+		CG_VerticalAlignForHeight( layout_cursor_y, layout_cursor_align, layout_cursor_height ),
+		layout_cursor_width, layout_cursor_height, CG_ScoresUpFunc ) >= 0 )
+	{
+		CG_ScoresOn_f();
+	}
+	return true;
+}
+
+static void CG_QuickMenuUpFunc( int id, unsigned int time )
+{
+	if( GS_MatchState() < MATCH_STATE_POSTMATCH )
+		CG_ShowQuickMenu( 0 );
+}
+
+static bool CG_LFuncTouchQuickMenu( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	int side = ( int )CG_GetNumericArg( &argumentnode );
+
+	if( GS_MatchState() < MATCH_STATE_POSTMATCH )
+	{
+		if( CG_TouchArea( TOUCHAREA_HUD_QUICKMENU,
+			CG_HorizontalAlignForWidth( layout_cursor_x, layout_cursor_align, layout_cursor_width ),
+			CG_VerticalAlignForHeight( layout_cursor_y, layout_cursor_align, layout_cursor_height ),
+			layout_cursor_width, layout_cursor_height, CG_QuickMenuUpFunc ) >= 0 )
+		{
+			CG_ShowQuickMenu( ( side < 0 ) ? -1 : 1 );
+		}
+	}
 	return true;
 }
 
@@ -2275,6 +3040,10 @@ static bool CG_LFuncIf( struct cg_layoutnode_s *commandnode, struct cg_layoutnod
 	return (int)CG_GetNumericArg( &argumentnode ) != 0;
 }
 
+static bool CG_LFuncIfNot( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	return (int)CG_GetNumericArg( &argumentnode ) == 0;
+}
 // racesow
 /**
  * CG_LFuncDrawCheckpoint
@@ -2317,6 +3086,7 @@ typedef struct cg_layoutcommand_s
 {
 	const char *name;
 	bool ( *func )( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments );
+	bool ( *touchfunc )( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments );
 	int numparms;
 	const char *help;
 	bool precache;
@@ -2327,6 +3097,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"setScale",
 		CG_LFuncScale,
+		CG_LFuncScale,
 		1,
 		"Sets the cursor scaling method.",
 		false
@@ -2335,13 +3106,33 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"setCursor",
 		CG_LFuncCursor,
+		CG_LFuncCursor,
 		2,
 		"Sets the cursor position to x and y coordinates.",
 		false
 	},
 
 	{
-		"MoveCursor",
+		"setCursorX",
+		CG_LFuncCursorX,
+		CG_LFuncCursorX,
+		1,
+		"Sets the cursor x position.",
+		false
+	},
+
+	{
+		"setCursorY",
+		CG_LFuncCursorY,
+		CG_LFuncCursorY,
+		1,
+		"Sets the cursor y position.",
+		false
+	},
+
+	{
+		"moveCursor",
+		CG_LFuncMoveCursor,
 		CG_LFuncMoveCursor,
 		2,
 		"Moves the cursor position by dx and dy.",
@@ -2351,6 +3142,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"setAlign",
 		CG_LFuncAlign,
+		CG_LFuncAlign,
 		2,
 		"Changes align setting. Parameters: horizontal alignment, vertical alignment",
 		false
@@ -2359,13 +3151,33 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"setSize",
 		CG_LFuncSize,
+		CG_LFuncSize,
 		2,
 		"Sets width and height. Used for pictures and models.",
 		false
 	},
 
 	{
+		"setWidth",
+		CG_LFuncSizeWidth,
+		CG_LFuncSizeWidth,
+		1,
+		"Sets width. Used for pictures and models.",
+		false
+	},
+
+	{
+		"setHeight",
+		CG_LFuncSizeHeight,
+		CG_LFuncSizeHeight,
+		1,
+		"Sets height. Used for pictures and models.",
+		false
+	},
+
+	{
 		"setFontFamily",
+		CG_LFuncFontFamily,
 		CG_LFuncFontFamily,
 		1,
 		"Sets font by font family. Accepts 'con_fontSystem', as a shortcut to default game font family.",
@@ -2375,6 +3187,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"setSpecialFontFamily",
 		CG_LFuncSpecialFontFamily,
+		CG_LFuncSpecialFontFamily,
 		1,
 		"Sets font by font family. The font will not overriden by the fallback font used when CJK is detected.",
 		false
@@ -2382,6 +3195,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 
 	{
 		"setFontSize",
+		CG_LFuncFontSize,
 		CG_LFuncFontSize,
 		1,
 		"Sets font by font name. Accepts 'con_fontSystemSmall', 'con_fontSystemMedium' and 'con_fontSystemBig' as shortcuts to default game fonts sizes.",
@@ -2391,6 +3205,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"setFontStyle",
 		CG_LFuncFontStyle,
+		CG_LFuncFontStyle,
 		1,
 		"Sets font style. Possible values are: 'normal', 'italic', 'bold' and 'bold-italic'.",
 		false
@@ -2399,6 +3214,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"setColor",
 		CG_LFuncColor,
+		NULL,
 		4,
 		"Sets color setting in RGBA mode. Used for text and pictures",
 		false
@@ -2407,6 +3223,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"setColorToTeamColor",
 		CG_LFuncColorToTeamColor,
+		NULL,
 		1,
 		"Sets cursor color to the color of the team provided in the argument",
 		false
@@ -2415,6 +3232,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"setColorAlpha",
 		CG_LFuncColorAlpha,
+		NULL,
 		1,
 		"Changes the alpha value of the current color",
 		false
@@ -2423,6 +3241,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"setRotationSpeed",
 		CG_LFuncRotationSpeed,
+		NULL,
 		3,
 		"Sets rotation speeds as vector. Used for models",
 		false
@@ -2431,14 +3250,25 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"setCustomWeaponIcons",
 		CG_LFuncCustomWeaponIcons,
+		NULL,
 		3,
 		"Sets a custom shader for weapon icons",
 		false
 	},
 
 	{
+		"resetCustomWeaponIcons",
+		CG_LFuncResetCustomWeaponIcons,
+		NULL,
+		0,
+		"Resets the custom shaders for weapon icons",
+		false
+	},
+
+	{
 		"setCustomWeaponSelect",
 		CG_LFuncCustomWeaponSelect,
+		NULL,
 		1,
 		"Sets a custom shader for weapon icons",
 		false
@@ -2447,6 +3277,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawObituaries",
 		CG_LFuncDrawObituaries,
+		NULL,
 		2,
 		"Draws graphical death messages",
 		false
@@ -2455,6 +3286,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawAwards",
 		CG_LFuncDrawAwards,
+		NULL,
 		0,
 		"Draws award messages",
 		false
@@ -2463,6 +3295,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawClock",
 		CG_LFuncDrawClock,
+		NULL,
 		0,
 		"Draws clock",
 		false
@@ -2471,6 +3304,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawHelpString",
 		CG_LFuncDrawHelpMessage,
+		NULL,
 		0,
 		"Draws the help message",
 		false
@@ -2479,6 +3313,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawPlayername",
 		CG_LFuncDrawPlayername,
+		NULL,
 		1,
 		"Draws the name of the player with id provided by the argument",
 		false
@@ -2487,6 +3322,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawPointing",
 		CG_LFuncDrawPointed,
+		NULL,
 		0,
 		"Draws the name of the player in the crosshair",
 		false
@@ -2495,6 +3331,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawTeamMates",
 		CG_LFuncDrawTeamMates,
+		NULL,
 		0,
 		"Draws indicators where team mates are",
 		false
@@ -2503,6 +3340,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawStatString",
 		CG_LFuncDrawConfigstring,
+		NULL,
 		1,
 		"Draws configstring of argument id",
 		false
@@ -2512,6 +3350,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawCheckPoint",
 		CG_LFuncDrawCheckpoint,
+		NULL,
 		1,
 		"Draws last checkpoint time of argument id",
 		false
@@ -2521,6 +3360,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawItemName",
 		CG_LFuncDrawItemNameFromIndex,
+		NULL,
 		1,
 		"Draws the name of the item with given item index",
 		false
@@ -2529,6 +3369,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawString",
 		CG_LFuncDrawString,
+		NULL,
 		1,
 		"Draws the string in the argument",
 		false
@@ -2537,6 +3378,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawStringNum",
 		CG_LFuncDrawNumeric2,
+		NULL,
 		1,
 		"Draws numbers as text",
 		false
@@ -2545,6 +3387,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawStringRepeat",
 		CG_LFuncDrawStringRepeat,
+		NULL,
 		2,
 		"Draws argument string multiple times",
 		false
@@ -2553,6 +3396,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawStringRepeatConfigString",
 		CG_LFuncDrawStringRepeatConfigString,
+		NULL,
 		2,
 		"Draws argument string multiple times",
 		false
@@ -2561,6 +3405,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawNum",
 		CG_LFuncDrawNumeric,
+		NULL,
 		1,
 		"Draws numbers of given character size",
 		false
@@ -2569,6 +3414,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawStretchNum",
 		CG_LFuncDrawStretchNum,
+		NULL,
 		1,
 		"Draws numbers stretch inside a given size",
 		false
@@ -2577,6 +3423,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawBar",
 		CG_LFuncDrawBar,
+		NULL,
 		2,
 		"Draws a bar of size setting, the bar is filled in proportion to the arguments",
 		false
@@ -2585,6 +3432,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawPicBar",
 		CG_LFuncDrawPicBar,
+		NULL,
 		3,
 		"Draws a picture of size setting, is filled in proportion to the 2 arguments (value, maxvalue). 3rd argument is the picture path",
 		false
@@ -2593,6 +3441,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawCrosshair",
 		CG_LFuncDrawCrossHair,
+		NULL,
 		0,
 		"Draws the game crosshair",
 		false
@@ -2601,6 +3450,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawKeyState",
 		CG_LFuncDrawKeyState,
+		NULL,
 		1,
 		"Draws icons showing if the argument key is pressed. Possible arg: forward, backward, left, right, fire, jump, crouch, special",
 		false
@@ -2609,6 +3459,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawNetIcon",
 		CG_LFuncDrawNet,
+		NULL,
 		0,
 		"Draws the disconnection icon",
 		false
@@ -2617,6 +3468,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawChat",
 		CG_LFuncDrawChat,
+		NULL,
 		3,
 		"Draws the game chat messages",
 		false
@@ -2625,6 +3477,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawPicByIndex",
 		CG_LFuncDrawPicByIndex,
+		NULL,
 		1,
 		"Draws a pic with argument as imageIndex",
 		true
@@ -2633,6 +3486,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawPicByItemIndex",
 		CG_LFuncDrawPicByItemIndex,
+		NULL,
 		1,
 		"Draws a item icon pic with argument as itemIndex",
 		false
@@ -2641,14 +3495,34 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawPicByName",
 		CG_LFuncDrawPicByName,
+		NULL,
 		1,
 		"Draws a pic with argument being the file path",
 		true
 	},
 
 	{
+		"drawSubPicByName",
+		CG_LFuncDrawSubPicByName,
+		NULL,
+		5,
+		"Draws a part of a pic with arguments being the file path and the texture coordinates",
+		true
+	},
+
+	{
+		"drawRotatedPicByName",
+		CG_LFuncDrawRotatedPicByName,
+		NULL,
+		2,
+		"Draws a pic with arguments being the file path and the rotation",
+		true
+	},
+
+	{
 		"drawModelByIndex",
 		CG_LFuncDrawModelByIndex,
+		NULL,
 		1,
 		"Draws a model with argument being the modelIndex",
 		true
@@ -2657,6 +3531,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawModelByName",
 		CG_LFuncDrawModelByName,
+		NULL,
 		2,
 		"Draws a model with argument being the path to the model file",
 		true
@@ -2665,6 +3540,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawModelByItemIndex",
 		CG_LFuncDrawModelByItemIndex,
+		NULL,
 		1,
 		"Draws a item model with argument being the item index",
 		false
@@ -2673,14 +3549,33 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawWeaponIcons",
 		CG_LFuncDrawWeaponIcons,
+		CG_LFuncTouchWeaponIcons,
 		4,
 		"Draws the icons of weapon/ammo owned by the player, arguments are offset x, offset y, size x, size y",
 		false
 	},
 
 	{
+		"setTouchWeaponDropOffset",
+		CG_LFuncSetTouchWeaponDropOffset,
+		CG_LFuncSetTouchWeaponDropOffset,
+		2,
+		"Sets the movement of weapon icons when dropping weapons on touch HUDs"
+	},
+
+	{
+		"drawWeaponCross",
+		CG_LFuncDrawWeaponCross,
+		NULL,
+		2,
+		"Draws the weapon selection cross, cursor sets the center, size sets the size of each icon, arguments are ammo y offset and size",
+		false
+	},
+
+	{
 		"drawCaptureAreas",
 		CG_LFuncDrawCaptureAreas,
+		NULL,
 		3,
 		"Draws the capture areas for iTDM",
 		false
@@ -2689,6 +3584,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawMiniMap",
 		CG_LFuncDrawMiniMap,
+		NULL,
 		2,
 		"Draws a minimap (radar). Arguments are : draw_playernames, draw_itemnames",
 		false
@@ -2697,21 +3593,34 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawWeaponWeakAmmo",
 		CG_LFuncDrawWeaponWeakAmmo,
+		NULL,
 		3,
 		"Draws the amount of weak ammo owned by the player, arguments are offset x, offset y, fontsize",
 		false
 	},
+
 	{
 		"drawWeaponStrongAmmo",
 		CG_LFuncDrawWeaponStrongAmmo,
+		NULL,
 		3,
 		"Draws the amount of strong ammo owned by the player,  arguments are offset x, offset y, fontsize",
 		false
 	},
 
 	{
+		"drawWeaponIcon",
+		CG_LFuncDrawWeaponIcon,
+		NULL,
+		0,
+		"Draws the icon of the current weapon",
+		false
+	},
+
+	{
 		"drawTeamInfo",
 		CG_LFuncDrawTeamInfo,
+		NULL,
 		0,
 		"Draws the Team Info (locations) box",
 		false
@@ -2720,13 +3629,24 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"if",
 		CG_LFuncIf,
+		CG_LFuncIf,
 		1,
 		"Conditional expression. Argument accepts operations >, <, ==, >=, <=, etc",
 		false
 	},
 
 	{
+		"ifnot",
+		CG_LFuncIfNot,
+		CG_LFuncIfNot,
+		1,
+		"Negative conditional expression. Argument accepts operations >, <, ==, >=, <=, etc",
+		false
+	},
+
+	{
 		"endif",
+		NULL,
 		NULL,
 		0,
 		"End of conditional expression block",
@@ -2736,6 +3656,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawTimer",
 		CG_LFuncDrawTimer,
+		NULL,
 		1,
 		"Draws a timer clock for the race gametype",
 		false
@@ -2743,6 +3664,7 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawPicVar",
 		CG_LFuncDrawPicVar,
+		NULL,
 		6,
 		"Draws a picture from a sequence, depending on the value of a given parameter. Parameters: minval, maxval, value, firstimg, lastimg, imagename (replacing ## by the picture number, no leading zeros), starting at 0)",
 		false
@@ -2751,12 +3673,104 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	{
 		"drawLocationName",
 		CG_LFuncDrawLocationName,
+		NULL,
 		1,
 		"Draws the location name with argument being location tag/index",
 		false
 	},
 
 	{
+		"touchMove",
+		NULL,
+		CG_LFuncTouchMove,
+		0,
+		"Places movement touchpad",
+		false
+	},
+
+	{
+		"touchView",
+		NULL,
+		CG_LFuncTouchView,
+		0,
+		"Places view rotation touchpad",
+		false
+	},
+
+	{
+		"touchJump",
+		NULL,
+		CG_LFuncTouchJump,
+		0,
+		"Places jump button",
+		false
+	},
+
+	{
+		"touchCrouch",
+		NULL,
+		CG_LFuncTouchCrouch,
+		0,
+		"Places crouch button",
+		false
+	},
+
+	{
+		"touchAttack",
+		NULL,
+		CG_LFuncTouchAttack,
+		0,
+		"Places attack button",
+		false
+	},
+
+	{
+		"touchSpecial",
+		NULL,
+		CG_LFuncTouchSpecial,
+		0,
+		"Places special button",
+		false
+	},
+
+	{
+		"touchClassAction",
+		NULL,
+		CG_LFuncTouchClassAction,
+		1,
+		"Places class action button",
+		false
+	},
+
+	{
+		"touchDropItem",
+		NULL,
+		CG_LFuncTouchDropItem,
+		1,
+		"Places item drop button",
+		false
+	},
+
+	{
+		"touchScores",
+		NULL,
+		CG_LFuncTouchScores,
+		0,
+		"Places scoreboard button",
+		false
+	},
+
+	{
+		"touchQuickMenu",
+		NULL,
+		CG_LFuncTouchQuickMenu,
+		1,
+		"Places quick menu button, 1 to show the menu on the right, -1 to show it on the left",
+		false
+	},
+
+	{
+		NULL,
 		NULL,
 		NULL,
 		0,
@@ -2824,6 +3838,7 @@ void Cmd_CG_PrintHudHelp_f( void )
 typedef struct cg_layoutnode_s
 {
 	bool ( *func )( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments );
+	bool ( *touchfunc )( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments );
 	int type;
 	char *string;
 	int integer;
@@ -2912,6 +3927,7 @@ static cg_layoutnode_t *CG_LayoutParseCommandNode( const char *token )
 	node->value = 0.0f;
 	node->string = CG_CopyString( command->name );
 	node->func = command->func;
+	node->touchfunc = command->touchfunc;
 	node->ifthread = NULL;
 	node->precache = command->precache;
 
@@ -3043,6 +4059,7 @@ static cg_layoutnode_t *CG_LayoutParseArgumentNode( const char *token )
 	node->value = atof( valuetok );
 	node->string = CG_CopyString( token );
 	node->func = NULL;
+	node->touchfunc = NULL;
 	node->ifthread = NULL;
 	node->precache = false;
 
@@ -3266,7 +4283,7 @@ static cg_layoutnode_t *CG_RecurseParseLayoutScript( char **ptr, int level )
 			}
 
 			// special case: last command was "if", we create a new sub-thread and ignore the new command
-			if( command && !Q_stricmp( command->string, "if" ) )
+			if( command && ( !Q_stricmp( command->string, "if" ) || !Q_stricmp( command->string, "ifnot" ) ) )
 			{
 				*ptr = s_tokenback; // step back one token
 				command->ifthread = CG_RecurseParseLayoutScript( ptr, level + 1 );
@@ -3397,7 +4414,7 @@ static void CG_ParseLayoutScript( char *string, cg_layoutnode_t *rootnode )
 * When finding an "if" command with a subtree, we execute the "if" command. In the case it
 * returns any value, we recurse execute the subtree
 */
-static void CG_RecurseExecuteLayoutThread( cg_layoutnode_t *rootnode )
+static void CG_RecurseExecuteLayoutThread( cg_layoutnode_t *rootnode, bool touch )
 {
 	cg_layoutnode_t	*argumentnode = NULL;
 	cg_layoutnode_t	*commandnode = NULL;
@@ -3438,14 +4455,24 @@ static void CG_RecurseExecuteLayoutThread( cg_layoutnode_t *rootnode )
 			CG_Printf( "ERROR: Layout command %s: invalid argument count (expecting %i, found %i)\n", commandnode->string, commandnode->integer, numArguments );
 			return;
 		}
-		if( commandnode->func )
+		if( !touch && commandnode->func )
 		{
 			//special case for if commands
 			if( commandnode->func( commandnode, argumentnode, numArguments ) )
 			{
 				// execute the "if" thread when command returns a value
 				if( commandnode->ifthread )
-					CG_RecurseExecuteLayoutThread( commandnode->ifthread );
+					CG_RecurseExecuteLayoutThread( commandnode->ifthread, touch );
+			}
+		}
+		else if( touch && commandnode->touchfunc )
+		{
+			//special case for if commands
+			if( commandnode->touchfunc( commandnode, argumentnode, numArguments ) )
+			{
+				// execute the "if" thread when command returns a value
+				if( commandnode->ifthread )
+					CG_RecurseExecuteLayoutThread( commandnode->ifthread, touch );
 			}
 		}
 
@@ -3464,9 +4491,9 @@ static void CG_RecurseExecuteLayoutThread( cg_layoutnode_t *rootnode )
 /*
 * CG_ExecuteLayoutProgram
 */
-void CG_ExecuteLayoutProgram( struct cg_layoutnode_s *rootnode )
+void CG_ExecuteLayoutProgram( struct cg_layoutnode_s *rootnode, bool touch )
 {
-	CG_RecurseExecuteLayoutThread( rootnode );
+	CG_RecurseExecuteLayoutThread( rootnode, touch );
 }
 
 //=============================================================================
@@ -3602,11 +4629,11 @@ static char *CG_LoadHUDFile( char *path )
 		{
 			break;
 		}
-		token = COM_ParseExt2( ( const char ** )&rec_ptr[rec_lvl], qtrue, qfalse );
+		token = COM_ParseExt2( ( const char ** )&rec_ptr[rec_lvl], true, false );
 		if( !Q_stricmp( "include", token ) )
 		{
 			// Handle include
-			token = COM_ParseExt2( ( const char ** )&rec_ptr[rec_lvl], qfalse, qfalse );
+			token = COM_ParseExt2( ( const char ** )&rec_ptr[rec_lvl], false, false );
 			if( ( ( rec_lvl + 1 ) < HUD_MAX_LVL ) && ( rec_ptr[rec_lvl] ) && ( token ) && ( token[0] != '\0' ) )
 			{
 				// Go to next recursive level and prepare it's filename :)
@@ -3641,7 +4668,7 @@ static char *CG_LoadHUDFile( char *path )
 			}
 			else
 			{
-				token = COM_ParseExt2( ( const char ** )&rec_ptr[rec_lvl], qfalse, qfalse );
+				token = COM_ParseExt2( ( const char ** )&rec_ptr[rec_lvl], false, false );
 				if( ( token ) && ( token[0] != '\0' ) )
 				{
 					if( developer->integer )
@@ -3872,6 +4899,12 @@ static void CG_LoadStatusBarFile( char *path )
 		CG_Printf( "HUD: failed to load %s file\n", path );
 		return;
 	}
+
+	CG_CancelTouches();
+	cg_hud_touch_buttons = 0;
+	cg_hud_touch_upmove = 0;
+	cg_hud_touch_zoomSeq = 0;
+
 	// load the new status bar program
 	CG_ParseLayoutScript( opt, cg.statusBar );
 	// Free the opt buffer!
@@ -3881,14 +4914,19 @@ static void CG_LoadStatusBarFile( char *path )
 	Q_strncpyz( layout_cursor_font_name, DEFAULT_SYSTEM_FONT_FAMILY, sizeof( layout_cursor_font_name ) );
 	layout_cursor_font_style = QFONT_STYLE_NONE;
 	layout_cursor_font_size = DEFAULT_SYSTEM_FONT_SMALL_SIZE;
+	layout_cursor_font_dirty = true;
+	layout_cursor_font_regfunc = trap_SCR_RegisterFont;
 
-	layout_cursor_font = trap_SCR_RegisterFont( layout_cursor_font_name, layout_cursor_font_style, layout_cursor_font_size );
 	for( i = 0; i < WEAP_TOTAL-1; i++ )
 	{
 		customWeaponPics[i] = NULL;
 		customNoGunWeaponPics[i] = NULL;
 	}
 	customWeaponSelectPic = NULL;
+
+	cg_touch_dropWeaponX = cg_touch_dropWeaponY = 0.0f;
+
+	trap_Cvar_ForceSet( "con_chatCGame", "0" );
 }
 
 /*
@@ -3897,30 +4935,68 @@ static void CG_LoadStatusBarFile( char *path )
 void CG_LoadStatusBar( void )
 {
 	cvar_t *hud = ISREALSPECTATOR() ? cg_specHUD : cg_clientHUD;
+	const char *default_hud = ( ( trap_IN_SupportedDevices() & IN_DEVICE_TOUCHSCREEN ) ? "default_touch" : "default" );
 	size_t filename_size;
 	char *filename;
 
-	assert( hud && hud->dvalue[0] );
+	assert( hud );
 
 	// buffer for filenames
-	filename_size = strlen( "huds/" ) + max( strlen( hud->dvalue ), strlen( hud->string ) ) + 4 + 1;
-	filename = ( char * )CG_Malloc( filename_size );
+	filename_size = strlen( "huds/" ) + max( strlen( default_hud ), strlen( hud->string ) ) + 4 + 1;
+	filename = ( char * )alloca( filename_size );
 
 	// always load default first. Custom second if needed
 	if( cg_debugHUD && cg_debugHUD->integer )
-		CG_Printf( "HUD: Loading default clientHUD huds/%s\n", hud->dvalue );
-	Q_snprintfz( filename, filename_size, "huds/%s", hud->dvalue );
+		CG_Printf( "HUD: Loading default clientHUD huds/%s\n", default_hud );
+	Q_snprintfz( filename, filename_size, "huds/%s", default_hud );
 	COM_DefaultExtension( filename, ".hud", filename_size );
 	CG_LoadStatusBarFile( filename );
 
-	if( hud->string[0] && Q_stricmp( hud->string, hud->dvalue ) )
+	if( hud->string[0] )
 	{
-		if( cg_debugHUD && cg_debugHUD->integer )
-			CG_Printf( "HUD: Loading custom clientHUD huds/%s\n", hud->string );
-		Q_snprintfz( filename, filename_size, "huds/%s", hud->string );
-		COM_DefaultExtension( filename, ".hud", filename_size );
-		CG_LoadStatusBarFile( filename );
+		if( Q_stricmp( hud->string, default_hud ) )
+		{
+			if( cg_debugHUD && cg_debugHUD->integer )
+				CG_Printf( "HUD: Loading custom clientHUD huds/%s\n", hud->string );
+			Q_snprintfz( filename, filename_size, "huds/%s", hud->string );
+			COM_DefaultExtension( filename, ".hud", filename_size );
+			CG_LoadStatusBarFile( filename );
+		}
 	}
+	else
+	{
+		trap_Cvar_Set( hud->name, default_hud );
+	}
+}
 
-	CG_Free( filename );
+/*
+* CG_GetHUDTouchButtons
+*/
+void CG_GetHUDTouchButtons( unsigned int *buttons, int *upmove )
+{
+	if( buttons )
+		*buttons = cg_hud_touch_buttons;
+	if( upmove )
+		*upmove = cg_hud_touch_upmove;
+}
+
+/*
+* CG_UpdateHUDPostDraw
+*/
+void CG_UpdateHUDPostDraw( void )
+{
+	cg_hud_weaponcrosstime -= cg.frameTime;
+	CG_CheckWeaponCross();
+
+	cg_touch_dropWeaponTime += cg.frameTime;
+	CG_CheckTouchWeaponDrop();
+}
+
+/*
+* CG_UpdateHUDPostTouch
+*/
+void CG_UpdateHUDPostTouch( void )
+{
+	if( cg.frame.playerState.pmove.pm_type != PM_NORMAL )
+		cg_hud_touch_buttons &= ~BUTTON_ZOOM;
 }

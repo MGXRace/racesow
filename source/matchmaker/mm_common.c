@@ -24,7 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 cvar_t *mm_url;
 
-static qboolean mm_initialized = qfalse;
+static bool mm_initialized = false;
 
 //==================================================
 
@@ -33,15 +33,14 @@ static qboolean mm_initialized = qfalse;
 //==================================================
 
 // returns static internal string
-static const char *mm_passwordFilename( const char *user )
+static const char *MM_PasswordFilename( const char *user )
 {
 	static char filename[MAX_STRING_CHARS];
 	char *user64;
 
 	user64 = (char*)base64_encode( (unsigned char*)user, strlen(user), NULL );
 
-	Q_strncpyz( filename, user64, sizeof( filename ) - 1 );
-	Q_strncatz( filename, ".profile", sizeof( filename ) - 1 );
+	Q_snprintfz( filename, sizeof( filename ), "%s.profile", user64 );
 
 	free( user64 );
 
@@ -58,8 +57,8 @@ const char *MM_PasswordRead( const char *user )
 
 	Com_DPrintf( "MM_PasswordRead %s\n", user );
 
-	filename = mm_passwordFilename( user );
-	if( FS_FOpenFile( filename, &filenum, FS_READ ) == -1 )
+	filename = MM_PasswordFilename( user );
+	if( FS_FOpenFile( filename, &filenum, FS_READ|FS_SECURE ) == -1 )
 	{
 		Com_Printf( "MM_PasswordRead: Couldnt open file %s\n", filename);
 		return NULL;
@@ -83,8 +82,8 @@ void MM_PasswordWrite( const char *user, const char *password )
 
 	Com_DPrintf( "MM_PasswordWrite: %s %s\n", user, password );
 
-	filename = mm_passwordFilename( user );
-	if( FS_FOpenFile( filename, &filenum, FS_WRITE ) == -1 )
+	filename = MM_PasswordFilename( user );
+	if( FS_FOpenFile( filename, &filenum, FS_WRITE|FS_SECURE ) == -1 )
 	{
 		Com_Printf( "MM_PasswordWrite: Failed to open %s for writing\n", filename );
 		return;
@@ -218,15 +217,15 @@ void MM_Frame( const int realmsec )
 
 void MM_Init( void )
 {
-	mm_initialized = qfalse;
+	mm_initialized = false;
 
 	mm_url = Cvar_Get( "mm_url", APP_MATCHMAKER_URL, CVAR_ARCHIVE | CVAR_NOSET );
 
-	mm_initialized = qtrue;
+	mm_initialized = true;
 }
 
 void MM_Shutdown( void )
 {
 	mm_url = NULL;
-	mm_initialized = qfalse;
+	mm_initialized = false;
 }

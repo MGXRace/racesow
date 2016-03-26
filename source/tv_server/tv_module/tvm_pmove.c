@@ -53,9 +53,9 @@ const float pm_decelerate = 12; // user intended deceleration when on ground
 
 #define SPEEDKEY    500
 
-//================
-//TVM_PM_ClampAngles
-//================
+/*
+* TVM_PM_ClampAngles
+*/
 static void TVM_PM_FlyMove( void )
 {
 	float speed, drop, friction, control, newspeed;
@@ -140,9 +140,9 @@ static void TVM_PM_FlyMove( void )
 	VectorMA( pml.origin, pml.frametime, pml.velocity, pml.origin );
 }
 
-//================
-//TVM_PM_ClampAngles
-//================
+/*
+* TVM_PM_ClampAngles
+*/
 #if defined ( _WIN32 ) && ( _MSC_VER >= 1400 )
 #pragma warning( push )
 #pragma warning( disable : 4310 )   // cast truncates constant value
@@ -183,12 +183,12 @@ static void TVM_PM_ClampAngles( void )
 #pragma warning( pop )
 #endif
 
-//================
-//TVM_PM_SnapPosition
-//
-//On exit, the origin will have a value that is pre-quantized to the (1.0/16.0)
-//precision of the network channel and in a valid position.
-//================
+/*
+* TVM_PM_SnapPosition
+* 
+* On exit, the origin will have a value that is pre-quantized to the (1.0/16.0)
+* precision of the network channel and in a valid position.
+*/
 static void TVM_PM_SnapPosition( void )
 {
 	int sign[3];
@@ -239,11 +239,11 @@ static void TVM_PM_SnapPosition( void )
 	VectorClear( pm->playerState->pmove.velocity );
 }
 
-//================
-//TVM_Pmove
-//
-//Can be called by either the server or the client
-//================
+/*
+* TVM_Pmove
+* 
+* Can be called by either the server or the client
+*/
 void TVM_Pmove( pmove_t *pmove )
 {
 	pm = pmove;
@@ -256,7 +256,7 @@ void TVM_Pmove( pmove_t *pmove )
 	pm->groundentity = -1;
 	pm->watertype = 0;
 	pm->waterlevel = 0;
-	pm->step = qfalse;
+	pm->step = false;
 
 	// clear all pmove local vars
 	memset( &pml, 0, sizeof( pml ) );
@@ -301,9 +301,9 @@ void TVM_Pmove( pmove_t *pmove )
 
 	pm->playerState->viewheight = playerbox_stand_viewheight;
 
-	pml.forwardPush = pm->cmd.forwardfrac * SPEEDKEY;
-	pml.sidePush = pm->cmd.sidefrac * SPEEDKEY;
-	pml.upPush = pm->cmd.upfrac * SPEEDKEY;
+	pml.forwardPush = pm->cmd.forwardmove * SPEEDKEY;
+	pml.sidePush = pm->cmd.sidemove * SPEEDKEY;
+	pml.upPush = pm->cmd.upmove * SPEEDKEY;
 
 	if( pm->playerState->pmove.stats[PM_STAT_NOUSERCONTROL] > 0 )
 	{

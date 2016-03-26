@@ -14,7 +14,7 @@
  *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -87,10 +87,10 @@ int TextureLayoutRow::Generate(TextureLayout& layout, int max_width, int y)
 }
 
 // Assigns allocated texture data to all rectangles in this row.
-void TextureLayoutRow::Allocate(byte* texture_data, int stride)
+void TextureLayoutRow::Allocate(byte* texture_data, int stride, int samples)
 {
 	for (size_t i = 0; i < rectangles.size(); ++i)
-		rectangles[i]->Allocate(texture_data, stride);
+		rectangles[i]->Allocate(texture_data, stride, samples);
 }
 
 // Returns the height of the row.

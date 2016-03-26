@@ -50,10 +50,16 @@ void ThrowSmallPileOfGibs( edict_t *self, int damage )
 		return;
 
 	for( i = 0; i < 3; i++ )
-		origin[i] = self->s.origin[i] + ( 0.5f * ( self->r.maxs[i] + self->r.mins[i] ) ) + 24;
+		origin[i] = self->s.origin[i];
+
+	self->s.origin[2] += 4;
+
+	// clamp the damage value since events do bitwise & 0xFF on the passed param
+	damage = bound( 0, damage, 255 );
 
 	event = G_SpawnEvent( EV_SPOG, damage, origin );
 	event->r.svflags |= SVF_TRANSMITORIGIN2;
+	event->s.team = self->s.team;
 	VectorCopy( self->velocity, event->s.origin2 );
 }
 
@@ -200,7 +206,7 @@ static void path_corner_touch( edict_t *self, edict_t *other, cplane_t *plane, i
 		v[2] -= other->r.mins[2];
 		VectorCopy( v, other->s.origin );
 		next = G_PickTarget( next->target );
-		other->s.teleported = qtrue;
+		other->s.teleported = true;
 	}
 
 	other->goalentity = other->movetarget = next;
@@ -982,7 +988,7 @@ void SP_misc_particles( edict_t *ent )
 
 	if( ent->spawnflags & 8 ) // LIGHT
 	{
-		ent->s.light = COLOR_RGB( (qbyte)(ent->color[0] * 255), (qbyte)(ent->color[1] * 255), (qbyte)(ent->color[2] * 255) );
+		ent->s.light = COLOR_RGB( (uint8_t)(ent->color[0] * 255), (uint8_t)(ent->color[1] * 255), (uint8_t)(ent->color[2] * 255) );
 		if( !ent->s.light )
 			ent->s.light = COLOR_RGB( 255, 255, 255 );
 	}

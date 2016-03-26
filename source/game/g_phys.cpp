@@ -458,7 +458,8 @@ typedef struct
 	edict_t	*ent;
 	vec3_t origin;
 	vec3_t angles;
-	float deltayaw;
+	float yaw;
+	vec3_t pmove_origin;
 } pushed_t;
 pushed_t pushed[MAX_EDICTS], *pushed_p;
 
@@ -500,7 +501,10 @@ static bool SV_Push( edict_t *pusher, vec3_t move, vec3_t amove )
 	VectorCopy( pusher->s.origin, pushed_p->origin );
 	VectorCopy( pusher->s.angles, pushed_p->angles );
 	if( pusher->r.client )
-		pushed_p->deltayaw = pusher->r.client->ps.pmove.delta_angles[YAW];
+	{
+		VectorCopy( pusher->r.client->ps.pmove.velocity, pushed_p->pmove_origin );
+		pushed_p->yaw = pusher->r.client->ps.viewangles[YAW];
+	}
 	pushed_p++;
 
 	// move the pusher to its final position
@@ -551,8 +555,10 @@ static bool SV_Push( edict_t *pusher, vec3_t move, vec3_t amove )
 			// try moving the contacted entity
 			VectorAdd( check->s.origin, move, check->s.origin );
 			if( check->r.client )
-			{ // FIXME: doesn't rotate monsters?
-				check->r.client->ps.pmove.delta_angles[YAW] += amove[YAW];
+			{
+				// FIXME: doesn't rotate monsters?
+				VectorAdd( check->r.client->ps.pmove.origin, move, check->r.client->ps.pmove.origin );
+				check->r.client->ps.viewangles[YAW] += amove[YAW];
 			}
 
 			// figure movement due to the pusher's amove
@@ -604,7 +610,8 @@ static bool SV_Push( edict_t *pusher, vec3_t move, vec3_t amove )
 			VectorCopy( p->angles, p->ent->s.angles );
 			if( p->ent->r.client )
 			{
-				p->ent->r.client->ps.pmove.delta_angles[YAW] = p->deltayaw;
+				VectorCopy( p->pmove_origin, p->ent->r.client->ps.pmove.origin );
+				p->ent->r.client->ps.viewangles[YAW] = p->yaw;
 			}
 			GClip_LinkEntity( p->ent );
 		}
@@ -645,8 +652,15 @@ static void SV_Physics_Pusher( edict_t *ent )
 			part->avelocity[0] || part->avelocity[1] || part->avelocity[2] )
 		{
 			// object is moving
-			VectorScale( part->velocity, FRAMETIME, move );
-			VectorScale( part->avelocity, FRAMETIME, amove );
+			if( part->s.linearMovement ) {
+				GS_LinearMovement( &part->s, game.serverTime, move );
+				VectorSubtract( move, part->s.origin, move );
+				VectorScale( part->avelocity, FRAMETIME, amove );
+			}
+			else {
+				VectorScale( part->velocity, FRAMETIME, move );
+				VectorScale( part->avelocity, FRAMETIME, amove );
+			}
 
 			if( !SV_Push( part, move, amove ) )
 				break; // move was blocked
@@ -800,12 +814,7 @@ static void SV_Physics_Toss( edict_t *ent )
 		if( ent->movetype == MOVETYPE_BOUNCE )
 			backoff = 1.5;
 		else if( ent->movetype == MOVETYPE_BOUNCEGRENADE )
-		{
-			static cvar_t *g_grenade_backoff = NULL;
-			if( !g_grenade_backoff )
-				g_grenade_backoff = trap_Cvar_Get( "g_grenade_backoff", "1.5", CVAR_DEVELOPER );
-			backoff = g_grenade_backoff->value;
-		}
+			backoff = 1.4;
 		else
 			backoff = 1;
 
@@ -905,7 +914,7 @@ void SV_Physics_LinearProjectile( edict_t *ent )
 	mask = ( ent->r.clipmask ) ? ent->r.clipmask : MASK_SOLID;
 
 	// find it's current position given the starting timeStamp
-	flyTime = (float)( game.serverTime - ent->s.linearProjectileTimeStamp ) * 0.001f;
+	flyTime = (float)( game.serverTime - ent->s.linearMovementTimeStamp ) * 0.001f;
 
 	VectorCopy( ent->s.origin, start );
 	VectorMA( ent->s.origin2, flyTime, ent->velocity, end );
@@ -919,7 +928,7 @@ void SV_Physics_LinearProjectile( edict_t *ent )
 		return;
 
 	// update some data required for the transmission
-	VectorCopy( ent->velocity, ent->s.linearProjectileVelocity );
+	VectorCopy( ent->velocity, ent->s.linearMovementVelocity );
 
 	GClip_TouchTriggers( ent );
 	ent->groundentity = NULL; // projectiles never have ground entity
@@ -960,12 +969,6 @@ void G_RunEntity( edict_t *ent )
 		{
 			SV_RunThink( part );
 		}
-	}
-
-	if( ent->s.linearProjectile && ( ent->movetype != MOVETYPE_LINEARPROJECTILE ) )
-	{
-		G_Printf( "WARNING: G_RunEntity: fixing entity type %i not having MOVETYPE_LINEARPROJECTILE assigned\n" );
-		ent->movetype = MOVETYPE_LINEARPROJECTILE;
 	}
 
 	switch( (int)ent->movetype )

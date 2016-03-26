@@ -26,7 +26,7 @@
  */
 
 #include "precompiled.h"
-#include <Rocket/Core.h>
+#include "../../Include/Rocket/Core.h"
 #include <algorithm>
 #include "FileInterfaceDefault.h"
 #include "GeometryDatabase.h"
@@ -44,6 +44,9 @@ static RenderInterface* render_interface = NULL;
 static SystemInterface* system_interface = NULL;
 // Rocket's file I/O interface.
 FileInterface* file_interface =  NULL;
+/// Rocket's font provider.
+static FontProviderInterface *fontprovider_interface = NULL;
+
 #ifndef ROCKET_NO_FILE_INTERFACE_DEFAULT
 static FileInterfaceDefault file_interface_default;
 #endif
@@ -177,6 +180,18 @@ SystemInterface* GetSystemInterface()
 	return system_interface;
 }
 
+// Sets the interface through which all font subsystem requests are made
+void SetFontProviderInterface(FontProviderInterface* _fontprovider_interface)
+{
+	fontprovider_interface = _fontprovider_interface;
+}
+
+// Returns Rocket's font provider interface.
+FontProviderInterface* GetFontProviderInterface()
+{
+	return fontprovider_interface;
+}
+
 // Sets the interface through which all rendering requests are made.
 void SetRenderInterface(RenderInterface* _render_interface)
 {
@@ -225,7 +240,10 @@ Context* CreateContext(const String& name, const Vector2i& dimensions, RenderInt
 
 	if (custom_render_interface == NULL &&
 		render_interface == NULL)
+	{
 		Log::Message(Log::LT_WARNING, "Failed to create context '%s', no render interface specified and no default render interface exists.", name.CString());
+		return NULL;
+	}
 
 	if (GetContext(name) != NULL)
 	{

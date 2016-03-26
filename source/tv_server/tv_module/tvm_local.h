@@ -29,9 +29,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "../../gameshared/q_comref.h"
 #include "../../gameshared/q_collision.h"
 
-//==================================================================
-// shared with server and module
-//==================================================================
+/*
+* shared with server and module
+*/
 #include "tvm_public.h"
 
 struct tvm_relay_s
@@ -62,7 +62,7 @@ struct tvm_relay_s
 	snapshot_t frame;
 	game_state_t gameState;
 	char configStrings[MAX_CONFIGSTRINGS][MAX_CONFIGSTRING_CHARS];
-	qboolean configStringsOverwritten[MAX_CONFIGSTRINGS];
+	bool configStringsOverwritten[MAX_CONFIGSTRINGS];
 
 	int playernum;
 
@@ -85,9 +85,9 @@ typedef struct
 	int maxclients;
 } tv_module_locals_t;
 
-//==================================================================
-// edict stuff
-//==================================================================
+/*
+* edict stuff
+*/
 
 #define	FOFS( x ) (size_t)&( ( (edict_t *)0 )->x )
 
@@ -120,7 +120,7 @@ struct edict_s
 
 	//================================
 
-	qboolean local;             // from local_edicts, not edicts
+	bool local;             // from local_edicts, not edicts
 	tvm_relay_t *relay;
 
 	snap_edict_t snap; // information that is cleared each frame snap
@@ -137,22 +137,22 @@ struct edict_s
 	int waterlevel;
 };
 
-//==================================================================
-// trap_* functions
-//==================================================================
+/*
+* trap_* functions
+*/
 
 #include "tvm_syscalls.h"
 
-//==================================================================
-// mem stuff
-//==================================================================
+/*
+* mem stuff
+*/
 
 #define TVM_Malloc( relay_server, size ) trap_MemAlloc( relay_server, size, __FILE__, __LINE__ )
 #define TVM_Free( data ) trap_MemFree( data, __FILE__, __LINE__ )
 
-//==================================================================
-// tv module wide things
-//==================================================================
+/*
+* tv module wide things
+*/
 
 extern tv_module_locals_t tvm;
 

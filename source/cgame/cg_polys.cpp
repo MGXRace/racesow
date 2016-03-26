@@ -129,8 +129,7 @@ static void CG_FreePoly( cpoly_t *dl )
 * CG_SpawnPolygon
 */
 static cpoly_t *CG_SpawnPolygon( float r, float g, float b, float a,
-								unsigned int die, unsigned int fadetime,
-struct shader_s *shader, int tag )
+	unsigned int die, unsigned int fadetime, struct shader_s *shader, int tag )
 {
 	cpoly_t *pl;
 
@@ -158,7 +157,7 @@ struct shader_s *shader, int tag )
 /*
 * CG_OrientPolygon
 */
-static void CG_OrientPolygon( vec3_t origin, vec3_t angles, poly_t *poly )
+static void CG_OrientPolygon( const vec3_t origin, const vec3_t angles, poly_t *poly )
 {
 	int i;
 	vec3_t perp;
@@ -179,7 +178,7 @@ static void CG_OrientPolygon( vec3_t origin, vec3_t angles, poly_t *poly )
 * Spawns a polygon from start to end points length and given width.
 * shaderlenght makes reference to size of the texture it will draw, so it can be tiled.
 */
-static cpoly_t *CG_SpawnPolyBeam( vec3_t start, vec3_t end, vec4_t color, int width, unsigned int dietime, unsigned int fadetime, struct shader_s *shader, int shaderlength, int tag )
+static cpoly_t *CG_SpawnPolyBeam( const vec3_t start, const vec3_t end, const vec4_t color, int width, unsigned int dietime, unsigned int fadetime, struct shader_s *shader, int shaderlength, int tag )
 {
 	cpoly_t *cgpoly;
 	poly_t *poly;
@@ -198,6 +197,11 @@ static cpoly_t *CG_SpawnPolyBeam( vec3_t start, vec3_t end, vec4_t color, int wi
 	ymax = width*0.5;
 	if( shaderlength && xmax > shaderlength )
 		stx = xmax / (float)shaderlength;
+
+	if( xmax - xmin < ymax - ymin ) {
+		// do not render polybeams which have width longer than their length
+		return NULL;
+	}
 
 	cgpoly = CG_SpawnPolygon( 1.0, 1.0, 1.0, 1.0, dietime ? dietime : cgs.snapFrameTime, fadetime, shader, tag );
 
@@ -218,40 +222,40 @@ static cpoly_t *CG_SpawnPolyBeam( vec3_t start, vec3_t end, vec4_t color, int wi
 	Vector4Set( poly->verts[poly->numverts], xmin, 0, ymin, 1 );
 	poly->stcoords[poly->numverts][0] = 0;
 	poly->stcoords[poly->numverts][1] = 0;
-	poly->colors[poly->numverts][0] = ( qbyte )( cgpoly->color[0] * 255 );
-	poly->colors[poly->numverts][1] = ( qbyte )( cgpoly->color[1] * 255 );
-	poly->colors[poly->numverts][2] = ( qbyte )( cgpoly->color[2] * 255 );
-	poly->colors[poly->numverts][3] = ( qbyte )( cgpoly->color[3] * 255 );
+	poly->colors[poly->numverts][0] = ( uint8_t )( cgpoly->color[0] * 255 );
+	poly->colors[poly->numverts][1] = ( uint8_t )( cgpoly->color[1] * 255 );
+	poly->colors[poly->numverts][2] = ( uint8_t )( cgpoly->color[2] * 255 );
+	poly->colors[poly->numverts][3] = ( uint8_t )( cgpoly->color[3] * 255 );
 	poly->numverts++;
 
 	// B
 	Vector4Set( poly->verts[poly->numverts], xmin, 0, ymax, 1 );
 	poly->stcoords[poly->numverts][0] = 0;
 	poly->stcoords[poly->numverts][1] = sty;
-	poly->colors[poly->numverts][0] = ( qbyte )( cgpoly->color[0] * 255 );
-	poly->colors[poly->numverts][1] = ( qbyte )( cgpoly->color[1] * 255 );
-	poly->colors[poly->numverts][2] = ( qbyte )( cgpoly->color[2] * 255 );
-	poly->colors[poly->numverts][3] = ( qbyte )( cgpoly->color[3] * 255 );
+	poly->colors[poly->numverts][0] = ( uint8_t )( cgpoly->color[0] * 255 );
+	poly->colors[poly->numverts][1] = ( uint8_t )( cgpoly->color[1] * 255 );
+	poly->colors[poly->numverts][2] = ( uint8_t )( cgpoly->color[2] * 255 );
+	poly->colors[poly->numverts][3] = ( uint8_t )( cgpoly->color[3] * 255 );
 	poly->numverts++;
 
 	// C
 	Vector4Set( poly->verts[poly->numverts], xmax, 0, ymax, 1 );
 	poly->stcoords[poly->numverts][0] = stx;
 	poly->stcoords[poly->numverts][1] = sty;
-	poly->colors[poly->numverts][0] = ( qbyte )( cgpoly->color[0] * 255 );
-	poly->colors[poly->numverts][1] = ( qbyte )( cgpoly->color[1] * 255 );
-	poly->colors[poly->numverts][2] = ( qbyte )( cgpoly->color[2] * 255 );
-	poly->colors[poly->numverts][3] = ( qbyte )( cgpoly->color[3] * 255 );
+	poly->colors[poly->numverts][0] = ( uint8_t )( cgpoly->color[0] * 255 );
+	poly->colors[poly->numverts][1] = ( uint8_t )( cgpoly->color[1] * 255 );
+	poly->colors[poly->numverts][2] = ( uint8_t )( cgpoly->color[2] * 255 );
+	poly->colors[poly->numverts][3] = ( uint8_t )( cgpoly->color[3] * 255 );
 	poly->numverts++;
 
 	// D
 	Vector4Set( poly->verts[poly->numverts], xmax, 0, ymin, 1 );
 	poly->stcoords[poly->numverts][0] = stx;
 	poly->stcoords[poly->numverts][1] = 0;
-	poly->colors[poly->numverts][0] = ( qbyte )( cgpoly->color[0] * 255 );
-	poly->colors[poly->numverts][1] = ( qbyte )( cgpoly->color[1] * 255 );
-	poly->colors[poly->numverts][2] = ( qbyte )( cgpoly->color[2] * 255 );
-	poly->colors[poly->numverts][3] = ( qbyte )( cgpoly->color[3] * 255 );
+	poly->colors[poly->numverts][0] = ( uint8_t )( cgpoly->color[0] * 255 );
+	poly->colors[poly->numverts][1] = ( uint8_t )( cgpoly->color[1] * 255 );
+	poly->colors[poly->numverts][2] = ( uint8_t )( cgpoly->color[2] * 255 );
+	poly->colors[poly->numverts][3] = ( uint8_t )( cgpoly->color[3] * 255 );
 	poly->numverts++;
 
 	// the verts data is stored inside cgpoly, cause it can be moved later
@@ -281,26 +285,19 @@ void CG_KillPolyBeamsByTag( int tag )
 /*
 * CG_QuickPolyBeam
 */
-void CG_QuickPolyBeam( vec3_t start, vec3_t end, int width, struct shader_s *shader )
+void CG_QuickPolyBeam( const vec3_t start, const vec3_t end, int width, struct shader_s *shader )
 {
-	cpoly_t *cgpoly;
-
 	if( !shader )
 		shader = CG_MediaShader( cgs.media.shaderLaser );
 
-	cgpoly = CG_SpawnPolyBeam( start, end, NULL, width, 1, 0, shader, 64, 0 );
-
-	// since autosprite doesn't work, spawn a second and rotate it 90 degrees
-	cgpoly = CG_SpawnPolyBeam( start, end, NULL, width, 1, 0, shader, 64, 0 );
-	cgpoly->angles[ROLL] += 90;
+	CG_SpawnPolyBeam( start, end, NULL, width, 1, 0, shader, 64, 0 );
 }
 
 /*
 * CG_LaserGunPolyBeam
 */
-void CG_LaserGunPolyBeam( vec3_t start, vec3_t end, vec4_t color, int tag )
+void CG_LaserGunPolyBeam( const vec3_t start, const vec3_t end, const vec4_t color, int tag )
 {
-	cpoly_t *cgpoly;
 	vec4_t tcolor = { 0, 0, 0, 0.35f };
 	vec_t total;
 	vec_t min;
@@ -318,27 +315,14 @@ void CG_LaserGunPolyBeam( vec3_t start, vec3_t end, vec4_t color, int tag )
 			VectorCopy( min_team_color, tcolor );
 	}
 
-	if( cg_lgbeam_old->integer ) {
-		cgpoly = CG_SpawnPolyBeam( start, end, color ? tcolor : NULL, 12, 1, 0, CG_MediaShader( cgs.media.shaderLaserGunBeamOld ), 64, tag );
-
-		// since autosprite doesn't work, spawn a second and rotate it 90 degrees
-		cgpoly = CG_SpawnPolyBeam( start, end, color ? tcolor : NULL, 12, 1, 0, CG_MediaShader( cgs.media.shaderLaserGunBeamOld ), 64, tag );
-		cgpoly->angles[ROLL] += 90;
-	} else {
-		cgpoly = CG_SpawnPolyBeam( start, end, color ? tcolor : NULL, 12, 1, 0, CG_MediaShader( cgs.media.shaderLaserGunBeam ), 64, tag );
-
-		// since autosprite doesn't work, spawn a second and rotate it 90 degrees
-		cgpoly = CG_SpawnPolyBeam( start, end, color ? tcolor : NULL, 12, 1, 0, CG_MediaShader( cgs.media.shaderLaserGunBeam ), 64, tag );
-		cgpoly->angles[ROLL] += 90;
-	}
+	CG_SpawnPolyBeam( start, end, color ? tcolor : NULL, 12, 1, 0, CG_MediaShader( cgs.media.shaderLaserGunBeam ), 64, tag );
 }
 
 /*
 * CG_ElectroPolyBeam
 */
-void CG_ElectroPolyBeam( vec3_t start, vec3_t end, int team )
+void CG_ElectroPolyBeam( const vec3_t start, const vec3_t end, int team )
 {
-	cpoly_t *cgpoly;
 	struct shader_s *shader;
 
 	if( cg_ebbeam_time->value <= 0.0f || cg_ebbeam_width->integer <= 0 )
@@ -358,11 +342,7 @@ void CG_ElectroPolyBeam( vec3_t start, vec3_t end, int team )
 			shader = CG_MediaShader( cgs.media.shaderElectroBeamOld );
 		}
 
-		cgpoly = CG_SpawnPolyBeam( start, end, NULL, cg_ebbeam_width->integer, cg_ebbeam_time->value * 1000, cg_ebbeam_time->value * 1000 * 0.4f, shader, 128, 0 );
-		cgpoly->angles[ROLL] += 45;
-
-		cgpoly = CG_SpawnPolyBeam( start, end, NULL, cg_ebbeam_width->integer, cg_ebbeam_time->value * 1000, cg_ebbeam_time->value * 1000 * 0.4f, shader, 128, 0 );
-		cgpoly->angles[ROLL] += 135;
+		CG_SpawnPolyBeam( start, end, NULL, cg_ebbeam_width->integer, cg_ebbeam_time->value * 1000, cg_ebbeam_time->value * 1000 * 0.4f, shader, 128, 0 );
 	}
 	else
 	{
@@ -378,32 +358,15 @@ void CG_ElectroPolyBeam( vec3_t start, vec3_t end, int team )
 			shader = CG_MediaShader( cgs.media.shaderElectroBeamA );
 		}
 
-		cgpoly = CG_SpawnPolyBeam( start, end, NULL, cg_ebbeam_width->integer, cg_ebbeam_time->value * 1000, cg_ebbeam_time->value * 1000 * 0.4f, shader, 128, 0 );
-		cgpoly->angles[ROLL] += 45;
-
-		if( cg_teamColoredBeams->integer && ( team == TEAM_ALPHA || team == TEAM_BETA ) )
-		{
-			if( team == TEAM_ALPHA )
-				shader = CG_MediaShader( cgs.media.shaderElectroBeamBAlpha );
-			else
-				shader = CG_MediaShader( cgs.media.shaderElectroBeamBBeta );
-		}
-		else
-		{
-			shader = CG_MediaShader( cgs.media.shaderElectroBeamB );
-		}
-
-		cgpoly = CG_SpawnPolyBeam( start, end, NULL, cg_ebbeam_width->integer, cg_ebbeam_time->value * 1000, cg_ebbeam_time->value * 1000 * 0.4f, shader, 128, 0 );
-		cgpoly->angles[ROLL] += 135;
+		CG_SpawnPolyBeam( start, end, NULL, cg_ebbeam_width->integer, cg_ebbeam_time->value * 1000, cg_ebbeam_time->value * 1000 * 0.4f, shader, 128, 0 );
 	}
 }
 
 /*
 * CG_InstaPolyBeam
 */
-void CG_InstaPolyBeam( vec3_t start, vec3_t end, int team )
+void CG_InstaPolyBeam( const vec3_t start, const vec3_t end, int team )
 {
-	cpoly_t *cgpoly;
 	vec4_t tcolor = { 1, 1, 1, 0.35f };
 	vec_t total;
 	vec_t min;
@@ -412,7 +375,7 @@ void CG_InstaPolyBeam( vec3_t start, vec3_t end, int team )
 	if( cg_instabeam_time->value <= 0.0f || cg_instabeam_width->integer <= 0 )
 		return;
 
-	if( cg_teamColoredBeams->integer && ( team == TEAM_ALPHA || team == TEAM_BETA ) )
+	if( cg_teamColoredInstaBeams->integer && ( team == TEAM_ALPHA || team == TEAM_BETA ) )
 	{
 		CG_TeamColor( team, tcolor );
 		min = 90 * ( 1.0f/255.0f );
@@ -432,17 +395,13 @@ void CG_InstaPolyBeam( vec3_t start, vec3_t end, int team )
 	if( !tcolor[3] )
 		return;
 
-	cgpoly = CG_SpawnPolyBeam( start, end, tcolor, cg_instabeam_width->integer, cg_instabeam_time->value * 1000, cg_instabeam_time->value * 1000 * 0.4f, CG_MediaShader( cgs.media.shaderInstaBeam ), 128, 0 );
-
-	// since autosprite doesn't work, spawn a second and rotate it 90 degrees
-	cgpoly = CG_SpawnPolyBeam( start, end, tcolor, cg_instabeam_width->integer, cg_instabeam_time->value * 1000, cg_instabeam_time->value * 1000 * 0.4f, CG_MediaShader( cgs.media.shaderInstaBeam ), 128, 0 );
-	cgpoly->angles[ROLL] += 90;
+	CG_SpawnPolyBeam( start, end, tcolor, cg_instabeam_width->integer, cg_instabeam_time->value * 1000, cg_instabeam_time->value * 1000 * 0.4f, CG_MediaShader( cgs.media.shaderInstaBeam ), 128, 0 );
 }
 
 /*
 * CG_PLink
 */
-void CG_PLink( vec3_t start, vec3_t end, vec4_t color, int flags )
+void CG_PLink( const vec3_t start, const vec3_t end, const vec4_t color, int flags )
 {
 	CG_SpawnPolyBeam( start, end, color, 4, 2000.0f, 0.0f, CG_MediaShader( cgs.media.shaderLaser ), 64, 0 );
 }
@@ -487,10 +446,10 @@ void CG_AddPolys( void )
 
 			for( i = 0; i < poly->numverts; i++ )
 			{
-				poly->colors[i][0] = ( qbyte )( cgpoly->color[0] * fade * 255 );
-				poly->colors[i][1] = ( qbyte )( cgpoly->color[1] * fade * 255 );
-				poly->colors[i][2] = ( qbyte )( cgpoly->color[2] * fade * 255 );
-				poly->colors[i][3] = ( qbyte )( cgpoly->color[3] * fade * 255 );
+				poly->colors[i][0] = ( uint8_t )( cgpoly->color[0] * fade * 255 );
+				poly->colors[i][1] = ( uint8_t )( cgpoly->color[1] * fade * 255 );
+				poly->colors[i][2] = ( uint8_t )( cgpoly->color[2] * fade * 255 );
+				poly->colors[i][3] = ( uint8_t )( cgpoly->color[3] * fade * 255 );
 			}
 		}
 

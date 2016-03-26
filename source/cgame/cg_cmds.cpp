@@ -34,7 +34,7 @@ SERVER COMMANDS
 */
 static void CG_SC_Print( void )
 {
-	CG_LocalPrint( false, "%s", trap_Cmd_Argv( 1 ) );
+	CG_LocalPrint( "%s", trap_Cmd_Argv( 1 ) );
 }
 
 /*
@@ -57,12 +57,12 @@ static void CG_SC_ChatPrint( void )
 	// !racesow
 
 	if( !name )
-		CG_LocalPrint( false, S_COLOR_GREEN "console: %s\n", text );
+		CG_LocalPrint( S_COLOR_GREEN "console: %s\n", text );
 	else if( teamonly )
-		CG_LocalPrint( true, S_COLOR_YELLOW "[%s]" S_COLOR_WHITE "%s" S_COLOR_YELLOW ": %s\n",
+		CG_LocalPrint( S_COLOR_YELLOW "[%s]" S_COLOR_WHITE "%s" S_COLOR_YELLOW ": %s\n",
 			cg.frame.playerState.stats[STAT_REALTEAM] == TEAM_SPECTATOR ? "SPEC" : "TEAM", name, text );
 	else
-		CG_LocalPrint( false, "%s" S_COLOR_GREEN ": %s\n", name, text );
+		CG_LocalPrint( "%s" S_COLOR_GREEN ": %s\n", name, text );
 
 	if( cg_chatBeep->integer )
 		trap_S_StartGlobalSound( CG_MediaSfx( cgs.media.sfxChat ), CHAN_AUTO, 1.0f );
@@ -80,7 +80,7 @@ static void CG_SC_Privsay( void )
 	if( !name || filter->integer & 1 || rs_chatBlocked[who-1] )
 		return;
 
-	CG_LocalPrint( false, "%s%s %s %s%s\n", name, S_COLOR_RED, in, S_COLOR_GREEN, text );
+	CG_LocalPrint( "%s%s %s %s%s\n", name, S_COLOR_RED, in, S_COLOR_GREEN, text );
 
 	if( cg_chatBeep->integer )
 		trap_S_StartGlobalSound( CG_MediaSfx( cgs.media.sfxChat ), CHAN_AUTO, 1.0f );
@@ -99,7 +99,7 @@ static void CG_SC_TVChatPrint( void )
 	if( filter->integer & 4 )
 		return;
 
-	CG_LocalPrint( false, S_COLOR_RED "[TV]" S_COLOR_WHITE "%s" S_COLOR_GREEN ": %s", name, text );
+	CG_LocalPrint( S_COLOR_RED "[TV]" S_COLOR_WHITE "%s" S_COLOR_GREEN ": %s", name, text );
 	if( cg_chatBeep->integer )
 		trap_S_StartGlobalSound( CG_MediaSfx( cgs.media.sfxChat ), CHAN_AUTO, 1.0f );
 }
@@ -110,6 +110,32 @@ static void CG_SC_TVChatPrint( void )
 static void CG_SC_CenterPrint( void )
 {
 	CG_CenterPrint( trap_Cmd_Argv( 1 ) );
+}
+
+/*
+* CG_SC_CenterPrintFormat
+*/
+static void CG_SC_CenterPrintFormat( void )
+{
+	if( trap_Cmd_Argc() == 8 ) {
+		CG_CenterPrint( va( CG_TranslateString( trap_Cmd_Argv( 1 ) ), trap_Cmd_Argv( 2 ), trap_Cmd_Argv( 3 ), 
+			trap_Cmd_Argv( 4 ), trap_Cmd_Argv( 5 ), trap_Cmd_Argv( 6 ), trap_Cmd_Argv( 7 ) ) );
+	} else if( trap_Cmd_Argc() == 7 ) {
+		CG_CenterPrint( va( CG_TranslateString( trap_Cmd_Argv( 1 ) ), trap_Cmd_Argv( 2 ), trap_Cmd_Argv( 3 ), 
+			trap_Cmd_Argv( 4 ), trap_Cmd_Argv( 5 ), trap_Cmd_Argv( 6 ) ) );
+	} else if( trap_Cmd_Argc() == 6 ) {
+		CG_CenterPrint( va( CG_TranslateString( trap_Cmd_Argv( 1 ) ), trap_Cmd_Argv( 2 ), trap_Cmd_Argv( 3 ), 
+			trap_Cmd_Argv( 4 ), trap_Cmd_Argv( 5 ) ) );
+	} else if( trap_Cmd_Argc() == 5 ) {
+		CG_CenterPrint( va( CG_TranslateString( trap_Cmd_Argv( 1 ) ), trap_Cmd_Argv( 2 ), trap_Cmd_Argv( 3 ), 
+			trap_Cmd_Argv( 4 ) ) );
+	} else if( trap_Cmd_Argc() == 4 ) {
+		CG_CenterPrint( va( CG_TranslateString( trap_Cmd_Argv( 1 ) ), trap_Cmd_Argv( 2 ), trap_Cmd_Argv( 3 ) ) );
+	} else if( trap_Cmd_Argc() == 3 ) {
+		CG_CenterPrint( va( CG_TranslateString( trap_Cmd_Argv( 1 ) ), trap_Cmd_Argv( 2 ) ) );
+	} else if( trap_Cmd_Argc() == 2 ) {
+		CG_CenterPrint( CG_TranslateString( trap_Cmd_Argv( 1 ) ) ); // theoretically, shouldn't happen
+	} 
 }
 
 /*
@@ -208,21 +234,23 @@ static void CG_SC_Scoreboard( void )
 /*
 * CG_SC_PrintPlayerStats
 */
-static void CG_SC_PrintPlayerStats( const char *s, void ( *pp )( const char *format, ... ) )
+static void CG_SC_PrintPlayerStats( const char *s, void ( *print )( const char *format, ... ), void ( *printDmg )( const char *format, ... ) )
 {
 	int playerNum;
-	int i, shot_weak, hit_weak, shot_strong, hit_strong, hit_total, shot_total;
+	int i, shot_strong, hit_total, shot_total;
 	int total_damage_given, total_damage_received, health_taken, armor_taken;
 	gsitem_t *item;
-	void ( *print )( const char *format, ... ) = pp;
 
 	playerNum = CG_ParseValue( &s );
 	if( playerNum < 0 || playerNum >= gs.maxclients )
 		return;
 
+	if( !printDmg )
+		printDmg = print;
+
 	// print stats to console/file
-	print( "Stats for %s" S_COLOR_WHITE ":\r\n\r\n", cgs.clientInfo[playerNum].name );
-	print( "Weapon\r\n" );
+	printDmg( "Stats for %s" S_COLOR_WHITE ":\r\n", cgs.clientInfo[playerNum].name );
+	print( "\r\nWeapon\r\n" );
 	print( "    hit/shot percent\r\n" );
 
 	for( i = WEAP_GUNBLADE; i < WEAP_TOTAL; i++ )
@@ -235,11 +263,10 @@ static void CG_SC_PrintPlayerStats( const char *s, void ( *pp )( const char *for
 			continue;
 		hit_total = CG_ParseValue( &s );
 
+		// legacy - parse shot_strong and hit_strong
 		shot_strong = CG_ParseValue( &s );
-		hit_strong = (shot_strong != shot_total ? CG_ParseValue( &s ) : hit_total);
-
-		shot_weak = shot_total - shot_strong;
-		hit_weak = hit_total - hit_strong;
+		if( shot_strong != shot_total )
+			CG_ParseValue( &s );
 
 		// name
 		print( "%s%2s" S_COLOR_WHITE ": ", item->color, item->shortname );
@@ -258,7 +285,7 @@ static void CG_SC_PrintPlayerStats( const char *s, void ( *pp )( const char *for
 	total_damage_given = CG_ParseValue( &s );
 	total_damage_received = CG_ParseValue( &s );
 
-	print( S_COLOR_YELLOW "Damage given/received: " S_COLOR_WHITE "%i/%i " S_COLOR_YELLOW "ratio: %s%3.2f\r\n",
+	printDmg( S_COLOR_YELLOW "Damage given/received: " S_COLOR_WHITE "%i/%i " S_COLOR_YELLOW "ratio: %s%3.2f\r\n",
 		total_damage_given, total_damage_received,
 		( total_damage_given > total_damage_received ? S_COLOR_GREEN : S_COLOR_RED ),
 		STATS_PERCENT( total_damage_given, total_damage_given + total_damage_received ) );
@@ -266,7 +293,7 @@ static void CG_SC_PrintPlayerStats( const char *s, void ( *pp )( const char *for
 	health_taken = CG_ParseValue( &s );
 	armor_taken = CG_ParseValue( &s );
 
-	print( S_COLOR_YELLOW "Health/Armor taken : " S_COLOR_CYAN "%i" S_COLOR_WHITE "/" S_COLOR_CYAN "%i\r\n",
+	printDmg( S_COLOR_YELLOW "Health/Armor taken: " S_COLOR_CYAN "%i" S_COLOR_WHITE "/" S_COLOR_CYAN "%i\r\n",
 		health_taken, armor_taken );
 
 #undef STATS_PERCENT
@@ -302,7 +329,7 @@ static void CG_SC_DumpPlayerStats( const char *filename, const char *stats )
 		return;
 	}
 
-	CG_SC_PrintPlayerStats( stats, CG_SC_PrintStatsToFile );
+	CG_SC_PrintPlayerStats( stats, CG_SC_PrintStatsToFile, NULL );
 
 	trap_FS_FCloseFile( cg_statsFileHandle );
 }
@@ -324,7 +351,7 @@ static void CG_SC_PlayerStats( void )
 		return;
 	}
 
-	CG_SC_PrintPlayerStats( s, CG_Printf );
+	CG_SC_PrintPlayerStats( s, CG_Printf, CG_LocalPrint );
 
 	if( print == 2 )
 		CG_SC_AutoRecordAction( "stats" );
@@ -669,6 +696,74 @@ static void CG_SC_ChannelRemove( void )
 	}
 }
 
+/**
+ * Returns the English match state message.
+ *
+ * @param mm match message ID
+ * @return match message text
+ */
+static const char *CG_MatchMessageString( matchmessage_t mm )
+{
+	if( ( trap_IN_SupportedDevices() & ( IN_DEVICE_KEYBOARD|IN_DEVICE_MOUSE ) ) != ( IN_DEVICE_KEYBOARD|IN_DEVICE_MOUSE ) )
+	{
+		switch( mm )
+		{
+		case MATCHMESSAGE_CHALLENGERS_QUEUE:
+			return "You are inside the challengers queue waiting for your turn to play.\n"
+				"Use the in-game menu to exit the queue.";
+
+		case MATCHMESSAGE_ENTER_CHALLENGERS_QUEUE:
+			return "Use the in-game menu to enter the challengers queue.\n"
+				"Only players in the queue will have a turn to play against the last winner.";
+
+		case MATCHMESSAGE_GET_READY:
+			return "Set yourself READY using the in-game menu to start the match!";
+
+		case MATCHMESSAGE_WAITING_FOR_PLAYERS:
+			return "Waiting for players.";
+
+		default:
+			return "";
+		}
+
+		return "";
+	}
+
+	switch( mm )
+	{
+	case MATCHMESSAGE_CHALLENGERS_QUEUE:
+		return "'ESC' for in-game menu or 'ENTER' for in-game chat.\n"
+			"You are inside the challengers queue waiting for your turn to play.\n"
+			"Use the in-game menu to exit the queue.\n"
+			"\nUse the mouse buttons for switching spectator modes.";
+
+	case MATCHMESSAGE_ENTER_CHALLENGERS_QUEUE:
+		return "'ESC' for in-game menu or 'ENTER' for in-game chat.\n"
+			"Use the in-game menu or press 'F3' to enter the challengers queue.\n"
+			"Only players in the queue will have a turn to play against the last winner.\n"
+			"\nUse the mouse buttons for switching spectator modes.";
+
+	case MATCHMESSAGE_SPECTATOR_MODES:
+		return "'ESC' for in-game menu or 'ENTER' for in-game chat.\n"
+			"Mouse buttons for switching spectator modes.\n"
+			"This message can be hidden by disabling 'help' in player setup menu.";
+
+	case MATCHMESSAGE_GET_READY:
+		return "Set yourself READY to start the match!\n"
+			"You can use the in-game menu or simply press 'F4'.\n"
+			"'ESC' for in-game menu or 'ENTER' for in-game chat.";
+
+	case MATCHMESSAGE_WAITING_FOR_PLAYERS:
+		return "Waiting for players.\n"
+			"'ESC' for in-game menu.";
+
+	default:
+		return "";
+	}
+
+	return "";
+}
+
 /*
 * CG_SC_MatchMessage
 */
@@ -680,18 +775,82 @@ static void CG_SC_MatchMessage( void )
 	cg.matchmessage = NULL;
 
 	mm = (matchmessage_t)atoi( trap_Cmd_Argv( 1 ) );
-	matchmessage = GS_MatchMessageString( mm );
-	if( !matchmessage[0] )
-		matchmessage = NULL;
+	matchmessage = CG_MatchMessageString( mm );
+	if( !matchmessage || !matchmessage[0] )
+		return;
 
-	if( matchmessage ) {
-		const char *translated = CG_TranslateString( matchmessage );
-		if( translated ) {
-			matchmessage = translated;
-		}
+	cg.matchmessage = CG_TranslateString( matchmessage );
+}
+
+/*
+* CG_SC_HelpMessage
+*/
+static void CG_SC_HelpMessage( void )
+{
+	unsigned index;
+	const char *id;
+	const char *helpmessage = NULL;
+	unsigned outlen = 0;
+	int c;
+
+	cg.helpmessage[0] = '\0';
+
+	index = atoi( trap_Cmd_Argv( 1 ) );
+	if( !index || index > MAX_HELPMESSAGES ) {
+		return;
 	}
 
-	cg.matchmessage = matchmessage;
+	id = cgs.configStrings[CS_HELPMESSAGES + index - 1];
+	if( !id[0] ) {
+		return;
+	}
+
+	if( !( trap_IN_SupportedDevices() & IN_DEVICE_KEYBOARD ) ) {
+		char nokeyboard[MAX_CONFIGSTRING_CHARS + 16];
+		Q_snprintfz( nokeyboard, sizeof( nokeyboard ), "%s_nokeyboard", id );
+		helpmessage = trap_L10n_TranslateString( nokeyboard );
+	}
+
+	if( !helpmessage ) {
+		helpmessage = CG_TranslateString( id );
+	}
+
+	while( ( c = helpmessage[0] ) && ( outlen < MAX_HELPMESSAGE_CHARS - 1 ) ) {
+		helpmessage++;
+
+		if( c == '{' ) { // template
+			int t = *( helpmessage++ );
+			switch( t ) {
+			case 'B': // key binding
+				{
+					char cmd[MAX_STRING_CHARS];
+					unsigned cmdlen = 0;
+					while( ( c = helpmessage[0] ) != '\0' ) {
+						helpmessage++;
+						if( c == '}' ) {
+							break;
+						}
+						if( cmdlen < MAX_STRING_CHARS - 1 ) {
+							cmd[cmdlen++] = c;
+						}
+					}
+					cmd[cmdlen] = '\0';
+					CG_GetBoundKeysString( cmd, cg.helpmessage + outlen, MAX_HELPMESSAGE_CHARS - outlen );
+					outlen += strlen( cg.helpmessage + outlen );
+				}
+				continue;
+			default:
+				helpmessage--;
+				break;
+			}
+		}
+
+		cg.helpmessage[outlen++] = c;
+	}
+	cg.helpmessage[outlen] = '\0';
+	Q_FixTruncatedUtf8( cg.helpmessage );
+
+	cg.helpmessage_time = cg.time;
 }
 
 /*
@@ -751,6 +910,8 @@ static void CG_Cmd_DemoGet_f( void )
 */
 static void CG_SC_DemoGet( void )
 {
+	const char *filename, *extension;
+
 	if( cgs.demoPlaying )
 	{
 		// ignore download commands coming from demo files
@@ -771,13 +932,16 @@ static void CG_SC_DemoGet( void )
 		return;
 	}
 
-	if( !COM_ValidateRelativeFilename( trap_Cmd_Argv( 1 ) ) )
+	filename = trap_Cmd_Argv( 1 );
+	extension = COM_FileExtension( filename );
+	if( !COM_ValidateRelativeFilename( filename ) ||
+		!extension || Q_stricmp( extension, cgs.demoExtension ) )
 	{
 		CG_Printf( "Warning: demoget: Invalid filename, ignored\n" );
 		return;
 	}
 
-	trap_DownloadRequest( trap_Cmd_Argv( 1 ), false );
+	trap_DownloadRequest( filename, false );
 }
 
 /*
@@ -824,11 +988,78 @@ static void CG_SC_MenuCustom( void )
 	
 	for( i = 2, c = 1; i < trap_Cmd_Argc() - 1; i += 2, c++ )
 	{
-		Q_strncatz( request, va( "btn%i \"%s\" ", c, trap_Cmd_Argv( i ) ), sizeof( request ) );
-		Q_strncatz( request, va( "cmd%i \"%s\" ", c, trap_Cmd_Argv( i + 1 ) ), sizeof( request ) );
+		const char *label = trap_Cmd_Argv( i );
+		const char *cmd = trap_Cmd_Argv( i + 1 );
+
+		Q_strncatz( request, va( "btn%i \"%s\" ", c, label ), sizeof( request ) );
+		Q_strncatz( request, va( "cmd%i \"%s%s\" ", c, *cmd ? "cmd " : "", cmd ), sizeof( request ) );
 	}
 
 	trap_Cmd_ExecuteText( EXEC_APPEND, va( "%s\n", request ) );
+}
+
+/*
+* CG_SC_MenuQuick
+*/
+static void CG_SC_MenuQuick( void )
+{
+	int i, c;
+
+	if( cgs.demoPlaying || cgs.tv )
+		return;
+
+	cg.quickmenu[0] = '\0';
+
+	if( trap_Cmd_Argc() >= 2 )
+	{
+		for( i = 1, c = 1; i < trap_Cmd_Argc() - 1; i += 2, c++ )
+		{
+			const char *label = trap_Cmd_Argv( i );
+			const char *cmd = trap_Cmd_Argv( i + 1 );
+
+			Q_strncatz( cg.quickmenu, va( "btn%i \"%s\" ", c, label ), sizeof( cg.quickmenu ) );
+			Q_strncatz( cg.quickmenu, va( "cmd%i \"%s%s\" ", c, *cmd ? "cmd " : "", cmd ), sizeof( cg.quickmenu ) );
+		}
+	}
+
+	CG_RefreshQuickMenu();
+}
+
+/*
+* CG_SC_MenuOpen
+*/
+static void CG_SC_MenuOpen_( bool modal )
+{
+	char request[MAX_STRING_CHARS];
+	int i, c;
+
+	if( cgs.demoPlaying || cgs.tv )
+		return;
+
+	if( trap_Cmd_Argc() < 2 )
+		return;
+
+	Q_strncpyz( request, va( "%s \"%s\"", modal ? "menu_modal" : "menu_open", trap_Cmd_Argv( 1 ) ), sizeof( request ) );
+	for( i = 2, c = 1; i < trap_Cmd_Argc(); i++, c++ )
+		Q_strncatz( request, va( " param%i \"%s\"", c, trap_Cmd_Argv( i ) ), sizeof( request ) );
+
+	trap_Cmd_ExecuteText( EXEC_APPEND, va( "%s\n", request ) );
+}
+
+/*
+* CG_SC_MenuOpen
+*/
+static void CG_SC_MenuOpen( void )
+{
+	CG_SC_MenuOpen_( false );
+}
+
+/*
+* CG_SC_MenuModal
+*/
+static void CG_SC_MenuModal( void )
+{
+	CG_SC_MenuOpen_( true );
 }
 
 /*
@@ -839,7 +1070,7 @@ void CG_AddAward( const char *str )
 	if( !str || !str[0] )
 		return;
 
-	Q_strncpyz( cg.award_lines[cg.award_head % MAX_AWARD_LINES], str, MAX_CONFIGSTRING_CHARS );
+	Q_strncpyz( cg.award_lines[cg.award_head % MAX_AWARD_LINES], CG_TranslateString( str ), MAX_CONFIGSTRING_CHARS );
 	cg.award_times[cg.award_head % MAX_AWARD_LINES] = cg.time;
 	cg.award_head++;
 }
@@ -897,17 +1128,6 @@ static void CG_SC_AddAward( void )
 	CG_AddAward( trap_Cmd_Argv( 1 ) );
 }
 
-/*
-* CG_SC_ExecuteText
-*/
-static void CG_SC_ExecuteText( void )
-{
-	if( cgs.demoPlaying || cgs.tv )
-		return;
-
-	trap_Cmd_ExecuteText( EXEC_APPEND, trap_Cmd_Args() );
-}
-
 typedef struct
 {
 	const char *name;
@@ -922,23 +1142,27 @@ static const svcmd_t cg_svcmds[] =
 	{ "pch", CG_SC_Privsay }, // racesow
 	{ "tvch", CG_SC_TVChatPrint },
 	{ "cp", CG_SC_CenterPrint },
+	{ "cpf", CG_SC_CenterPrintFormat },
 	{ "obry", CG_SC_Obituary },
 	{ "scb", CG_SC_Scoreboard },
 	{ "plstats", CG_SC_PlayerStats },
 	{ "mm", CG_SC_MatchMessage },
+	{ "mapmsg", CG_SC_HelpMessage },
 	{ "ti", CG_CS_UpdateTeamInfo },
 	{ "demoget", CG_SC_DemoGet },
 	{ "cha", CG_SC_ChannelAdd },
 	{ "chr", CG_SC_ChannelRemove },
 	{ "mecu", CG_SC_MenuCustom },
+	{ "meop", CG_SC_MenuOpen },
+	{ "memo", CG_SC_MenuModal },
 	{ "motd", CG_SC_MOTD },
 	{ "aw", CG_SC_AddAward },
+	{ "qm", CG_SC_MenuQuick },
 	{ "cpa", CG_SC_CheckpointsAdd }, //racesow
 	{ "cpc", CG_SC_CheckpointsClear }, //racesow
 	{ "dstart", CG_SC_RaceDemoStart }, //racesow
 	{ "dstop", CG_SC_RaceDemoStop }, //racesow
 	{ "dcancel", CG_SC_RaceDemoCancel }, //racesow
-	{ "cmd", CG_SC_ExecuteText },
 
 	{ NULL }
 };
@@ -1085,6 +1309,90 @@ static void CG_Cmd_LastWeapon_f( void )
 			trap_Cmd_ExecuteText( EXEC_NOW, va( "cmd use %i", item->tag ) );
 			cg.lastWeapon = cg.predictedPlayerState.stats[STAT_PENDING_WEAPON];
 		}
+	}
+}
+
+/*
+* CG_Cmd_WeaponCross_f
+*/
+static void CG_Cmd_WeaponCross_f( void )
+{
+	int i;
+	int quarter = -1, first;
+	int w[2], count = 0, selected = -1, select;
+	gsitem_t *item;
+
+	if( !cg.frame.valid )
+		return;
+
+	if( trap_Cmd_Argc() > 1 )
+		quarter = atoi( trap_Cmd_Argv( 1 ) );
+
+	if( ( quarter < 0 ) || ( quarter > 4 ) )
+	{
+		CG_Printf( "Usage: '%s <0-4>' (0 - just show, 1 - GB/MG, 2 - RG/GL, 3 - RL/PG, 4 - LG/EB)\n", trap_Cmd_Argv( 0 ) );
+		return;
+	}
+
+	if( cgs.demoPlaying || ( cg.predictedPlayerState.pmove.pm_type == PM_CHASECAM ) )
+	{
+		if( quarter )
+			CG_ChaseStep( ( quarter > 2 ) ? -1 : 1 );
+		return;
+	}
+
+	CG_ShowWeaponCross();
+
+	if( !quarter )
+		return;
+
+	quarter--;
+	first = quarter << 1;
+
+	for( i = 0; i < 2; i++ )
+	{
+		if( !cg.predictedPlayerState.inventory[WEAP_GUNBLADE + first + i] )
+		{
+			continue;
+		}
+		if( ( first + i ) /* show uncharged gunblade */ &&
+			!cg.predictedPlayerState.inventory[AMMO_GUNBLADE + first + i] &&
+			!cg.predictedPlayerState.inventory[AMMO_WEAK_GUNBLADE + first + i] )
+		{
+			continue;
+		}
+
+		if( cg.predictedPlayerState.stats[STAT_PENDING_WEAPON] == ( WEAP_GUNBLADE + first + i ) )
+			selected = i;
+
+		w[count] = first + i;
+		count++;
+	}
+
+	if( !count )
+		return;
+
+	if( count == 2 )
+	{
+		if( selected >= 0 )
+			select = selected ^ 1;
+		else
+			select = ( cg.lastCrossWeapons >> quarter ) & 1;
+	}
+	else
+	{
+		if( selected >= 0 )
+			return;
+		select = 0;
+	}
+
+	item = GS_Cmd_UseItem( &cg.frame.playerState, va( "%i", WEAP_GUNBLADE + w[select] ), IT_WEAPON );
+	if( item )
+	{
+		if( item->type & IT_WEAPON )
+			CG_Predict_ChangeWeapon( item->tag );
+		trap_Cmd_ExecuteText( EXEC_NOW, va( "cmd use %i", item->tag ) );
+		cg.lastCrossWeapons = ( cg.lastCrossWeapons & ~( 1 << quarter ) ) | ( ( w[select] & 1 ) << quarter );
 	}
 }
 
@@ -1256,6 +1564,7 @@ static const cgcmd_t cgcmds[] =
 	{ "weapnext", CG_Cmd_NextWeapon_f, true },
 	{ "weapprev", CG_Cmd_PrevWeapon_f, true },
 	{ "weaplast", CG_Cmd_LastWeapon_f, true },
+	{ "weapcross", CG_Cmd_WeaponCross_f, true },
 	{ "viewpos", CG_Viewpos_f, true },
 	{ "block", CG_Cmd_RSChatBlock_f, false }, // racesow
 	{ "players", NULL, false },
@@ -1273,8 +1582,6 @@ void CG_RegisterCGameCommands( void )
 	char *name;
 	const cgcmd_t *cmd;
 
-	CG_LoadingString( "commands" );
-
 	if( !cgs.demoPlaying )
 	{
 		const svcmd_t *svcmd;
@@ -1285,8 +1592,6 @@ void CG_RegisterCGameCommands( void )
 			name = cgs.configStrings[CS_GAMECOMMANDS+i];
 			if( !name[0] )
 				continue;
-
-			CG_LoadingItemName( name );
 
 			// check for local command overrides
 			for( cmd = cgcmds; cmd->name; cmd++ )

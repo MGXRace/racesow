@@ -125,12 +125,12 @@ static inline struct cmodel_s *TV_Module_CM_OctagonModelForBBox( relay_t *relay,
 	return CM_OctagonModelForBBox( relay->cms, mins, maxs );
 }
 
-static inline qboolean TV_Module_CM_AreasConnected( relay_t *relay, int area1, int area2 )
+static inline bool TV_Module_CM_AreasConnected( relay_t *relay, int area1, int area2 )
 {
 	if( !relay )
 	{
 		Com_Printf( "Error: TV_Module_CM_AreasConnected: Relay not set\n" );
-		return qfalse;
+		return false;
 	}
 
 	return CM_AreasConnected( relay->cms, area1, area2 );
@@ -590,7 +590,7 @@ tv_module_t *TV_GetModule( const char *game )
 	}
 	else {
 		iter->export = (tv_module_export_t *)Com_LoadGameLibrary( "tv", "GetTVModuleAPI", &iter->handle, 
-			&iter->import, qfalse, NULL );
+			&iter->import, false, NULL );
 	}
 	if( !iter->export )
 	{
@@ -662,7 +662,7 @@ void TV_Relay_InitModule( relay_t *relay )
 	relay->module_mempool = _Mem_AllocPool( relay->upstream->mempool, va( "TV Module Progs" ), MEMPOOL_GAMEPROGS, __FILE__, __LINE__ );
 	relay->module = relay->module_export->InitRelay( relay, relay->snapFrameTime, relay->playernum );
 
-	Mem_CheckSentinelsGlobal();
+	Mem_DebugCheckSentinelsGlobal( );
 
 	// update upstream name for upstream
 	TV_Relay_UpstreamUserinfoChanged( relay );

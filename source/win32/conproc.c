@@ -46,7 +46,7 @@ HANDLE heventParentSend;
 HANDLE hStdout;
 HANDLE hStdin;
 
-static unsigned _stdcall RequestProc( void *arg );
+static unsigned WINAPI RequestProc( void *arg );
 static LPVOID GetMappedBuffer( HANDLE hfileBuffer );
 static void ReleaseMappedBuffer( LPVOID pBuffer );
 static BOOL GetScreenBufferLines( int *piLines );
@@ -99,19 +99,19 @@ void InitConProc( int argc, char **argv )
 	if( ( t = CCheckParm( "-HFILE" ) ) > 0 )
 	{
 		if( t < argc )
-			hFile = (HANDLE) (qintptr) atol( ccom_argv[t+1] );
+			hFile = (HANDLE) (intptr_t) atol( ccom_argv[t+1] );
 	}
 
 	if( ( t = CCheckParm( "-HPARENT" ) ) > 0 )
 	{
 		if( t < argc )
-			heventParent = (HANDLE) (qintptr) atol( ccom_argv[t+1] );
+			heventParent = (HANDLE) (intptr_t) atol( ccom_argv[t+1] );
 	}
 
 	if( ( t = CCheckParm( "-HCHILD" ) ) > 0 )
 	{
 		if( t < argc )
-			heventChild = (HANDLE) (qintptr) atol( ccom_argv[t+1] );
+			heventChild = (HANDLE) (intptr_t) atol( ccom_argv[t+1] );
 	}
 
 
@@ -160,7 +160,7 @@ void DeinitConProc( void )
 }
 
 
-static unsigned _stdcall RequestProc( void *arg )
+static unsigned WINAPI RequestProc( void *arg )
 {
 	int *pBuffer;
 	DWORD dwRet;

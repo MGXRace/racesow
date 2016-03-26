@@ -60,11 +60,10 @@ enum
 // usercmd_t is sent to the server each client frame
 typedef struct usercmd_s
 {
-	qbyte msec;
-	qbyte buttons;
+	uint8_t msec;
+	uint8_t buttons;
 	short angles[3];
-	float forwardfrac, sidefrac, upfrac;
-	short forwardmove, sidemove, upmove;
+	float forwardmove, sidemove, upmove;
 	unsigned int serverTimeStamp;
 } usercmd_t;
 
@@ -163,6 +162,7 @@ typedef struct
 #define MAX_GAMECOMMANDS	256		// command names for command completion
 #define MAX_LOCATIONS		256
 #define MAX_WEAPONDEFS		MAX_ITEMS
+#define MAX_HELPMESSAGES		256
 
 //
 // config strings are a general means of communication from
@@ -218,17 +218,19 @@ typedef struct
 #define CS_LOCATIONS		( CS_GAMECOMMANDS+MAX_GAMECOMMANDS )
 #define CS_WEAPONDEFS		( CS_LOCATIONS+MAX_LOCATIONS )
 #define CS_GENERAL			( CS_WEAPONDEFS+MAX_WEAPONDEFS )
+#define CS_HELPMESSAGES		( CS_GENERAL+MAX_GENERAL ) // for localizable messages, that got a special place on the HUD
 
-#define	MAX_CONFIGSTRINGS	( CS_GENERAL+MAX_GENERAL )
+#define	MAX_CONFIGSTRINGS	( CS_HELPMESSAGES+MAX_HELPMESSAGES )
 
 //==============================================
 
 // masterservers cvar is shared by client and server. This ensures both have the same default string
-#define	DEFAULT_MASTER_SERVERS_IPS		"dpmaster.deathmask.net ghdigital.com excalibur.nvg.ntnu.no eu.master.warsow.net"
-#define SERVER_PINGING_TIMEOUT			50
-#define LAN_SERVER_PINGING_TIMEOUT		20
-#define DEFAULT_PLAYERMODEL				"bigvic"
-#define DEFAULT_PLAYERSKIN				"default"
+#define	DEFAULT_MASTER_SERVERS_IPS			"dpmaster.deathmask.net ghdigital.com excalibur.nvg.ntnu.no eu.master.warsow.net"
+#define DEFAULT_MASTER_SERVERS_STEAM_IPS	"208.64.200.65:27015 208.64.200.39:27011 208.64.200.52:27011"
+#define SERVER_PINGING_TIMEOUT				50
+#define LAN_SERVER_PINGING_TIMEOUT			20
+#define DEFAULT_PLAYERMODEL					"bigvic"
+#define DEFAULT_PLAYERSKIN					"default"
 
 #ifdef UCMDTIMENUDGE
 # define MAX_UCMD_TIMENUDGE 50
@@ -253,6 +255,7 @@ typedef struct
 #define SVF_ONLYTEAM			0x00000200		// this entity is only transmited to clients with the same ent->s.team value
 #define SVF_FORCEOWNER			0x00000400		// this entity forces the entity at s.ownerNum to be included in the snapshot
 #define SVF_ONLYOWNER			0x00000800		// this entity is only transmitted to its owner
+#define SVF_FORCETEAM			0x00001000		// this entity is always transmitted to clients with the same ent->s.team value
 
 // edict->solid values
 typedef enum
@@ -280,8 +283,11 @@ typedef struct entity_state_s
 	unsigned int svflags;
 
 	int type;							// ET_GENERIC, ET_BEAM, etc
-	qboolean linearProjectile;			// is sent inside "type" as ET_INVERSE flag
-	vec3_t linearProjectileVelocity;	// this is transmitted instead of origin when linearProjectile is true
+	bool linearMovement;				// is sent inside "type" as ET_INVERSE flag
+	union {
+		vec3_t linearMovementVelocity;		// this is transmitted instead of origin when linearProjectile is true
+		vec3_t linearMovementEnd;			// the end movement point for brush models
+	};
 
 	vec3_t origin;
 	vec3_t angles;
@@ -290,6 +296,7 @@ typedef struct entity_state_s
 	{
 		vec3_t old_origin;				// for lerping
 		vec3_t origin2;					// ET_BEAM, ET_PORTALSURFACE, ET_EVENT specific
+		vec3_t linearMovementBegin;		// the starting movement point for brush models
 	};
 
 	unsigned int modelindex;
@@ -316,6 +323,7 @@ typedef struct entity_state_s
 		int targetNum;					// ET_EVENT specific
 		int colorRGBA;					// ET_BEAM, ET_EVENT specific
 		int range;						// ET_LASERBEAM, ET_CURVELASERBEAM specific
+		unsigned int linearMovementDuration;
 	};
 
 	float attenuation;					// should be <= 255/16.0 as this is sent as byte
@@ -325,7 +333,7 @@ typedef struct entity_state_s
 										// PVS culling)
 
 	int weapon;							// WEAP_ for players
-	qboolean teleported;				// the entity was teleported this snap (sent inside "weapon" as ET_INVERSE flag)
+	bool teleported;					// the entity was teleported this snap (sent inside "weapon" as ET_INVERSE flag)
 
 	unsigned int effects;
 
@@ -348,7 +356,7 @@ typedef struct entity_state_s
 
 	union
 	{
-		unsigned int linearProjectileTimeStamp;
+		unsigned int linearMovementTimeStamp;
 		int light;						// constant light glow
 	};
 
@@ -439,12 +447,12 @@ typedef struct
 
 //==============================================
 
-#define	MAX_PARSE_GAMECOMMANDS	64
+#define	MAX_PARSE_GAMECOMMANDS	256
 
 typedef struct
 {
-	qboolean all;
-	qbyte targets[MAX_CLIENTS/8];
+	bool all;
+	uint8_t targets[MAX_CLIENTS/8];
 	size_t commandOffset;			// offset of the data in gamecommandsData
 } gcommand_t;
 
@@ -468,13 +476,13 @@ typedef struct
 	unsigned int POVnum;		// entity number of the player in POV
 	unsigned int playerNum;		// client number
 	float viewheight;
-	float fov;					// horizontal field of view
+	float fov;					// horizontal field of view (unused)
 
-	qbyte weaponState;
+	uint8_t weaponState;
 
 	int inventory[MAX_ITEMS];
 	short stats[PS_MAX_STATS];	// fast status bar updates
-	qbyte plrkeys;				// infos on the pressed keys of chased player (self if not chasing)
+	uint8_t plrkeys;				// infos on the pressed keys of chased player (self if not chasing)
 } player_state_t;
 
 typedef struct
@@ -484,7 +492,7 @@ typedef struct
 
 	// command (in)
 	usercmd_t cmd;
-	qboolean snapinitial;       // if s has been changed outside pmove
+	bool snapinitial;       // if s has been changed outside pmove
 
 	// results (out)
 	int numtouch;

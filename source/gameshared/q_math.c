@@ -37,15 +37,15 @@ int DirToByte( vec3_t dir )
 {
 	int i, best;
 	float d, bestd;
-	qboolean normalized;
+	bool normalized;
 
 	if( !dir || VectorCompare( dir, vec3_origin ) )
 		return NUMVERTEXNORMALS;
 
 	if( DotProduct( dir, dir ) == 1 )
-		normalized = qtrue;
+		normalized = true;
 	else
-		normalized = qfalse;
+		normalized = false;
 
 	bestd = 0;
 	best = 0;
@@ -197,8 +197,7 @@ void RotatePointAroundVector( vec3_t dst, const vec3_t dir, const vec3_t point, 
 void AngleVectors( const vec3_t angles, vec3_t forward, vec3_t right, vec3_t up )
 {
 	float angle;
-	static float sr, sp, sy, cr, cp, cy, t;
-	// static to help MS compiler fp bugs
+	float sr, sp, sy, cr, cp, cy, t;
 
 	angle = DEG2RAD( angles[YAW] );
 	sy = sin( angle );
@@ -543,12 +542,13 @@ float CalcFov( float fov_x, float width, float height )
 /*
 * AdjustFov
 */
-void AdjustFov( float *fov_x, float *fov_y, float width, float height, qboolean lock_x )
+void AdjustFov( float *fov_x, float *fov_y, float width, float height, bool lock_x )
 {
 	float x, y;
 
-	if( width*3 == 4*height || width*4 == height*5 )
-	{                                                   // 4:3 or 5:4 ratio
+	if( width*3 == 4*height || width*4 == height*5 || height > width )
+	{
+		// 4:3, 5:4 ratios or vertical display
 		return;
 	}
 
@@ -722,15 +722,15 @@ void PlaneFromPoints( vec3_t verts[3], cplane_t *plane )
 /*
 * ComparePlanes
 */
-qboolean ComparePlanes( const vec3_t p1normal, vec_t p1dist, const vec3_t p2normal, vec_t p2dist )
+bool ComparePlanes( const vec3_t p1normal, vec_t p1dist, const vec3_t p2normal, vec_t p2dist )
 {
 	if( fabs( p1normal[0] - p2normal[0] ) < PLANE_NORMAL_EPSILON
 	    && fabs( p1normal[1] - p2normal[1] ) < PLANE_NORMAL_EPSILON
 	    && fabs( p1normal[2] - p2normal[2] ) < PLANE_NORMAL_EPSILON
 	    && fabs( p1dist - p2dist ) < PLANE_DIST_EPSILON )
-		return qtrue;
+		return true;
 
-	return qfalse;
+	return false;
 }
 
 /*
@@ -776,13 +776,13 @@ void ClearBounds( vec3_t mins, vec3_t maxs )
 	maxs[0] = maxs[1] = maxs[2] = -99999;
 }
 
-qboolean BoundsIntersect( const vec3_t mins1, const vec3_t maxs1, const vec3_t mins2, const vec3_t maxs2 )
+bool BoundsIntersect( const vec3_t mins1, const vec3_t maxs1, const vec3_t mins2, const vec3_t maxs2 )
 {
-	return (qboolean)( mins1[0] <= maxs2[0] && mins1[1] <= maxs2[1] && mins1[2] <= maxs2[2] &&
+	return (bool)( mins1[0] <= maxs2[0] && mins1[1] <= maxs2[1] && mins1[2] <= maxs2[2] &&
 	                   maxs1[0] >= mins2[0] && maxs1[1] >= mins2[1] && maxs1[2] >= mins2[2] );
 }
 
-qboolean BoundsAndSphereIntersect( const vec3_t mins, const vec3_t maxs, const vec3_t centre, float radius )
+bool BoundsAndSphereIntersect( const vec3_t mins, const vec3_t maxs, const vec3_t centre, float radius )
 {
 	int i;
 	float dmin = 0;
@@ -797,8 +797,8 @@ qboolean BoundsAndSphereIntersect( const vec3_t mins, const vec3_t maxs, const v
 	}
 
 	if( dmin <= radius2 )
-		return qtrue;
-	return qfalse;
+		return true;
+	return false;
 }
 
 void AddPointToBounds( const vec3_t v, vec3_t mins, vec3_t maxs )
@@ -957,6 +957,30 @@ void VectorReflect( const vec3_t v, const vec3_t n, const vec_t dist, vec3_t out
 
 //============================================================================
 
+float LinearMovementWithOvershoot( vec_t start, vec_t end, float duration, float freq, float decay, float t )
+{
+	float e;
+	vec_t amplitude;
+	float phase;
+
+	if( t < duration ) {
+		return start + (end - start) * t / duration;
+	}
+
+	e = decay * (t - duration);
+	if( e > 5.0f ) {
+		// some reasonable exponent to stop oscillation
+		return end;
+	}
+
+	e = exp( e );
+	amplitude = (float)(end - start) / duration;
+	phase = freq * M_TWOPI;
+	return end + amplitude * sin((t - duration) * phase) / e / phase;
+}
+
+//============================================================================
+
 void Matrix3_Identity( mat3_t m )
 {
 	int i, j;
@@ -974,14 +998,14 @@ void Matrix3_Copy( const mat3_t m1, mat3_t m2 )
 	memcpy( m2, m1, sizeof( mat3_t ) );
 }
 
-qboolean Matrix3_Compare( const mat3_t m1, const mat3_t m2 )
+bool Matrix3_Compare( const mat3_t m1, const mat3_t m2 )
 {
 	int i;
 
 	for( i = 0; i < 9; i++ )
 		if( m1[i] != m2[i] )
-			return qfalse;
-	return qtrue;
+			return false;
+	return true;
 }
 
 void Matrix3_Multiply( const mat3_t m1, const mat3_t m2, mat3_t out )
@@ -1131,11 +1155,11 @@ void Quat_Quat3( const vec3_t in, quat_t out )
 	out[3] = -sqrt(max(1 - in[0]*in[0] - in[1]*in[1] - in[2]*in[2], 0.0f));
 }
 
-qboolean Quat_Compare( const quat_t q1, const quat_t q2 )
+bool Quat_Compare( const quat_t q1, const quat_t q2 )
 {
 	if( q1[0] != q2[0] || q1[1] != q2[1] || q1[2] != q2[2] || q1[3] != q2[3] )
-		return qfalse;
-	return qtrue;
+		return false;
+	return true;
 }
 
 void Quat_Conjugate( const quat_t q1, quat_t q2 )
@@ -1217,6 +1241,19 @@ void Quat_Multiply( const quat_t q1, const quat_t q2, quat_t out )
 	out[3] = q1[3] * q2[3] - q1[0] * q2[0] - q1[1] * q2[1] - q1[2] * q2[2];
 }
 
+static void Quat_LLerp( const quat_t q1, const quat_t q2, vec_t t, quat_t out )
+{
+	vec_t scale0, scale1;
+
+	scale0 = 1.0 - t;
+	scale1 = t;
+
+	out[0] = scale0 * q1[0] + scale1 * q2[0];
+	out[1] = scale0 * q1[1] + scale1 * q2[1];
+	out[2] = scale0 * q1[2] + scale1 * q2[2];
+	out[3] = scale0 * q1[3] + scale1 * q2[3];
+}
+
 void Quat_Lerp( const quat_t q1, const quat_t q2, vec_t t, quat_t out )
 {
 	quat_t p1;
@@ -1241,19 +1278,16 @@ void Quat_Lerp( const quat_t q1, const quat_t q2, vec_t t, quat_t out )
 		p1[2] = q1[2]; p1[3] = q1[3];
 	}
 
-	if( cosom < 1.0 - 0.0001 )
-	{
-		sinsqr = 1.0 - cosom * cosom;
-		sinom = Q_RSqrt( sinsqr );
-		omega = atan2( sinsqr * sinom, cosom );
-		scale0 = sin( ( 1.0 - t ) * omega ) * sinom;
-		scale1 = sin( t * omega ) * sinom;
+	if( cosom >= 1.0 - 0.0001 ) {
+		Quat_LLerp( q1, q2, t, out );
+		return;
 	}
-	else
-	{
-		scale0 = 1.0 - t;
-		scale1 = t;
-	}
+
+	sinsqr = 1.0 - cosom * cosom;
+	sinom = Q_RSqrt( sinsqr );
+	omega = atan2( sinsqr * sinom, cosom );
+	scale0 = sin( ( 1.0 - t ) * omega ) * sinom;
+	scale1 = sin( t * omega ) * sinom;
 
 	out[0] = scale0 * p1[0] + scale1 * q2[0];
 	out[1] = scale0 * p1[1] + scale1 * q2[1];
@@ -1361,6 +1395,7 @@ void DualQuat_FromQuatAndVector( const quat_t q, const vec3_t v, dualquat_t out 
 {
 	// regular quaternion, copy
 	Quat_Copy( q, &out[0] );
+	Quat_Normalize( &out[0] );
 
 	// convert translation vector to dual part
 	DualQuat_SetVector( out, v );
@@ -1370,6 +1405,7 @@ void DualQuat_FromQuat3AndVector( const vec3_t q, const vec3_t v, dualquat_t out
 {
 	// regular quaternion, copy
 	Quat_Quat3( q, &out[0] );
+	Quat_Normalize( &out[0] );
 
 	// convert translation vector to dual part
 	DualQuat_SetVector( out, v );
@@ -1448,8 +1484,19 @@ void DualQuat_Multiply( const dualquat_t dq1, const dualquat_t dq2, dualquat_t o
 
 void DualQuat_Lerp( const dualquat_t dq1, const dualquat_t dq2, vec_t t, dualquat_t out )
 {
-	Quat_Lerp( &dq1[0], &dq2[0], t, &out[0] );
-	Quat_Lerp( &dq1[4], &dq2[4], t, &out[4] );
+	int i, j;
+	vec_t k;
+	
+	k = dq1[0] * dq2[0] + dq1[1] * dq2[1] + dq1[2] * dq2[2] + dq1[3] * dq2[3];
+	k = k < 0 ? -t : t;
+	t = 1.0 - t;
+
+	for( i = 0; i < 4; i++ )
+		out[i] = dq1[i] * t + dq2[i] * k;
+	for( j = 4; j < 8; j++ )
+		out[j] = dq1[j] * t + dq2[j] * k;
+
+	Quat_Normalize( &out[0] );
 }
 
 /*
@@ -1480,7 +1527,7 @@ vec_t NormalCDF( vec_t x )
 
 	if ( x < 0.0 )
 		sign = -1.0;
-	x = abs(x);
+	x = fabs(x);
 	if( x > 37.0 )
 		cumnorm = 0.0;
 	else

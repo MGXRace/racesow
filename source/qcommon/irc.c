@@ -26,9 +26,11 @@ static void *irc_libhandle = NULL;
 static cvar_t *irc_server;
 static dynvar_t *irc_connected;
 
+static void *irc_wakelock;
+
 static mempool_t *irc_pool;
-static qboolean connected_b = qfalse;
-static qboolean irc_initialized = qfalse;
+static bool connected_b = false;
+static bool irc_initialized = false;
 
 static void Irc_LoadLibrary( void );
 static void Irc_UnloadLibrary( void );
@@ -37,8 +39,8 @@ static void Irc_UnloadLibrary( void );
 extern struct qfontface_s *SCR_RegisterFont( const char *name, int style, unsigned int size );
 extern void SCR_DrawString( int x, int y, int align, const char *str, struct qfontface_s *font, vec4_t color );
 extern size_t SCR_DrawStringWidth( int x, int y, int align, const char *str, size_t maxwidth, struct qfontface_s *font, vec4_t color );
-extern void SCR_DrawRawChar( int x, int y, qwchar num, struct qfontface_s *font, vec4_t color );
-extern size_t SCR_strHeight( struct qfontface_s *font );
+extern void SCR_DrawRawChar( int x, int y, wchar_t num, struct qfontface_s *font, vec4_t color );
+extern size_t SCR_FontHeight( struct qfontface_s *font );
 extern size_t SCR_strWidth( const char *str, struct qfontface_s *font, size_t maxlen );
 extern size_t SCR_StrlenForWidth( const char *str, struct qfontface_s *font, size_t maxwidth );
 extern int CL_GetKeyDest( void );
@@ -61,13 +63,13 @@ dynvar_get_status_t Irc_GetConnected_f( void **connected )
 
 dynvar_set_status_t Irc_SetConnected_f( void *connected )
 {
-	connected_b = *(qboolean *) connected;
+	connected_b = *(bool *) connected;
 	return DYNVAR_SET_OK;
 }
 
 static void Irc_ConnectedListener_f( void *connected )
 {
-	if( *(qboolean *) connected )
+	if( *(bool *) connected )
 	{
 		assert( irc_server );
 	}
@@ -82,7 +84,7 @@ static void Irc_Quit_f( void *nothing )
 {
 	if( irc_initialized )
 	{
-		qboolean *c, b;
+		bool *c, b;
 		Dynvar_GetValue( irc_connected, (void **) &c );
 		b = *c;
 		Irc_UnloadLibrary();
@@ -136,15 +138,15 @@ static void Irc_LoadLibrary( void )
 	import.SCR_DrawString = SCR_DrawString;
 	import.SCR_DrawStringWidth = SCR_DrawStringWidth;
 	import.SCR_DrawRawChar = SCR_DrawRawChar;
-	import.SCR_strHeight = SCR_strHeight;
+	import.SCR_strHeight = SCR_FontHeight;
 	import.SCR_strWidth = SCR_strWidth;
 	import.SCR_StrlenForWidth = SCR_StrlenForWidth;
 	import.SCR_GetScreenWidth = SCR_GetScreenWidth;
 	import.SCR_GetScreenHeight = SCR_GetScreenHeight;
 	import.R_RegisterPic = SCR_RegisterPic;
 	import.R_DrawStretchPic = SCR_DrawStretchPic;
-	import.Milliseconds = Sys_Milliseconds;
-	import.Microseconds = Sys_Microseconds;
+	import.Sys_Milliseconds = Sys_Milliseconds;
+	import.Sys_Microseconds = Sys_Microseconds;
 	import.Mem_AllocPool = Irc_MemAllocPool;
 	import.Mem_Alloc = Irc_MemAlloc;
 	import.Mem_Free = Irc_MemFree;
@@ -198,7 +200,7 @@ static void Irc_LoadLibrary( void )
 	funcs[0].name = "GetIrcAPI";
 	funcs[0].funcPointer = (void **) &GetIrcAPI_f;
 	funcs[1].name = NULL;
-	irc_libhandle = Com_LoadLibrary( LIB_DIRECTORY "/irc_" ARCH LIB_SUFFIX, funcs );
+	irc_libhandle = Com_LoadLibrary( LIB_DIRECTORY "/" LIB_PREFIX "irc_" ARCH LIB_SUFFIX, funcs );
 
 	if( irc_libhandle )
 	{
@@ -214,7 +216,7 @@ static void Irc_LoadLibrary( void )
 				dynvar_t *const quit = Dynvar_Lookup( "quit" );
 				if( quit )
 					Dynvar_AddListener( quit, Irc_Quit_f );
-				irc_initialized = qtrue;
+				irc_initialized = true;
 				Cmd_AddCommand( "irc_unload", Irc_UnloadLibrary );
 				Com_Printf( "Success.\n" );
 			}
@@ -239,7 +241,7 @@ static void Irc_LoadLibrary( void )
 		Com_Printf( "Not found.\n" );
 	}
 
-	Mem_CheckSentinelsGlobal();
+	Mem_DebugCheckSentinelsGlobal();
 }
 
 static void Irc_UnloadLibrary( void )
@@ -248,7 +250,7 @@ static void Irc_UnloadLibrary( void )
 	if( irc_initialized )
 	{
 		dynvar_t *const quit = Dynvar_Lookup( "quit" );
-		qboolean *c;
+		bool *c;
 		if( !irc_connected )
 			irc_connected = Dynvar_Lookup( "irc_connected" );
 		Dynvar_GetValue( irc_connected, (void **) &c );
@@ -258,7 +260,7 @@ static void Irc_UnloadLibrary( void )
 		Cmd_RemoveCommand( "irc_unload" );
 		if( quit )
 			Dynvar_RemoveListener( quit, Irc_Quit_f );
-		irc_initialized = qfalse;
+		irc_initialized = false;
 	}
 	Com_UnloadLibrary( &irc_libhandle );
 	assert( !irc_libhandle );
@@ -275,7 +277,7 @@ void Irc_Connect_f( void )
 		if( irc_libhandle )
 		{
 			// library loaded, check for connection status
-			qboolean *c;
+			bool *c;
 			if( !irc_server )
 				irc_server = Cvar_Get( "irc_server", "irc.quakenet.org", CVAR_ARCHIVE );
 			if( !irc_connected )
@@ -293,7 +295,11 @@ void Irc_Connect_f( void )
 				Dynvar_AddListener( irc_connected, Irc_ConnectedListener_f );
 				irc_export->Connect();
 				Dynvar_GetValue( irc_connected, (void **) &c );
-				if( !*c )
+				if( *c )
+				{
+					irc_wakelock = Sys_AcquireWakeLock();
+				}
+				else
 				{
 					// connect failed
 					Com_Printf( "Could not connect to %s (%s).\n", Cvar_GetStringValue( irc_server ), irc_export->ERROR_MSG );
@@ -312,7 +318,7 @@ void Irc_Disconnect_f( void )
 {
 	if( irc_libhandle )
 	{
-		qboolean *c;
+		bool *c;
 		if( !irc_server )
 			irc_server = Cvar_Get( "irc_server", "", 0 );
 		if( !irc_connected )
@@ -323,6 +329,11 @@ void Irc_Disconnect_f( void )
 		if( *c )
 		{
 			// still connected, proceed
+			if( irc_wakelock )
+			{
+				Sys_ReleaseWakeLock( irc_wakelock );
+				irc_wakelock = NULL;
+			}
 			irc_export->Disconnect();
 			Dynvar_RemoveListener( irc_connected, Irc_ConnectedListener_f );
 		}
@@ -333,10 +344,10 @@ void Irc_Disconnect_f( void )
 		Com_Printf( "IRC module not loaded. Connect first.\n" );
 }
 
-qboolean Irc_IsConnected( void )
+bool Irc_IsConnected( void )
 {
 	if( irc_libhandle ) {
-		qboolean *c;
+		bool *c;
 
 		if( !irc_connected )
 			irc_connected = Dynvar_Lookup( "irc_connected" );
@@ -344,10 +355,10 @@ qboolean Irc_IsConnected( void )
 		
 		Dynvar_GetValue( irc_connected, (void **) &c );
 		if( *c ) {
-			return qtrue;
+			return true;
 		}
 	}
-	return qfalse;
+	return false;
 }
 
 size_t Irc_HistorySize( void )

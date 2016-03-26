@@ -34,7 +34,7 @@ static void Com_ScriptModule_Print( const char *msg )
 	Com_Printf( "%s", msg );
 }
 
-static void *Com_ScriptModule_MemAlloc( mempool_t *pool, int size, const char *filename, int fileline )
+static void *Com_ScriptModule_MemAlloc( mempool_t *pool, size_t size, const char *filename, int fileline )
 {
 	return _Mem_Alloc( pool, size, MEMPOOL_ANGELSCRIPT, 0, filename, fileline );
 }
@@ -83,9 +83,9 @@ static void *Com_LoadScriptLibrary( const char *basename, void *parms )
 	if( script_library )
 		Com_Error( ERR_FATAL, "Com_LoadScriptLibrary without Com_UnloadScriptLibrary" );
 
-	file_size = strlen( LIB_DIRECTORY "/" ) + strlen( basename ) + 1 + strlen( ARCH ) + strlen( LIB_SUFFIX ) + 1;
+	file_size = strlen( LIB_DIRECTORY "/" LIB_PREFIX ) + strlen( basename ) + 1 + strlen( ARCH ) + strlen( LIB_SUFFIX ) + 1;
 	file = ( char* )Mem_TempMalloc( file_size );
-	Q_snprintfz( file, file_size, LIB_DIRECTORY "/%s_" ARCH LIB_SUFFIX, basename );
+	Q_snprintfz( file, file_size, LIB_DIRECTORY "/" LIB_PREFIX "%s_" ARCH LIB_SUFFIX, basename );
 
 	funcs[0].name = "GetAngelwrapAPI";
 	funcs[0].funcPointer = ( void ** )&GetAngelwrapAPI;
@@ -111,7 +111,7 @@ void Com_ScriptModule_Shutdown( void )
 	ae = NULL;
 }
 
-static qboolean Com_ScriptModule_Load( const char *name, angelwrap_import_t *import )
+static bool Com_ScriptModule_Load( const char *name, angelwrap_import_t *import )
 {
 	int apiversion;
 
@@ -121,7 +121,7 @@ static qboolean Com_ScriptModule_Load( const char *name, angelwrap_import_t *imp
 	if( !ae )
 	{
 		Com_Printf( "Loading %s failed\n", name );
-		return qfalse;
+		return false;
 	}
 
 	apiversion = ae->API();
@@ -130,7 +130,7 @@ static qboolean Com_ScriptModule_Load( const char *name, angelwrap_import_t *imp
 		Com_UnloadScriptLibrary();
 		ae = NULL;
 		Com_Printf( "Wrong module version for %s: %i, not %i\n", name, apiversion, ANGELWRAP_API_VERSION );
-		return qfalse;
+		return false;
 	}
 
 	if( !ae->Init() )
@@ -138,12 +138,12 @@ static qboolean Com_ScriptModule_Load( const char *name, angelwrap_import_t *imp
 		Com_UnloadScriptLibrary();
 		ae = NULL;
 		Com_Printf( "Initialization of %s failed\n", name );
-		return qfalse;
+		return false;
 	}
 
 	Com_Printf( "Initialization of %s successful\n", name );
 
-	return qtrue;
+	return true;
 }
 
 void Com_ScriptModule_Init( void )
@@ -202,7 +202,7 @@ void Com_ScriptModule_Init( void )
 	}
 
 	// check memory integrity
-	Mem_CheckSentinelsGlobal();
+	Mem_DebugCheckSentinelsGlobal();
 
 	Com_Printf( "------------------------------------\n" );
 }

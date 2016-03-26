@@ -26,9 +26,9 @@
  */
 
 #include "precompiled.h"
-#include <Rocket/Core/FontEffect.h>
-#include <Rocket/Core/FontDatabase.h>
-#include <Rocket/Core/FontEffectInstancer.h>
+#include "../../Include/Rocket/Core/FontEffect.h"
+#include "../../Include/Rocket/Core/FontDatabase.h"
+#include "../../Include/Rocket/Core/FontEffectInstancer.h"
 
 namespace Rocket {
 namespace Core {
@@ -48,23 +48,6 @@ FontEffect::~FontEffect()
 const String& FontEffect::GetName() const
 {
 	return name;
-}
-
-// Asks the font effect if it requires, and will generate, its own unique texture.
-bool FontEffect::HasUniqueTexture() const
-{
-	return false;
-}
-
-// Gets the effect to resize and reposition a glyph's bitmap.
-bool FontEffect::GetGlyphMetrics(Vector2i& ROCKET_UNUSED(origin), Vector2i& ROCKET_UNUSED(dimensions), const FontGlyph& ROCKET_UNUSED(glyph)) const
-{
-	return false;
-}
-
-// Requests the effect to generate the texture data for a single glyph's bitmap.
-void FontEffect::GenerateGlyphTexture(byte* ROCKET_UNUSED(destination_data), const Vector2i& ROCKET_UNUSED(destination_dimensions), int ROCKET_UNUSED(destination_stride), const FontGlyph& ROCKET_UNUSED(glyph)) const
-{
 }
 
 // Sets the colour of the effect's geometry.

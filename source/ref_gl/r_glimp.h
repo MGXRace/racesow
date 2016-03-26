@@ -120,25 +120,27 @@ enum
 	GLSTATE_DSTBLEND_ONE_MINUS_DST_ALPHA	= 128,
 
 	GLSTATE_NO_COLORWRITE					= 0x100,
+	GLSTATE_ALPHAWRITE						= 0x200,
 
-	GLSTATE_DEPTHWRITE						= 0x200,
-	GLSTATE_DEPTHFUNC_EQ					= 0x400,
+	GLSTATE_DEPTHWRITE						= 0x400,
+	GLSTATE_DEPTHFUNC_EQ					= 0x800,
+	GLSTATE_DEPTHFUNC_GT					= 0x1000,
 
-	GLSTATE_OFFSET_FILL						= 0x800,
-	GLSTATE_NO_DEPTH_TEST					= 0x1000,
+	GLSTATE_OFFSET_FILL						= 0x2000,
+	GLSTATE_NO_DEPTH_TEST					= 0x4000,
 
-	GLSTATE_STENCIL_TEST					= 0x2000,
+	GLSTATE_STENCIL_TEST					= 0x8000,
 
-	GLSTATE_MARK_END						= 0x4000 // SHADERPASS_MARK_BEGIN
+	GLSTATE_MARK_END						= 0x10000 // SHADERPASS_MARK_BEGIN
 };
 
 #define GLSTATE_MASK		( GLSTATE_MARK_END-1 )
 
 // #define SHADERPASS_SRCBLEND_MASK (((GLSTATE_SRCBLEND_DST_ALPHA)<<1)-GLSTATE_SRCBLEND_ZERO)
 #define GLSTATE_SRCBLEND_MASK	0xF
-
 // #define SHADERPASS_DSTBLEND_MASK (((GLSTATE_DSTBLEND_DST_ALPHA)<<1)-GLSTATE_DSTBLEND_ZERO)
 #define GLSTATE_DSTBLEND_MASK	0xF0
+#define GLSTATE_BLEND_MASK		( GLSTATE_SRCBLEND_MASK|GLSTATE_DSTBLEND_MASK )
 
 #define GLSTATE_BLEND_ADD		( GLSTATE_SRCBLEND_ONE|GLSTATE_DSTBLEND_ONE )
 
@@ -149,7 +151,7 @@ typedef struct
 	int			_extMarker;
 
 	//
-	// only qbytes must follow the extensionsBoolMarker
+	// only uint8_ts must follow the extensionsBoolMarker
 	//
 
 	char		draw_range_elements
@@ -158,6 +160,7 @@ typedef struct
 				,texture_edge_clamp
 				,texture_filter_anisotropic
 				,texture_compression
+				,compressed_ETC1_RGB8_texture
 				,vertex_buffer_object
 				,GLSL
 				,GLSL_core
@@ -178,19 +181,22 @@ typedef struct
 				,meminfo
 				,framebuffer_blit
 				,depth24
+				,depth_nonlinear
 				,multiview_draw_buffers
 				,get_program_binary
 				,rgb8_rgba8
+				,ES3_compatibility
+				,blend_func_separate
+				,texture_array
+				,fragment_precision_high
+				,packed_depth_stencil
+				,texture_lod
+				,gpu_shader5
 				;
-	union {
-		char	shadow, shadow_samplers;
-	};
-	union {
-		char	texture_non_power_of_two, texture_npot;
-	};
-	union {
-		char	half_float_vertex, vertex_half_float;
-	};
+	union { char shadow, shadow_samplers; };
+	union { char texture3D, texture_3D; };
+	union { char texture_non_power_of_two, texture_npot; };
+	union { char half_float_vertex, vertex_half_float; };
 } glextinfo_t;
 
 typedef struct
@@ -203,31 +209,42 @@ typedef struct
 	const char		*shadingLanguageVersionString;
 	unsigned		versionHash;
 
+	const char		*applicationName;
+	const char		*screenshotPrefix;
+	int				startupColor;
+
 	int				version;
 	int				shadingLanguageVersion;
 
 	int				width, height;
-	qboolean		fullScreen;
-	qboolean		wideScreen;
+	bool			fullScreen;
 
-	qboolean		stereoEnabled;
-	qboolean		stencilEnabled;
+	bool			stereoEnabled;
+	int				stencilBits;
 
-	qboolean		hwGamma;
+	bool			hwGamma;
 	unsigned short	gammaRampSize;
 	unsigned short	originalGammaRamp[3*GAMMARAMP_STRIDE];
+
+	float			depthEpsilon;
 
 	int				maxTextureSize
 					,maxTextureUnits
 					,maxTextureCubemapSize
-					,maxTextureSize3D
+					,maxTexture3DSize
+					,maxTextureLayers
 					,maxTextureFilterAnisotropic
+					,maxRenderbufferSize
 					,maxVaryingFloats
 					,maxVertexUniformComponents
 					,maxVertexAttribs
 					,maxFragmentUniformComponents
 					;
 	unsigned int	maxGLSLBones;	// the maximum amount of bones we can handle in a vertex shader
+
+	bool			forceRGBAFramebuffers;	// PowerVR hack - its blending interprets alpha in RGB FBs as 0, not 1
+	bool			multithreading;
+
 	glextinfo_t		ext;
 } glconfig_t;
 
@@ -241,18 +258,21 @@ IMPLEMENTATION SPECIFIC FUNCTIONS
 ====================================================================
 */
 
-void		GLimp_BeginFrame( void );
-void		GLimp_EndFrame( void );
-int			GLimp_Init( const char *applicationName, void *hinstance, void *wndproc, void *parenthWnd );
-void	    GLimp_Shutdown( void );
-rserr_t		GLimp_SetMode( int x, int y, int width, int height, int displayFrequency,
-				qboolean fullscreen, qboolean wideScreen );
-void	    GLimp_AppActivate( qboolean active, qboolean destroy );
-qboolean	GLimp_GetGammaRamp( size_t stride, unsigned short *psize, unsigned short *ramp );
-void		GLimp_SetGammaRamp( size_t stride, unsigned short   size, unsigned short *ramp );
+bool	GLimp_ScreenEnabled( void );
+void	GLimp_BeginFrame( void );
+void	GLimp_EndFrame( void );
+int		GLimp_Init( const char *applicationName, void *hinstance, void *wndproc, void *parenthWnd, 
+			int iconResource, const int *iconXPM );
+void	GLimp_Shutdown( void );
+rserr_t	GLimp_SetMode( int x, int y, int width, int height, int displayFrequency, bool fullscreen, bool stereo );
+rserr_t	GLimp_SetWindow( void *hinstance, void *wndproc, void *parenthWnd );
+void	GLimp_AppActivate( bool active, bool destroy );
+bool	GLimp_GetGammaRamp( size_t stride, unsigned short *psize, unsigned short *ramp );
+void	GLimp_SetGammaRamp( size_t stride, unsigned short   size, unsigned short *ramp );
+void	GLimp_SetSwapInterval( int swapInterval );
 
-void		*GLimp_SharedContext_Create( void );
-qboolean	GLimp_SharedContext_MakeCurrent( void *ctx );
-void		GLimp_SharedContext_Destroy( void *ctx );
+bool	GLimp_SharedContext_Create( void **context, void **surface );
+bool	GLimp_SharedContext_MakeCurrent( void *context, void *surface );
+void	GLimp_SharedContext_Destroy( void *context, void *surface );
 
 #endif // R_GLIMP_H

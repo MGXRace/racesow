@@ -107,7 +107,7 @@ static void G_Client_DeadView( edict_t *ent )
 	// move us to body position
 	VectorCopy( body->s.origin, ent->s.origin );
 	VectorCopy( body->s.origin, ent->s.old_origin );
-	ent->s.teleported = qtrue;
+	ent->s.teleported = true;
 	client->ps.viewangles[ROLL] = 0;
 	client->ps.viewangles[PITCH] = 0;
 
@@ -456,15 +456,6 @@ void G_ClientEndSnapFrame( edict_t *ent )
 		return;
 
 	client = ent->r.client;
-
-	// set fov
-	if( !client->ps.pmove.stats[PM_STAT_ZOOMTIME] )
-		client->ps.fov = ent->r.client->fov;
-	else
-	{
-		float frac = (float)client->ps.pmove.stats[PM_STAT_ZOOMTIME] / (float)ZOOMTIME;
-		client->ps.fov = client->fov - ( (float)( client->fov - client->zoomfov ) * frac );
-	}
 
 	// If the end of unit layout is displayed, don't give
 	// the player any normal movement attributes

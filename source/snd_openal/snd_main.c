@@ -21,7 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "snd_local.h"
 #include "snd_cmdque.h"
 
-static sndQueue_t *s_cmdQueue;
+static sndCmdPipe_t *s_cmdPipe;
 
 static struct qthread_s *s_backThread;
 
@@ -34,9 +34,15 @@ cvar_t *s_openAL_device;
 cvar_t *s_doppler;
 cvar_t *s_sound_velocity;
 cvar_t *s_stereo2mono;
+cvar_t *s_globalfocus;
 
 static int s_registration_sequence = 1;
-static qboolean s_registering;
+static bool s_registering;
+
+// batch entity spatializations
+static unsigned s_num_ent_spats;
+static smdCmdSpatialization_t s_ent_spats[SND_SPATIALIZE_ENTS_MAX];
+static const unsigned s_max_ent_spats = sizeof( s_ent_spats ) / sizeof( s_ent_spats[0] );
 
 static void SF_UnregisterSound( sfx_t *sfx );
 static void SF_FreeSound( sfx_t *sfx );
@@ -69,11 +75,11 @@ static void SF_Music_f( void )
 {
 	if( trap_Cmd_Argc() == 2 )
 	{
-		SF_StartBackgroundTrack( trap_Cmd_Argv( 1 ), trap_Cmd_Argv( 1 ) );
+		SF_StartBackgroundTrack( trap_Cmd_Argv( 1 ), trap_Cmd_Argv( 1 ), 0 );
 	}
 	else if( trap_Cmd_Argc() == 3 )
 	{
-		SF_StartBackgroundTrack( trap_Cmd_Argv( 1 ), trap_Cmd_Argv( 2 ) );
+		SF_StartBackgroundTrack( trap_Cmd_Argv( 1 ), trap_Cmd_Argv( 2 ), 0 );
 	}
 	else
 	{
@@ -87,7 +93,7 @@ static void SF_Music_f( void )
 */
 static void SF_SoundList_f( void )
 {
-	S_IssueStuffCmd( s_cmdQueue, "soundlist" );
+	S_IssueStuffCmd( s_cmdPipe, "soundlist" );
 }
 
 /*
@@ -95,15 +101,17 @@ static void SF_SoundList_f( void )
 */
 static void SF_ListDevices_f( void )
 {
-	S_IssueStuffCmd( s_cmdQueue, "devicelist" );
+	S_IssueStuffCmd( s_cmdPipe, "devicelist" );
 }
 
 /*
 * SF_Init
 */
-qboolean SF_Init( void *hwnd, int maxEntities, qboolean verbose )
+bool SF_Init( void *hwnd, int maxEntities, bool verbose )
 {
 	soundpool = S_MemAllocPool( "OpenAL sound module" );
+	
+	s_num_ent_spats = 0;
 
 #ifdef OPENAL_RUNTIME
 	if( !QAL_Init( ALDRIVER, verbose ) )
@@ -113,16 +121,17 @@ qboolean SF_Init( void *hwnd, int maxEntities, qboolean verbose )
 #endif
 		{
 			Com_Printf( "Failed to load OpenAL library: %s\n", ALDRIVER );
-			return qfalse;
+			return false;
 		}
 	}
 #endif
 
 	s_volume = trap_Cvar_Get( "s_volume", "0.8", CVAR_ARCHIVE );
-	s_musicvolume = trap_Cvar_Get( "s_musicvolume", "0.2", CVAR_ARCHIVE );
+	s_musicvolume = trap_Cvar_Get( "s_musicvolume", "0.15", CVAR_ARCHIVE );
 	s_doppler = trap_Cvar_Get( "s_doppler", "1.0", CVAR_ARCHIVE );
 	s_sound_velocity = trap_Cvar_Get( "s_sound_velocity", "10976", CVAR_DEVELOPER );
 	s_stereo2mono = trap_Cvar_Get ( "s_stereo2mono", "0", CVAR_ARCHIVE );
+	s_globalfocus = trap_Cvar_Get( "s_globalfocus", "0", CVAR_ARCHIVE );
 
 #ifdef ENABLE_PLAY
 	trap_Cmd_AddCommand( "play", SF_Play_f );
@@ -135,53 +144,56 @@ qboolean SF_Init( void *hwnd, int maxEntities, qboolean verbose )
 	trap_Cmd_AddCommand( "soundlist", SF_SoundList_f );
 	trap_Cmd_AddCommand( "s_devices", SF_ListDevices_f );
 
-	s_cmdQueue = S_CreateSoundQueue();
-	if( !s_cmdQueue ) {
-		return qfalse;
+	s_cmdPipe = S_CreateSoundCmdPipe();
+	if( !s_cmdPipe ) {
+		return false;
 	}
 
-	trap_Thread_Create( &s_backThread, S_BackgroundUpdateProc, s_cmdQueue );
+	s_backThread = trap_Thread_Create( S_BackgroundUpdateProc, s_cmdPipe );
 
-	S_IssueInitCmd( s_cmdQueue, hwnd, maxEntities, verbose );
+	S_IssueInitCmd( s_cmdPipe, hwnd, maxEntities, verbose );
 
-	S_FinishSoundQueue( s_cmdQueue );
+	S_FinishSoundCmdPipe( s_cmdPipe );
 
 	if( !alContext ) {
-		return qfalse;
+		return false;
 	}
 
 	S_InitBuffers();
 
-	return qtrue;
+	return true;
 }
 
 /*
 * SF_Shutdown
 */
-void SF_Shutdown( qboolean verbose )
+void SF_Shutdown( bool verbose )
 {
 	if( !soundpool ) {
 		return;
 	}
 	
-	SF_StopAllSounds();
+	SF_StopAllSounds( true, true );
+
+	// wake up the mixer
+	SF_Activate( true );
 
 	// wait for the queue to be processed
-	S_FinishSoundQueue( s_cmdQueue );
+	S_FinishSoundCmdPipe( s_cmdPipe );
 
 	S_ShutdownBuffers();
 
 	// shutdown backend
-	S_IssueShutdownCmd( s_cmdQueue, verbose );
+	S_IssueShutdownCmd( s_cmdPipe, verbose );
 
 	// wait for the queue to be processed
-	S_FinishSoundQueue( s_cmdQueue );
+	S_FinishSoundCmdPipe( s_cmdPipe );
 
 	// wait for the backend thread to die
 	trap_Thread_Join( s_backThread );
 	s_backThread = NULL;
 
-	S_DestroySoundQueue( &s_cmdQueue );
+	S_DestroySoundCmdPipe( &s_cmdPipe );
 
 #ifdef ENABLE_PLAY
 	trap_Cmd_RemoveCommand( "play" );
@@ -205,25 +217,25 @@ void SF_BeginRegistration( void )
 	if( !s_registration_sequence ) {
 		s_registration_sequence = 1;
 	}
-	s_registering = qtrue;
+	s_registering = true;
 
 	// wait for the queue to be processed
-	S_FinishSoundQueue( s_cmdQueue );
+	S_FinishSoundCmdPipe( s_cmdPipe );
 }
 
 void SF_EndRegistration( void )
 {
 	// wait for the queue to be processed
-	S_FinishSoundQueue( s_cmdQueue );
+	S_FinishSoundCmdPipe( s_cmdPipe );
 
 	S_ForEachBuffer( SF_UnregisterSound );
 
 	// wait for the queue to be processed
-	S_FinishSoundQueue( s_cmdQueue );
+	S_FinishSoundCmdPipe( s_cmdPipe );
 
 	S_ForEachBuffer( SF_FreeSound );
 
-	s_registering = qfalse;
+	s_registering = false;
 
 }
 
@@ -237,7 +249,7 @@ sfx_t *SF_RegisterSound( const char *name )
 	assert( name );
 
 	sfx = S_FindBuffer( name );
-	S_IssueLoadSfxCmd( s_cmdQueue, sfx->id );
+	S_IssueLoadSfxCmd( s_cmdPipe, sfx->id );
 	sfx->used = trap_Milliseconds();
 	sfx->registration_sequence = s_registration_sequence;
 	return sfx;
@@ -252,7 +264,7 @@ static void SF_UnregisterSound( sfx_t *sfx )
 		return;
 	}
 	if( sfx->registration_sequence != s_registration_sequence ) {
-		S_IssueFreeSfxCmd( s_cmdQueue, sfx->id );
+		S_IssueFreeSfxCmd( s_cmdPipe, sfx->id );
 	}
 }
 
@@ -272,19 +284,23 @@ static void SF_FreeSound( sfx_t *sfx )
 /*
 * SF_Activate
 */
-void SF_Activate( qboolean active )
+void SF_Activate( bool active )
 {
+	if( !active && s_globalfocus->integer ) {
+		return;
+	}
+
 	SF_LockBackgroundTrack( !active );
 
-	S_IssueActivateCmd( s_cmdQueue, active );
+	S_IssueActivateCmd( s_cmdPipe, active );
 }
 
 /*
 * SF_StartBackgroundTrack
 */
-void SF_StartBackgroundTrack( const char *intro, const char *loop )
+void SF_StartBackgroundTrack( const char *intro, const char *loop, int mode )
 {
-	S_IssueStartBackgroundTrackCmd( s_cmdQueue, intro, loop );
+	S_IssueStartBackgroundTrackCmd( s_cmdPipe, intro, loop, mode );
 }
 
 /*
@@ -292,23 +308,23 @@ void SF_StartBackgroundTrack( const char *intro, const char *loop )
 */
 void SF_StopBackgroundTrack( void )
 {
-	S_IssueStopBackgroundTrackCmd( s_cmdQueue );
+	S_IssueStopBackgroundTrackCmd( s_cmdPipe );
 }
 
 /*
 * SF_LockBackgroundTrack
 */
-void SF_LockBackgroundTrack( qboolean lock )
+void SF_LockBackgroundTrack( bool lock )
 {
-	S_IssueLockBackgroundTrackCmd( s_cmdQueue, lock );
+	S_IssueLockBackgroundTrackCmd( s_cmdPipe, lock );
 }
 
 /*
 * SF_StopAllSounds
 */
-void SF_StopAllSounds( void )
+void SF_StopAllSounds( bool clear, bool stopMusic )
 {
-	S_IssueStopAllSoundsCmd( s_cmdQueue );
+	S_IssueStopAllSoundsCmd( s_cmdPipe, clear, stopMusic );
 }
 
 /*
@@ -316,7 +332,7 @@ void SF_StopAllSounds( void )
 */
 void SF_PrevBackgroundTrack( void )
 {
-	S_IssueAdvanceBackgroundTrackCmd( s_cmdQueue, -1 );
+	S_IssueAdvanceBackgroundTrackCmd( s_cmdPipe, -1 );
 }
 
 /*
@@ -324,7 +340,7 @@ void SF_PrevBackgroundTrack( void )
 */
 void SF_NextBackgroundTrack( void )
 {
-	S_IssueAdvanceBackgroundTrackCmd( s_cmdQueue, 1 );
+	S_IssueAdvanceBackgroundTrackCmd( s_cmdPipe, 1 );
 }
 
 /*
@@ -332,7 +348,7 @@ void SF_NextBackgroundTrack( void )
 */
 void SF_PauseBackgroundTrack( void )
 {
-	S_IssuePauseBackgroundTrackCmd( s_cmdQueue );
+	S_IssuePauseBackgroundTrackCmd( s_cmdPipe );
 }
 
 /*
@@ -340,7 +356,7 @@ void SF_PauseBackgroundTrack( void )
 */
 void SF_BeginAviDemo( void )
 {
-	S_IssueAviDemoCmd( s_cmdQueue, qtrue );
+	S_IssueAviDemoCmd( s_cmdPipe, true );
 }
 
 /*
@@ -348,7 +364,7 @@ void SF_BeginAviDemo( void )
 */
 void SF_StopAviDemo( void )
 {
-	S_IssueAviDemoCmd( s_cmdQueue, qfalse );
+	S_IssueAviDemoCmd( s_cmdPipe, false );
 }
 
 /*
@@ -356,7 +372,7 @@ void SF_StopAviDemo( void )
 */
 void SF_SetAttenuationModel( int model, float maxdistance, float refdistance )
 {
-	S_IssueSetAttenuationCmd( s_cmdQueue, model, maxdistance, refdistance );
+	S_IssueSetAttenuationCmd( s_cmdPipe, model, maxdistance, refdistance );
 }
 
 /*
@@ -364,7 +380,18 @@ void SF_SetAttenuationModel( int model, float maxdistance, float refdistance )
 */
 void SF_SetEntitySpatialization( int entnum, const vec3_t origin, const vec3_t velocity )
 {
-	S_IssueSetEntitySpatializationCmd( s_cmdQueue, entnum, origin, velocity );
+	smdCmdSpatialization_t *spat;
+
+	if( s_num_ent_spats == s_max_ent_spats ) {
+		// flush all spatializations at once to free room
+		S_IssueSetMulEntitySpatializationCmd( s_cmdPipe, s_num_ent_spats, s_ent_spats );
+		s_num_ent_spats = 0;
+	}
+
+	spat = &s_ent_spats[s_num_ent_spats++];
+	spat->entnum = entnum;
+	VectorCopy( origin, spat->origin );
+	VectorCopy( velocity, spat->velocity );
 }
 
 /*
@@ -372,7 +399,7 @@ void SF_SetEntitySpatialization( int entnum, const vec3_t origin, const vec3_t v
 */
 void SF_StartFixedSound( sfx_t *sfx, const vec3_t origin, int channel, float fvol, float attenuation )
 {
-	S_IssueStartFixedSoundCmd( s_cmdQueue, sfx->id, origin, channel, fvol, attenuation );
+	S_IssueStartFixedSoundCmd( s_cmdPipe, sfx->id, origin, channel, fvol, attenuation );
 }
 
 /*
@@ -380,7 +407,7 @@ void SF_StartFixedSound( sfx_t *sfx, const vec3_t origin, int channel, float fvo
 */
 void SF_StartRelativeSound( sfx_t *sfx, int entnum, int channel, float fvol, float attenuation )
 {
-	S_IssueStartRelativeSoundCmd( s_cmdQueue, sfx->id, entnum, channel, fvol, attenuation );
+	S_IssueStartRelativeSoundCmd( s_cmdPipe, sfx->id, entnum, channel, fvol, attenuation );
 }
 
 /*
@@ -388,7 +415,7 @@ void SF_StartRelativeSound( sfx_t *sfx, int entnum, int channel, float fvol, flo
 */
 void SF_StartGlobalSound( sfx_t *sfx, int channel, float fvol )
 {
-	S_IssueStartGlobalSoundCmd( s_cmdQueue, sfx->id, channel, fvol );
+	S_IssueStartGlobalSoundCmd( s_cmdPipe, sfx->id, channel, fvol );
 }
 
 /*
@@ -405,7 +432,7 @@ void SF_StartLocalSound( const char *sound )
 		return;
 	}
 
-	S_IssueStartLocalSoundCmd( s_cmdQueue, sfx->id );
+	S_IssueStartLocalSoundCmd( s_cmdPipe, sfx->id );
 }
 
 /*
@@ -413,7 +440,7 @@ void SF_StartLocalSound( const char *sound )
 */
 void SF_Clear( void )
 {
-	S_IssueClearCmd( s_cmdQueue );
+	S_IssueClearCmd( s_cmdPipe );
 }
 
 /*
@@ -421,29 +448,34 @@ void SF_Clear( void )
 */
 void SF_AddLoopSound( sfx_t *sfx, int entnum, float fvol, float attenuation )
 {
-	S_IssueAddLoopSoundCmd( s_cmdQueue, sfx->id, entnum, fvol, attenuation );
+	S_IssueAddLoopSoundCmd( s_cmdPipe, sfx->id, entnum, fvol, attenuation );
 }
 
 /*
 * SF_Update
 */
-void SF_Update( const vec3_t origin, const vec3_t velocity, const mat3_t axis, qboolean avidump )
+void SF_Update( const vec3_t origin, const vec3_t velocity, const mat3_t axis, bool avidump )
 {
-	S_IssueSetListenerCmd( s_cmdQueue, origin, velocity, axis, avidump );
+	if( s_num_ent_spats ) {
+		S_IssueSetMulEntitySpatializationCmd( s_cmdPipe, s_num_ent_spats, s_ent_spats );
+		s_num_ent_spats = 0;
+	}
+
+	S_IssueSetListenerCmd( s_cmdPipe, origin, velocity, axis, avidump );
 }
 
 /*
 * SF_RawSamples
 */
 void SF_RawSamples( unsigned int samples, unsigned int rate, unsigned short width, 
-	unsigned short channels, const qbyte *data, qboolean music )
+	unsigned short channels, const uint8_t *data, bool music )
 {
 	size_t data_size = samples * width * channels;
-	qbyte *data_copy = S_Malloc( data_size );
+	uint8_t *data_copy = S_Malloc( data_size );
 
 	memcpy( data_copy, data, data_size );
 
-	S_IssueRawSamplesCmd( s_cmdQueue, samples, rate, width, channels, data_copy, music );
+	S_IssueRawSamplesCmd( s_cmdPipe, samples, rate, width, channels, data_copy, music );
 }
 
 /*
@@ -451,14 +483,14 @@ void SF_RawSamples( unsigned int samples, unsigned int rate, unsigned short widt
 */
 void SF_PositionedRawSamples( int entnum, float fvol, float attenuation, 
 	unsigned int samples, unsigned int rate, 
-	unsigned short width, unsigned short channels, const qbyte *data )
+	unsigned short width, unsigned short channels, const uint8_t *data )
 {
 	size_t data_size = samples * width * channels;
-	qbyte *data_copy = S_Malloc( data_size );
+	uint8_t *data_copy = S_Malloc( data_size );
 
 	memcpy( data_copy, data, data_size );
 
-	S_IssuePositionedRawSamplesCmd( s_cmdQueue, entnum, fvol, attenuation, 
+	S_IssuePositionedRawSamplesCmd( s_cmdPipe, entnum, fvol, attenuation, 
 		samples, rate, width, channels, data_copy );
 }
 
@@ -515,7 +547,7 @@ void Com_Printf( const char *format, ... )
 }
 
 #if defined ( HAVE_DLLMAIN )
-int _stdcall DLLMain( void *hinstDll, unsigned long dwReason, void *reserved )
+int WINAPI DLLMain( void *hinstDll, unsigned long dwReason, void *reserved )
 {
 	return 1;
 }

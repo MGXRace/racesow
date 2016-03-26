@@ -460,7 +460,7 @@ static void CG_Democam_ExecutePathAnalysis( void )
 bool CG_LoadRecamScriptFile( char *filename )
 {
 	int filelen, filehandle;
-	qbyte *buf = NULL;
+	uint8_t *buf = NULL;
 	char *ptr, *token;
 	int linecount;
 	cg_democam_t *cam = NULL;
@@ -478,7 +478,7 @@ bool CG_LoadRecamScriptFile( char *filename )
 	}
 	else
 	{
-		buf = ( qbyte * )CG_Malloc( filelen + 1 );
+		buf = ( uint8_t * )CG_Malloc( filelen + 1 );
 		filelen = trap_FS_Read( buf, filelen, filehandle );
 		trap_FS_FCloseFile( filehandle );
 	}
@@ -491,7 +491,7 @@ bool CG_LoadRecamScriptFile( char *filename )
 	ptr = ( char * )buf;
 	while( ptr )
 	{
-		token = COM_ParseExt( &ptr, qtrue );
+		token = COM_ParseExt( &ptr, true );
 		if( !token[0] )
 			break;
 
@@ -502,15 +502,15 @@ bool CG_LoadRecamScriptFile( char *filename )
 			sub = CG_Democam_RegisterSubtitle();
 			sub->highprint = ( Q_stricmp( token, "print" ) == 0 );
 
-			token = COM_ParseExt( &ptr, qtrue );
+			token = COM_ParseExt( &ptr, true );
 			if( !token[0] )
 				break;
 			sub->timeStamp = (unsigned int)atoi( token );
-			token = COM_ParseExt( &ptr, qtrue );
+			token = COM_ParseExt( &ptr, true );
 			if( !token[0] )
 				break;
 			sub->maxDuration = (unsigned int)atoi( token );
-			sub->text = CG_CopyString( COM_ParseExt( &ptr, qtrue ) );
+			sub->text = CG_CopyString( COM_ParseExt( &ptr, true ) );
 
 			linecount = 0;
 		}
@@ -659,7 +659,7 @@ static void CG_DrawEntityNumbers( void )
 	float dist;
 	trace_t	trace;
 	vec3_t eorigin;
-	int xoffset = 0, yoffset = 0;
+	int shadowOffset = max( 1, cgs.vidHeight / 600 );
 
 	for( i = 0; i < cg.frame.numEntities; i++ )
 	{
@@ -691,11 +691,9 @@ static void CG_DrawEntityNumbers( void )
 			if( ( coords[0] < 0 || coords[0] > cgs.vidWidth ) || ( coords[1] < 0 || coords[1] > cgs.vidHeight ) )
 				return;
 
-			trap_SCR_DrawString( coords[0]+xoffset+1,
-				coords[1]+yoffset+1,
+			trap_SCR_DrawString( coords[0] + shadowOffset, coords[1] + shadowOffset,
 				ALIGN_LEFT_MIDDLE, va( "%i", cent->current.number ), cgs.fontSystemSmall, colorBlack );
-			trap_SCR_DrawString( coords[0]+xoffset,
-				coords[1]+yoffset,
+			trap_SCR_DrawString( coords[0], coords[1],
 				ALIGN_LEFT_MIDDLE, va( "%i", cent->current.number ), cgs.fontSystemSmall, colorWhite );
 		}
 	}
@@ -709,9 +707,13 @@ void CG_Democam_DrawCenterSubtitle( int y, unsigned int maxwidth, struct qfontfa
 	if( !text || !text[0] )
 		return;
 
+	int shadowOffset = 2 * cgs.vidHeight / 600;
+	if( !shadowOffset )
+		shadowOffset = 1;
+
 	if( !maxwidth || trap_SCR_strWidth( text, font, 0 ) <= maxwidth )
 	{
-		trap_SCR_DrawStringWidth( x + 2, y + 2, ALIGN_CENTER_TOP, COM_RemoveColorTokens( text ), maxwidth, font, colorBlack );
+		trap_SCR_DrawStringWidth( x + shadowOffset, y + shadowOffset, ALIGN_CENTER_TOP, COM_RemoveColorTokens( text ), maxwidth, font, colorBlack );
 		trap_SCR_DrawStringWidth( x, y, ALIGN_CENTER_TOP, text, maxwidth, font, colorWhite );
 		return;
 	}
@@ -726,7 +728,7 @@ void CG_Democam_DrawCenterSubtitle( int y, unsigned int maxwidth, struct qfontfa
 		{
 			c = *s;
 			*s = 0;
-			trap_SCR_DrawStringWidth( x + 2, y + 2, ALIGN_CENTER_TOP, COM_RemoveColorTokens( ptr ), maxwidth, font, colorBlack );
+			trap_SCR_DrawStringWidth( x + shadowOffset, y + shadowOffset, ALIGN_CENTER_TOP, COM_RemoveColorTokens( ptr ), maxwidth, font, colorBlack );
 			trap_SCR_DrawStringWidth( x, y, ALIGN_CENTER_TOP, ptr, maxwidth, font, colorWhite );
 			*s = c;
 
@@ -753,7 +755,7 @@ void CG_Democam_DrawCenterSubtitle( int y, unsigned int maxwidth, struct qfontfa
 			*s = c;
 			d = *t;
 			*t = 0;
-			trap_SCR_DrawStringWidth( x + 2, y + 2, ALIGN_CENTER_TOP, COM_RemoveColorTokens( ptr ), maxwidth, font, colorBlack );
+			trap_SCR_DrawStringWidth( x + shadowOffset, y + shadowOffset, ALIGN_CENTER_TOP, COM_RemoveColorTokens( ptr ), maxwidth, font, colorBlack );
 			trap_SCR_DrawStringWidth( x, y, ALIGN_CENTER_TOP, ptr, maxwidth, font, colorWhite );
 			*t = d;
 			s = t;
@@ -761,7 +763,7 @@ void CG_Democam_DrawCenterSubtitle( int y, unsigned int maxwidth, struct qfontfa
 			ptr = s;
 		}
 
-		y += trap_SCR_strHeight( font );
+		y += trap_SCR_FontHeight( font );
 	}
 }
 
@@ -800,20 +802,20 @@ void CG_DrawDemocam2D( void )
 		CG_DrawEntityNumbers();
 
 		// draw the cams info
-		xpos = 8;
-		ypos = 100;
+		xpos = 8 * cgs.vidHeight / 600;
+		ypos = 100 * cgs.vidHeight / 600;
 
 		if( *cgs.demoName )
 		{
 			trap_SCR_DrawString( xpos, ypos, ALIGN_LEFT_TOP, va( "Demo: %s", cgs.demoName ), cgs.fontSystemSmall, colorWhite );
-			ypos += trap_SCR_strHeight( cgs.fontSystemSmall );
+			ypos += trap_SCR_FontHeight( cgs.fontSystemSmall );
 		}
 
 		trap_SCR_DrawString( xpos, ypos, ALIGN_LEFT_TOP, va( "Play mode: %s%s%s", S_COLOR_ORANGE, CamIsFree ? "Free Fly" : "Preview", S_COLOR_WHITE ), cgs.fontSystemSmall, colorWhite );
-		ypos += trap_SCR_strHeight( cgs.fontSystemSmall );
+		ypos += trap_SCR_FontHeight( cgs.fontSystemSmall );
 
 		trap_SCR_DrawString( xpos, ypos, ALIGN_LEFT_TOP, va( "Time: %i", demo_time ), cgs.fontSystemSmall, colorWhite );
-		ypos += trap_SCR_strHeight( cgs.fontSystemSmall );
+		ypos += trap_SCR_FontHeight( cgs.fontSystemSmall );
 
 		cam_type_name = "none";
 		cam_timestamp = 0;
@@ -834,7 +836,7 @@ void CG_DrawDemocam2D( void )
 		trap_SCR_DrawString( xpos, ypos, ALIGN_LEFT_TOP, va( "Current cam: " S_COLOR_ORANGE "%s" S_COLOR_WHITE " Fov " S_COLOR_ORANGE "%s" S_COLOR_WHITE " Start %i Tracking " S_COLOR_ORANGE "%s" S_COLOR_WHITE,
 			cam_type_name, sfov, cam_timestamp, strack ),
 			cgs.fontSystemSmall, colorWhite );
-		ypos += trap_SCR_strHeight( cgs.fontSystemSmall );
+		ypos += trap_SCR_FontHeight( cgs.fontSystemSmall );
 
 		if( currentcam )
 		{
@@ -842,7 +844,7 @@ void CG_DrawDemocam2D( void )
 				currentcam->angles[PITCH], currentcam->angles[YAW], currentcam->angles[ROLL] ),
 				cgs.fontSystemSmall, colorWhite );
 		}
-		ypos += trap_SCR_strHeight( cgs.fontSystemSmall );
+		ypos += trap_SCR_FontHeight( cgs.fontSystemSmall );
 
 		cam_type_name = "none";
 		cam_timestamp = 0;
@@ -863,7 +865,7 @@ void CG_DrawDemocam2D( void )
 		trap_SCR_DrawString( xpos, ypos, ALIGN_LEFT_TOP, va( "Next cam: " S_COLOR_ORANGE "%s" S_COLOR_WHITE " Fov " S_COLOR_ORANGE "%s" S_COLOR_WHITE " Start %i Tracking " S_COLOR_ORANGE "%s" S_COLOR_WHITE,
 			cam_type_name, sfov, cam_timestamp, strack ),
 			cgs.fontSystemSmall, colorWhite );
-		ypos += trap_SCR_strHeight( cgs.fontSystemSmall );
+		ypos += trap_SCR_FontHeight( cgs.fontSystemSmall );
 
 		if( nextcam )
 		{
@@ -871,7 +873,7 @@ void CG_DrawDemocam2D( void )
 				nextcam->angles[PITCH], nextcam->angles[YAW], nextcam->angles[ROLL] ),
 				cgs.fontSystemSmall, colorWhite );
 		}
-		ypos += trap_SCR_strHeight( cgs.fontSystemSmall );
+		ypos += trap_SCR_FontHeight( cgs.fontSystemSmall );
 	}
 }
 
@@ -953,7 +955,7 @@ float CG_DemoCam_GetOrientation( vec3_t origin, vec3_t angles, vec3_t velocity )
 	VectorCopy( cam_velocity, velocity );
 
 	if( !currentcam || !currentcam->fov )
-		return cg.frame.playerState.fov;
+		return bound( MIN_FOV, cg_fov->value, MAX_FOV );
 
 	return cam_fov;
 }
@@ -979,9 +981,6 @@ int CG_DemoCam_FreeFly( void )
 		// run frame
 		trap_NET_GetUserCmd( trap_NET_GetCurrentUserCmdNum() - 1, &cmd );
 		cmd.msec = cg.realFrameTime * 1000;
-		cmd.forwardfrac = ( (float)cmd.forwardmove/(float)cmd.msec );
-		cmd.sidefrac = ( (float)cmd.sidemove/(float)cmd.msec );
-		cmd.upfrac = ( (float)cmd.upmove/(float)cmd.msec );
 
 		for( i = 0; i < 3; i++ )
 			moveangles[i] = SHORT2ANGLE( cmd.angles[i] ) + SHORT2ANGLE( freecam_delta_angles[i] );
@@ -989,9 +988,9 @@ int CG_DemoCam_FreeFly( void )
 		AngleVectors( moveangles, forward, right, up );
 		VectorCopy( moveangles, cam_angles );
 
-		fmove = cmd.forwardfrac * SPEED;
-		smove = cmd.sidefrac * SPEED;
-		upmove = cmd.upfrac * SPEED;
+		fmove = cmd.forwardmove * SPEED;
+		smove = cmd.sidemove * SPEED;
+		upmove = cmd.upmove * SPEED;
 		if( cmd.buttons & BUTTON_SPECIAL )
 			maxspeed *= 2;
 
@@ -1024,7 +1023,7 @@ static void CG_Democam_SetCameraPositionFromView( void )
 		VectorCopy( cg.view.origin, cam_origin );
 		VectorCopy( cg.view.angles, cam_angles );
 		VectorCopy( cg.view.velocity, cam_velocity );
-		cam_fov = cg.predictedPlayerState.fov;
+		cam_fov = cg.view.refdef.fov_x;
 		cam_orbital_radius = 0;
 	}
 
@@ -1045,7 +1044,7 @@ static void CG_Democam_SetCameraPositionFromView( void )
 /*
 * CG_Democam_CalcView
 */
-int CG_Democam_CalcView( void )
+static int CG_Democam_CalcView( void )
 {
 	int i, viewType;
 	float lerpfrac;
@@ -1067,14 +1066,14 @@ int CG_Democam_CalcView( void )
 			VectorCopy( cg.view.origin, cam_origin );
 			VectorCopy( cg.view.angles, cam_angles );
 			VectorCopy( cg.view.velocity, cam_velocity );
-			cam_fov = cg.predictedPlayerState.fov;
+			cam_fov = cg.view.refdef.fov_x;
 			break;
 
 		case DEMOCAM_THIRDPERSON:
 			VectorCopy( cg.view.origin, cam_origin );
 			VectorCopy( cg.view.angles, cam_angles );
 			VectorCopy( cg.view.velocity, cam_velocity );
-			cam_fov = cg.predictedPlayerState.fov;
+			cam_fov = cg.view.refdef.fov_x;
 			cam_3dPerson = true;
 			break;
 

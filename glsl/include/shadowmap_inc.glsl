@@ -1,8 +1,17 @@
 	{
+		float f;
+
 		vec3 shadowmaptc = vec3(v_ShadowProjVector[SHADOW_INDEX].xyz / v_ShadowProjVector[SHADOW_INDEX].w);
 
 		// this keeps shadows from appearing on surfaces behind frustum's nearplane
 		float d = step(v_ShadowProjVector[SHADOW_INDEX].w, 0.0);
+
+		# ifdef APPLY_SHADOW_NORMAL_CHECK
+		f = dot(u_ShadowDir[SHADOW_INDEX].xyz, v_Normal);
+		d += step(0.0, f);
+		# endif
+		
+		d += length(v_Position[SHADOW_INDEX].xyz - u_ShadowEntityDist[SHADOW_INDEX].xyz) / u_ShadowDir[SHADOW_INDEX].w;
 
 		//shadowmaptc = (shadowmaptc + vec3 (1.0)) * vec3 (0.5);
 		shadowmaptc.xy = shadowmaptc.xy * u_ShadowmapTextureParams[SHADOW_INDEX].xy; // .x - texture width
@@ -11,12 +20,10 @@
 
 		vec2 ShadowMap_TextureScale = u_ShadowmapTextureParams[SHADOW_INDEX].zw;
 
-		float f;
-
 		#ifdef APPLY_DITHER
 
 		# ifdef APPLY_PCF
-		#  define texval(x, y) dshadow2D(u_ShadowmapTexture[SHADOW_INDEX], vec3(center + vec2(x, y)*ShadowMap_TextureScale, shadowmaptc.z))
+		#  define texval(x, y) dshadow2D(SHADOW_TEXTURE, vec3(center + vec2(x, y)*ShadowMap_TextureScale, shadowmaptc.z))
 
 		// this method can be described as a 'dithered pinwheel' (4 texture lookups)
 		// which is a combination of the 'pinwheel' filter suggested by eihrul and dithered 4x4 PCF,
@@ -32,9 +39,11 @@
 		float group3 = texval( 0.4, -1.0);
 		float group4 = texval( 1.0,  0.4);
 
+		#  undef texval
+
 		f = dot(vec4(0.25), vec4(group1, group2, group3, group4));
 		# else
-		f = dshadow2D(u_ShadowmapTexture[SHADOW_INDEX], vec3(shadowmaptc.xy*ShadowMap_TextureScale, shadowmaptc.z));
+		f = dshadow2D(SHADOW_TEXTURE, vec3(shadowmaptc.xy*ShadowMap_TextureScale, shadowmaptc.z));
 		# endif // APPLY_PCF
 	
 		#else
@@ -55,19 +64,33 @@
 		// NOTE: we're using emulation of texture_gather now
 
 		# ifdef APPLY_PCF
-		# define texval(off) dshadow2D(u_ShadowmapTexture[SHADOW_INDEX], vec3(off,shadowmaptc.z))
-		
+		#  define texval(off) dshadow2D(SHADOW_TEXTURE, vec3(off,shadowmaptc.z))
+
+		#  ifdef APPLY_SHADOW_SAMPLERS
 		vec2 offset = fract(shadowmaptc.xy - 0.5);
 		vec4 size = vec4(offset + 1.0, 2.0 - offset), weight = (vec4(2.0 - 1.0 / size.xy, 1.0 / size.zw - 1.0) + (shadowmaptc.xy - offset).xyxy)*ShadowMap_TextureScale.xyxy;
 		f = (1.0/9.0)*dot(size.zxzx*size.wwyy, vec4(texval(weight.zw), texval(weight.xw), texval(weight.zy), texval(weight.xy)));
+
+		#  else
+		vec2 origin = floor(shadowmaptc.xy) * ShadowMap_TextureScale;
+		vec4 offsets = ShadowMap_TextureScale.xyxy * vec4(-0.5, -0.5, 0.5, 0.5);
+		float texNN = texval(origin + offsets.xy);
+		float texPN = texval(origin + offsets.zy);
+		float texNP = texval(origin + offsets.xw);
+		float texPP = texval(origin + offsets.zw);
+		vec2 mixFactors = fract(shadowmaptc.xy);
+		f = mix(mix(texNN, texPN, mixFactors.x), mix(texNP, texPP, mixFactors.x), mixFactors.y);
+		#  endif // APPLY_SHADOW_SAMPLERS
+
+		#  undef texval
 		
-		#else
+		# else
 		
-		f = dshadow2D(u_ShadowmapTexture[SHADOW_INDEX], vec3(shadowmaptc.xy * ShadowMap_TextureScale, shadowmaptc.z));
+		f = dshadow2D(SHADOW_TEXTURE, vec3(shadowmaptc.xy * ShadowMap_TextureScale, shadowmaptc.z));
 		
-		#endif // APPLY_PCF
+		# endif // APPLY_PCF
 		
 		#endif // APPLY_DITHER
 
-		finalcolor *= clamp(max(max(f, d), u_ShadowAlpha), 0.0, 1.0);
+		finalcolor *= clamp(max(max(f, d), u_ShadowAlpha[SHADOW_INDEX / 4].SHADOW_INDEX_COMPONENT), 0.0, 1.0);
 	}

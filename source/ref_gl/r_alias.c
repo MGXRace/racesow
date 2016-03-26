@@ -35,7 +35,9 @@ static void Mod_AliasBuildStaticVBOForMesh( maliasmesh_t *mesh )
 	
 	vattribs = VATTRIB_POSITION_BIT | VATTRIB_TEXCOORDS_BIT | VATTRIB_NORMAL_BIT | VATTRIB_SVECTOR_BIT;
 	for( i = 0; i < mesh->numskins; i++ ) {
-		vattribs |= mesh->skins[i].shader->vattribs;
+		if( mesh->skins[i].shader ) {
+			vattribs |= mesh->skins[i].shader->vattribs;
+		}
 	}
 
 	mesh->vbo = R_CreateMeshVBO( ( void * )mesh, 
@@ -56,8 +58,8 @@ static void Mod_AliasBuildStaticVBOForMesh( maliasmesh_t *mesh )
 	aliasmesh.normalsArray = mesh->normalsArray;
 	aliasmesh.sVectorsArray = mesh->sVectorsArray;
 
-	R_UploadVBOVertexData( mesh->vbo, 0, vattribs, &aliasmesh, VBO_HINT_NONE );
-	R_UploadVBOElemData( mesh->vbo, 0, 0, &aliasmesh, VBO_HINT_NONE );
+	R_UploadVBOVertexData( mesh->vbo, 0, vattribs, &aliasmesh );
+	R_UploadVBOElemData( mesh->vbo, 0, 0, &aliasmesh );
 }
 
 /*
@@ -80,8 +82,8 @@ static void Mod_AliasBuildMeshesForFrame0( model_t *mod )
 		size *= mesh->numverts;
 
 		mesh->xyzArray = ( vec4_t * )Mod_Malloc( mod, size );
-		mesh->normalsArray = ( vec4_t * )( ( qbyte * )mesh->xyzArray + mesh->numverts * sizeof( vec4_t ) );
-		mesh->sVectorsArray = ( vec4_t * )( ( qbyte * )mesh->normalsArray + mesh->numverts * sizeof( vec4_t ) );
+		mesh->normalsArray = ( vec4_t * )( ( uint8_t * )mesh->xyzArray + mesh->numverts * sizeof( vec4_t ) );
+		mesh->sVectorsArray = ( vec4_t * )( ( uint8_t * )mesh->normalsArray + mesh->numverts * sizeof( vec4_t ) );
 
 		for( i = 0; i < mesh->numverts; i++ )
 		{
@@ -143,7 +145,7 @@ void Mod_LoadAliasMD3Model( model_t *mod, model_t *parent, void *buffer, bspForm
 {
 	int version, i, j, l;
 	int bufsize, numverts;
-	qbyte *buf;
+	uint8_t *buf;
 	dmd3header_t *pinmodel;
 	dmd3frame_t *pinframe;
 	dmd3tag_t *pintag;
@@ -182,6 +184,8 @@ void Mod_LoadAliasMD3Model( model_t *mod, model_t *parent, void *buffer, bspForm
 	poutmodel->numtags = LittleLong( pinmodel->num_tags );
 	poutmodel->nummeshes = LittleLong( pinmodel->num_meshes );
 	poutmodel->numskins = 0;
+	poutmodel->numverts = 0;
+	poutmodel->numtris = 0;
 
 	if( poutmodel->numframes <= 0 )
 		ri.Com_Error( ERR_DROP, "model %s has no frames", mod->name );
@@ -203,19 +207,20 @@ void Mod_LoadAliasMD3Model( model_t *mod, model_t *parent, void *buffer, bspForm
 	bufsize = poutmodel->numframes * ( sizeof( maliasframe_t ) + sizeof( maliastag_t ) * poutmodel->numtags ) +
 		poutmodel->nummeshes * sizeof( maliasmesh_t ) + 
 		poutmodel->nummeshes * sizeof( drawSurfaceAlias_t );
-	buf = ( qbyte * )Mod_Malloc( mod, bufsize );
+	buf = ( uint8_t * )Mod_Malloc( mod, bufsize );
 
 	//
 	// load the frames
 	//
-	pinframe = ( dmd3frame_t * )( ( qbyte * )pinmodel + LittleLong( pinmodel->ofs_frames ) );
+	pinframe = ( dmd3frame_t * )( ( uint8_t * )pinmodel + LittleLong( pinmodel->ofs_frames ) );
 	poutframe = poutmodel->frames = ( maliasframe_t * )buf; buf += sizeof( maliasframe_t ) * poutmodel->numframes;
 	for( i = 0; i < poutmodel->numframes; i++, pinframe++, poutframe++ )
 	{
+		memcpy( poutframe->translate, pinframe->translate, sizeof( vec3_t ) );
 		for( j = 0; j < 3; j++ )
 		{
 			poutframe->scale[j] = MD3_XYZ_SCALE;
-			poutframe->translate[j] = LittleFloat( pinframe->translate[j] );
+			poutframe->translate[j] = LittleFloat( poutframe->translate[j] );
 		}
 
 		// never trust the modeler utility and recalculate bbox and radius
@@ -225,26 +230,29 @@ void Mod_LoadAliasMD3Model( model_t *mod, model_t *parent, void *buffer, bspForm
 	//
 	// load the tags
 	//
-	pintag = ( dmd3tag_t * )( ( qbyte * )pinmodel + LittleLong( pinmodel->ofs_tags ) );
+	pintag = ( dmd3tag_t * )( ( uint8_t * )pinmodel + LittleLong( pinmodel->ofs_tags ) );
 	pouttag = poutmodel->tags = ( maliastag_t * )buf; buf += sizeof( maliastag_t ) * poutmodel->numframes * poutmodel->numtags;
 	for( i = 0; i < poutmodel->numframes; i++ )
 	{
 		for( l = 0; l < poutmodel->numtags; l++, pintag++, pouttag++ )
 		{
+			dmd3tag_t intag;
 			mat3_t axis;
+
+			memcpy( &intag, pintag, sizeof( dmd3tag_t ) );
 
 			for( j = 0; j < 3; j++ )
 			{
-				axis[AXIS_FORWARD+j] = LittleFloat( pintag->axis[0][j] );
-				axis[AXIS_RIGHT+j] = LittleFloat( pintag->axis[1][j] );
-				axis[AXIS_UP+j] = LittleFloat( pintag->axis[2][j] );
-				pouttag->origin[j] = LittleFloat( pintag->origin[j] );
+				axis[AXIS_FORWARD+j] = LittleFloat( intag.axis[0][j] );
+				axis[AXIS_RIGHT+j] = LittleFloat( intag.axis[1][j] );
+				axis[AXIS_UP+j] = LittleFloat( intag.axis[2][j] );
+				pouttag->origin[j] = LittleFloat( intag.origin[j] );
 			}
 
 			Quat_FromMatrix3( axis, pouttag->quat );
 			Quat_Normalize( pouttag->quat );
 
-			Q_strncpyz( pouttag->name, pintag->name, MD3_MAX_PATH );
+			Q_strncpyz( pouttag->name, intag.name, MD3_MAX_PATH );
 		}
 	}
 
@@ -262,21 +270,28 @@ void Mod_LoadAliasMD3Model( model_t *mod, model_t *parent, void *buffer, bspForm
 	//
 	// load meshes
 	//
-	pinmesh = ( dmd3mesh_t * )( ( qbyte * )pinmodel + LittleLong( pinmodel->ofs_meshes ) );
+	pinmesh = ( dmd3mesh_t * )( ( uint8_t * )pinmodel + LittleLong( pinmodel->ofs_meshes ) );
 	poutmesh = poutmodel->meshes = ( maliasmesh_t * )buf; buf += sizeof( maliasmesh_t ) * poutmodel->nummeshes;
 	for( i = 0; i < poutmodel->nummeshes; i++, poutmesh++ )
 	{
-		if( strncmp( (const char *)pinmesh->id, IDMD3HEADER, 4 ) )
-			ri.Com_Error( ERR_DROP, "mesh %s in model %s has wrong id (%s should be %s)",
-			pinmesh->name, mod->name, pinmesh->id, IDMD3HEADER );
+		dmd3mesh_t inmesh;
 
-		Q_strncpyz( poutmesh->name, pinmesh->name, MD3_MAX_PATH );
+		memcpy( &inmesh, pinmesh, sizeof( dmd3mesh_t ) );
+
+		if( strncmp( (const char *)inmesh.id, IDMD3HEADER, 4 ) )
+			ri.Com_Error( ERR_DROP, "mesh %s in model %s has wrong id (%s should be %s)",
+			inmesh.name, mod->name, inmesh.id, IDMD3HEADER );
+
+		Q_strncpyz( poutmesh->name, inmesh.name, MD3_MAX_PATH );
 
 		Mod_StripLODSuffix( poutmesh->name );
 
-		poutmesh->numtris = LittleLong( pinmesh->num_tris );
-		poutmesh->numskins = LittleLong( pinmesh->num_skins );
-		poutmesh->numverts = numverts = LittleLong( pinmesh->num_verts );
+		poutmesh->numtris = LittleLong( inmesh.num_tris );
+		poutmesh->numskins = LittleLong( inmesh.num_skins );
+		poutmesh->numverts = numverts = LittleLong( inmesh.num_verts );
+
+		poutmodel->numverts += poutmesh->numverts;
+		poutmodel->numtris += poutmesh->numtris;
 
 		/*		if( poutmesh->numskins <= 0 )
 		ri.Com_Error( ERR_DROP, "mesh %i in model %s has no skins", i, mod->name );
@@ -294,12 +309,12 @@ void Mod_LoadAliasMD3Model( model_t *mod, model_t *parent, void *buffer, bspForm
 		bufsize = ALIGN( sizeof( maliasskin_t ) * poutmesh->numskins, sizeof( vec_t ) ) +
 			numverts * ( sizeof( vec2_t ) + sizeof( maliasvertex_t ) * poutmodel->numframes ) +
 			poutmesh->numtris * sizeof( elem_t ) * 3;
-		buf = ( qbyte * )Mod_Malloc( mod, bufsize );
+		buf = ( uint8_t * )Mod_Malloc( mod, bufsize );
 
 		//
 		// load the skins
 		//
-		pinskin = ( dmd3skin_t * )( ( qbyte * )pinmesh + LittleLong( pinmesh->ofs_skins ) );
+		pinskin = ( dmd3skin_t * )( ( uint8_t * )pinmesh + LittleLong( inmesh.ofs_skins ) );
 		poutskin = poutmesh->skins = ( maliasskin_t * )buf;
 		buf += ALIGN( sizeof( maliasskin_t ) * poutmesh->numskins, sizeof( vec_t ) );
 		for( j = 0; j < poutmesh->numskins; j++, pinskin++, poutskin++ ) {
@@ -310,18 +325,19 @@ void Mod_LoadAliasMD3Model( model_t *mod, model_t *parent, void *buffer, bspForm
 		//
 		// load the texture coordinates
 		//
-		pincoord = ( dmd3coord_t * )( ( qbyte * )pinmesh + LittleLong( pinmesh->ofs_tcs ) );
+		pincoord = ( dmd3coord_t * )( ( uint8_t * )pinmesh + LittleLong( inmesh.ofs_tcs ) );
 		poutcoord = poutmesh->stArray = ( vec2_t * )buf; buf += poutmesh->numverts * sizeof( vec2_t );
 		for( j = 0; j < poutmesh->numverts; j++, pincoord++ )
 		{
-			poutcoord[j][0] = LittleFloat( pincoord->st[0] );
-			poutcoord[j][1] = LittleFloat( pincoord->st[1] );
+			memcpy( poutcoord[j], pincoord->st, sizeof( vec2_t ) );
+			poutcoord[j][0] = LittleFloat( poutcoord[j][0] );
+			poutcoord[j][1] = LittleFloat( poutcoord[j][1] );
 		}
 
 		//
 		// load the vertexes and normals
 		//
-		pinvert = ( dmd3vertex_t * )( ( qbyte * )pinmesh + LittleLong( pinmesh->ofs_verts ) );
+		pinvert = ( dmd3vertex_t * )( ( uint8_t * )pinmesh + LittleLong( inmesh.ofs_verts ) );
 		poutvert = poutmesh->vertexes = ( maliasvertex_t * )buf;
 		buf += poutmesh->numverts * sizeof( maliasvertex_t ) * poutmodel->numframes;
 		for( l = 0, poutframe = poutmodel->frames; l < poutmodel->numframes; l++, poutframe++, pinvert += poutmesh->numverts, poutvert += poutmesh->numverts )
@@ -330,12 +346,16 @@ void Mod_LoadAliasMD3Model( model_t *mod, model_t *parent, void *buffer, bspForm
 
 			for( j = 0; j < poutmesh->numverts; j++ )
 			{
-				poutvert[j].point[0] = LittleShort( pinvert[j].point[0] );
-				poutvert[j].point[1] = LittleShort( pinvert[j].point[1] );
-				poutvert[j].point[2] = LittleShort( pinvert[j].point[2] );
+				dmd3vertex_t invert;
 
-				poutvert[j].latlong[0] = pinvert[j].norm[0];
-				poutvert[j].latlong[1] = pinvert[j].norm[1];
+				memcpy( &invert, &( pinvert[j] ), sizeof( dmd3vertex_t ) );
+
+				poutvert[j].point[0] = LittleShort( invert.point[0] );
+				poutvert[j].point[1] = LittleShort( invert.point[1] );
+				poutvert[j].point[2] = LittleShort( invert.point[2] );
+
+				poutvert[j].latlong[0] = invert.norm[0];
+				poutvert[j].latlong[1] = invert.norm[1];
 
 				VectorCopy( poutvert[j].point, v );
 				AddPointToBounds( v, poutframe->mins, poutframe->maxs );
@@ -345,16 +365,20 @@ void Mod_LoadAliasMD3Model( model_t *mod, model_t *parent, void *buffer, bspForm
 		//
 		// load the elems
 		//
-		pinelem = ( unsigned int * )( ( qbyte * )pinmesh + LittleLong( pinmesh->ofs_elems ) );
+		pinelem = ( unsigned int * )( ( uint8_t * )pinmesh + LittleLong( inmesh.ofs_elems ) );
 		poutelem = poutmesh->elems = ( elem_t * )buf;
 		for( j = 0; j < poutmesh->numtris; j++, pinelem += 3, poutelem += 3 )
 		{
-			poutelem[0] = (elem_t)LittleLong( pinelem[0] );
-			poutelem[1] = (elem_t)LittleLong( pinelem[1] );
-			poutelem[2] = (elem_t)LittleLong( pinelem[2] );
+			unsigned int inelem[3];
+
+			memcpy( inelem, pinelem, sizeof( int ) * 3 );
+
+			poutelem[0] = (elem_t)LittleLong( inelem[0] );
+			poutelem[1] = (elem_t)LittleLong( inelem[1] );
+			poutelem[2] = (elem_t)LittleLong( inelem[2] );
 		}
 
-		pinmesh = ( dmd3mesh_t * )( ( qbyte * )pinmesh + LittleLong( pinmesh->meshsize ) );
+		pinmesh = ( dmd3mesh_t * )( ( uint8_t * )pinmesh + LittleLong( inmesh.meshsize ) );
 	}
 
 	//
@@ -412,7 +436,7 @@ static model_t *R_AliasModelLOD( const entity_t *e )
 static float R_AliasModelLerpBBox( const entity_t *e, const model_t *mod, vec3_t mins, vec3_t maxs )
 {
 	int i;
-	int framenum = framenum = e->frame, oldframenum = e->oldframe;
+	int framenum = e->frame, oldframenum = e->oldframe;
 	const maliasmodel_t *aliasmodel = ( const maliasmodel_t * )mod->extradata;
 	const maliasframe_t *pframe, *poldframe;
 
@@ -473,7 +497,7 @@ static float R_AliasModelLerpBBox( const entity_t *e, const model_t *mod, vec3_t
 /*
 * R_AliasModelLerpTag
 */
-qboolean R_AliasModelLerpTag( orientation_t *orient, const maliasmodel_t *aliasmodel, int oldframenum, int framenum, float lerpfrac, const char *name )
+bool R_AliasModelLerpTag( orientation_t *orient, const maliasmodel_t *aliasmodel, int oldframenum, int framenum, float lerpfrac, const char *name )
 {
 	int i;
 	quat_t quat;
@@ -489,7 +513,7 @@ qboolean R_AliasModelLerpTag( orientation_t *orient, const maliasmodel_t *aliasm
 	if( i == aliasmodel->numtags )
 	{
 		//ri.Com_DPrintf ("R_AliasModelLerpTag: no such tag %s\n", name );
-		return qfalse;
+		return false;
 	}
 
 	// ignore invalid frames
@@ -519,7 +543,7 @@ qboolean R_AliasModelLerpTag( orientation_t *orient, const maliasmodel_t *aliasm
 	orient->origin[1] = oldtag->origin[1] + ( tag->origin[1] - oldtag->origin[1] ) * lerpfrac;
 	orient->origin[2] = oldtag->origin[2] + ( tag->origin[2] - oldtag->origin[2] ) * lerpfrac;
 
-	return qtrue;
+	return true;
 }
 
 /*
@@ -527,13 +551,13 @@ qboolean R_AliasModelLerpTag( orientation_t *orient, const maliasmodel_t *aliasm
 * 
 * Interpolates between two frames and origins
 */
-qboolean R_DrawAliasSurf( const entity_t *e, const shader_t *shader, const mfog_t *fog, drawSurfaceAlias_t *drawSurf )
+void R_DrawAliasSurf( const entity_t *e, const shader_t *shader, const mfog_t *fog, const portalSurface_t *portalSurface, unsigned int shadowBits, drawSurfaceAlias_t *drawSurf )
 {
 	int i;
-	int framenum, oldframenum;
+	int framenum = e->frame, oldframenum = e->oldframe;
 	float backv[3], frontv[3];
 	vec3_t normal, oldnormal;
-	qboolean calcVerts, calcNormals, calcSTVectors;
+	bool calcVerts, calcNormals, calcSTVectors;
 	vec3_t move;
 	const maliasframe_t *frame, *oldframe;
 	const maliasvertex_t *v, *ov;
@@ -545,48 +569,54 @@ qboolean R_DrawAliasSurf( const entity_t *e, const shader_t *shader, const mfog_
 	// see what vertex attribs backend needs
 	vattribs = RB_GetVertexAttribs();
 
-	framenum = bound( e->frame, 0, model->numframes );
-	oldframenum = bound( e->oldframe, 0, model->numframes );
+	if( ( framenum >= model->numframes ) || ( framenum < 0 ) )
+	{
+		framenum = 0;
+	}
+
+	if( ( oldframenum >= model->numframes ) || ( oldframenum < 0 ) )
+	{
+		oldframenum = 0;
+	}
 
 	frame = model->frames + framenum;
 	oldframe = model->frames + oldframenum;
 	for( i = 0; i < 3; i++ )
 		move[i] = frame->translate[i] + ( oldframe->translate[i] - frame->translate[i] ) * backlerp;
 
-	// based on backend's needs
-	calcNormals = ( ( ( vattribs & VATTRIB_NORMAL_BIT ) != 0 ) && ( ( framenum != 0 ) || ( oldframenum != 0 ) ) ) ? qtrue : qfalse;
-	calcSTVectors = ( ( ( vattribs & VATTRIB_SVECTOR_BIT ) != 0 ) && calcNormals ) ? qtrue : qfalse;
-
 	if( aliasmesh->vbo != NULL && !framenum && !oldframenum )
 	{
 		RB_BindVBO( aliasmesh->vbo->index, GL_TRIANGLES );
 
-		RB_DrawElements( 0, aliasmesh->numverts, 0, aliasmesh->numtris * 3 );
+		RB_DrawElements( 0, aliasmesh->numverts, 0, aliasmesh->numtris * 3, 
+			0, aliasmesh->numverts, 0, aliasmesh->numtris * 3 );
 	}
 	else
 	{
-		mesh_t *rb_mesh;
+		mesh_t dynamicMesh;
 		vec4_t *inVertsArray;
 		vec4_t *inNormalsArray;
 		vec4_t *inSVectorsArray;
 
-		RB_BindVBO( RB_VBO_STREAM, GL_TRIANGLES );
+		// based on backend's needs
+		calcVerts = ( framenum || oldframenum ) ? true : false;
+		calcNormals = ( ( ( vattribs & VATTRIB_NORMAL_BIT ) != 0 ) && ( ( framenum != 0 ) || ( oldframenum != 0 ) ) ) ? true : false;
+		calcSTVectors = ( ( ( vattribs & VATTRIB_SVECTOR_BIT ) != 0 ) && calcNormals ) ? true : false;
 
-		rb_mesh = RB_MapBatchMesh( aliasmesh->numverts, aliasmesh->numtris * 3 );
-		if( !rb_mesh ) {
-			ri.Com_DPrintf( S_COLOR_YELLOW "R_DrawAliasSurf: RB_MapBatchMesh returned NULL for (%s)(%s)", 
-				drawSurf->model->name, aliasmesh->name );
-			return qfalse;
-		}
+		memset( &dynamicMesh, 0, sizeof( dynamicMesh ) );
 
-		inVertsArray = rb_mesh->xyzArray;
-		inNormalsArray = rb_mesh->normalsArray;
-		inSVectorsArray = rb_mesh->sVectorsArray;
+		dynamicMesh.elems = aliasmesh->elems;
+		dynamicMesh.numElems = aliasmesh->numtris * 3;
+		dynamicMesh.numVerts = aliasmesh->numverts;
+
+		R_GetTransformBufferForMesh( &dynamicMesh, calcVerts, calcNormals, calcSTVectors );
+
+		inVertsArray = dynamicMesh.xyzArray;
+		inNormalsArray = dynamicMesh.normalsArray;
+		inSVectorsArray = dynamicMesh.sVectorsArray;
 
 		if( !framenum && !oldframenum )
 		{
-			calcVerts = qfalse;
-
 			if( calcNormals )
 			{
 				v = aliasmesh->vertexes;
@@ -596,8 +626,6 @@ qboolean R_DrawAliasSurf( const entity_t *e, const shader_t *shader, const mfog_
 		}
 		else if( framenum == oldframenum )
 		{
-			calcVerts = qtrue;
-
 			for( i = 0; i < 3; i++ )
 				frontv[i] = frame->scale[i];
 
@@ -616,8 +644,6 @@ qboolean R_DrawAliasSurf( const entity_t *e, const shader_t *shader, const mfog_
 		}
 		else
 		{
-			calcVerts = qtrue;
-
 			for( i = 0; i < 3; i++ )
 			{
 				backv[i] = backlerp * oldframe->scale[i];
@@ -649,27 +675,18 @@ qboolean R_DrawAliasSurf( const entity_t *e, const shader_t *shader, const mfog_
 		if( calcSTVectors )
 			R_BuildTangentVectors( aliasmesh->numverts, inVertsArray, inNormalsArray, aliasmesh->stArray, aliasmesh->numtris, aliasmesh->elems, inSVectorsArray );
 
-		if( !calcVerts ) {
-			rb_mesh->xyzArray = aliasmesh->xyzArray;
-		}
-		rb_mesh->elems = aliasmesh->elems;
-		rb_mesh->numElems = aliasmesh->numtris * 3;
-		rb_mesh->numVerts = aliasmesh->numverts;
+		if( !calcVerts )
+			dynamicMesh.xyzArray = aliasmesh->xyzArray;
+		dynamicMesh.stArray = aliasmesh->stArray;
+		if( !calcNormals )
+			dynamicMesh.normalsArray = aliasmesh->normalsArray;
+		if( !calcSTVectors )
+			dynamicMesh.sVectorsArray = aliasmesh->sVectorsArray;
 
-		rb_mesh->stArray = aliasmesh->stArray;
-		if( !calcNormals ) {
-			rb_mesh->normalsArray = aliasmesh->normalsArray;
-		}
-		if( !calcSTVectors ) {
-			rb_mesh->sVectorsArray = aliasmesh->sVectorsArray;
-		}
+		RB_AddDynamicMesh( e, shader, fog, portalSurface, shadowBits, &dynamicMesh, GL_TRIANGLES, 0.0f, 0.0f );
 
-		RB_UploadMesh( rb_mesh );
-
-		RB_EndBatch();
+		RB_FlushDynamicMeshes();
 	}
-
-	return qfalse;
 }
 
 /*
@@ -719,7 +736,7 @@ void R_AliasModelFrameBounds( const model_t *mod, int frame, vec3_t mins, vec3_t
 *
 * Returns true if the entity is added to draw list
 */
-qboolean R_AddAliasModelToDrawList( const entity_t *e )
+bool R_AddAliasModelToDrawList( const entity_t *e )
 {
 	int i, j;
 	const model_t *mod;
@@ -734,20 +751,20 @@ qboolean R_AddAliasModelToDrawList( const entity_t *e )
 
 	mod = R_AliasModelLOD( e );
 	if( !( aliasmodel = ( ( const maliasmodel_t * )mod->extradata ) ) || !aliasmodel->nummeshes )
-		return qfalse;
+		return false;
 
 	radius = R_AliasModelLerpBBox( e, mod, mins, maxs );
-	clipped = R_CullModelEntity( e, mins, maxs, radius, qtrue );
+	clipped = R_CullModelEntity( e, mins, maxs, radius, true, aliasmodel->numtris > 100 );
 	if( clipped )
-		return qfalse;
+		return false;
 
 	// never render weapon models or non-occluders into shadowmaps
 	if( rn.renderFlags & RF_SHADOWMAPVIEW ) {
 		if( e->renderfx & RF_WEAPONMODEL ) {
-			return qtrue;
+			return true;
 		}
 		if( rsc.entShadowGroups[R_ENT2NUM(e)] != rn.shadowGroup->id ) {
-			return qtrue;
+			return true;
 		}
 	}
 
@@ -765,7 +782,7 @@ qboolean R_AddAliasModelToDrawList( const entity_t *e )
 	{
 		R_AliasModelLerpBBox( e, mod );
 		if( R_CompletelyFogged( fog, e->origin, radius ) )
-			return qfalse;
+			return false;
 	}
 #endif
 
@@ -777,20 +794,20 @@ qboolean R_AddAliasModelToDrawList( const entity_t *e )
 			shader = R_FindShaderForSkinFile( e->customSkin, mesh->name );
 		} else if( e->customShader ) {
 			shader = e->customShader;
-		} else if( mesh->numskins ) 	{
+		} else if( mesh->numskins ) {
 			for( j = 0; j < mesh->numskins; j++ ) {
 				shader = mesh->skins[j].shader;
 				if( shader ) {
-					R_AddDSurfToDrawList( e, fog, shader, distance, 0, NULL, aliasmodel->drawSurfs + i );
+					R_AddSurfToDrawList( rn.meshlist, e, fog, shader, distance, 0, NULL, aliasmodel->drawSurfs + i );
 				}
 			}
 			continue;
 		}
 
 		if( shader ) {
-			R_AddDSurfToDrawList( e, fog, shader, distance, 0, NULL, aliasmodel->drawSurfs + i );
+			R_AddSurfToDrawList( rn.meshlist, e, fog, shader, distance, 0, NULL, aliasmodel->drawSurfs + i );
 		}
 	}
 
-	return qtrue;
+	return true;
 }

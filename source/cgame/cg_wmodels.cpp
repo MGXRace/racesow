@@ -54,7 +54,7 @@ static const char *wmPartSufix[] = { "", "_expansion", "_barrel", "_flash", "_ha
 */
 static bool CG_vWeap_ParseAnimationScript( weaponinfo_t *weaponinfo, const char *filename )
 {
-	qbyte *buf;
+	uint8_t *buf;
 	char *ptr, *token;
 	int rounder, counter, i;
 	bool debug = true;
@@ -80,7 +80,7 @@ static bool CG_vWeap_ParseAnimationScript( weaponinfo_t *weaponinfo, const char 
 		trap_FS_FCloseFile( filenum );
 		return false;
 	}
-	buf = ( qbyte * )CG_Malloc( length + 1 );
+	buf = ( uint8_t * )CG_Malloc( length + 1 );
 	trap_FS_Read( buf, length, filenum );
 	trap_FS_FCloseFile( filenum );
 
@@ -99,7 +99,7 @@ static bool CG_vWeap_ParseAnimationScript( weaponinfo_t *weaponinfo, const char 
 	ptr = ( char * )buf;
 	while( ptr )
 	{
-		token = COM_ParseExt( &ptr, qtrue );
+		token = COM_ParseExt( &ptr, true );
 		if( !token[0] )
 			break;
 
@@ -112,11 +112,11 @@ static bool CG_vWeap_ParseAnimationScript( weaponinfo_t *weaponinfo, const char 
 					CG_Printf( "%sScript: barrel:%s", S_COLOR_BLUE, S_COLOR_WHITE );
 
 				// time
-				i = atoi( COM_ParseExt( &ptr, qfalse ) );
+				i = atoi( COM_ParseExt( &ptr, false ) );
 				weaponinfo->barrelTime = (unsigned int)( i > 0 ? i : 0 );
 
 				// speed
-				weaponinfo->barrelSpeed = atof( COM_ParseExt( &ptr, qfalse ) );
+				weaponinfo->barrelSpeed = atof( COM_ParseExt( &ptr, false ) );
 
 				if( debug )
 					CG_Printf( "%s time:%i, speed:%.2f\n", S_COLOR_BLUE, (int)weaponinfo->barrelTime, weaponinfo->barrelSpeed, S_COLOR_WHITE );
@@ -127,15 +127,15 @@ static bool CG_vWeap_ParseAnimationScript( weaponinfo_t *weaponinfo, const char 
 					CG_Printf( "%sScript: flash:%s", S_COLOR_BLUE, S_COLOR_WHITE );
 
 				// time
-				i = atoi( COM_ParseExt( &ptr, qfalse ) );
+				i = atoi( COM_ParseExt( &ptr, false ) );
 				weaponinfo->flashTime = (unsigned int)( i > 0 ? i : 0 );
 
 				// radius
-				i = atoi( COM_ParseExt( &ptr, qfalse ) );
+				i = atoi( COM_ParseExt( &ptr, false ) );
 				weaponinfo->flashRadius = (float)( i > 0 ? i : 0 );
 
 				// fade
-				token = COM_ParseExt( &ptr, qfalse );
+				token = COM_ParseExt( &ptr, false );
 				if( !Q_stricmp( token, "no" ) )
 					weaponinfo->flashFade = false;
 
@@ -147,9 +147,9 @@ static bool CG_vWeap_ParseAnimationScript( weaponinfo_t *weaponinfo, const char 
 				if( debug )
 					CG_Printf( "%sScript: flashColor:%s", S_COLOR_BLUE, S_COLOR_WHITE );
 
-				weaponinfo->flashColor[0] = atof( token = COM_ParseExt( &ptr, qfalse ) );
-				weaponinfo->flashColor[1] = atof( token = COM_ParseExt( &ptr, qfalse ) );
-				weaponinfo->flashColor[2] = atof( token = COM_ParseExt( &ptr, qfalse ) );
+				weaponinfo->flashColor[0] = atof( token = COM_ParseExt( &ptr, false ) );
+				weaponinfo->flashColor[1] = atof( token = COM_ParseExt( &ptr, false ) );
+				weaponinfo->flashColor[2] = atof( token = COM_ParseExt( &ptr, false ) );
 
 				if( debug )
 					CG_Printf( "%s%f %f %f%s\n", S_COLOR_BLUE,
@@ -161,12 +161,12 @@ static bool CG_vWeap_ParseAnimationScript( weaponinfo_t *weaponinfo, const char 
 				if( debug )
 					CG_Printf( "%sScript: handPosition:%s", S_COLOR_BLUE, S_COLOR_WHITE );
 
-				weaponinfo->handpositionOrigin[FORWARD] = atof( COM_ParseExt( &ptr, qfalse ) );
-				weaponinfo->handpositionOrigin[RIGHT] = atof( COM_ParseExt( &ptr, qfalse ) );
-				weaponinfo->handpositionOrigin[UP] = atof( COM_ParseExt( &ptr, qfalse ) );
-				weaponinfo->handpositionAngles[PITCH] = atof( COM_ParseExt( &ptr, qfalse ) );
-				weaponinfo->handpositionAngles[YAW] = atof( COM_ParseExt( &ptr, qfalse ) );
-				weaponinfo->handpositionAngles[ROLL] = atof( COM_ParseExt( &ptr, qfalse ) );
+				weaponinfo->handpositionOrigin[FORWARD] = atof( COM_ParseExt( &ptr, false ) );
+				weaponinfo->handpositionOrigin[RIGHT] = atof( COM_ParseExt( &ptr, false ) );
+				weaponinfo->handpositionOrigin[UP] = atof( COM_ParseExt( &ptr, false ) );
+				weaponinfo->handpositionAngles[PITCH] = atof( COM_ParseExt( &ptr, false ) );
+				weaponinfo->handpositionAngles[YAW] = atof( COM_ParseExt( &ptr, false ) );
+				weaponinfo->handpositionAngles[ROLL] = atof( COM_ParseExt( &ptr, false ) );
 
 				if( debug )
 					CG_Printf( "%s%f %f %f %f %f %f%s\n", S_COLOR_BLUE,
@@ -186,7 +186,7 @@ static bool CG_vWeap_ParseAnimationScript( weaponinfo_t *weaponinfo, const char 
 					break;
 				}
 
-				token = COM_ParseExt( &ptr, qfalse );
+				token = COM_ParseExt( &ptr, false );
 				if( Q_stricmp( token, "NULL" ) )
 				{
 					weaponinfo->sound_fire[weaponinfo->num_fire_sounds] = trap_S_RegisterSound( token );
@@ -207,7 +207,7 @@ static bool CG_vWeap_ParseAnimationScript( weaponinfo_t *weaponinfo, const char 
 					break;
 				}
 
-				token = COM_ParseExt( &ptr, qfalse );
+				token = COM_ParseExt( &ptr, false );
 				if( Q_stricmp( token, "NULL" ) )
 				{
 					weaponinfo->sound_strongfire[weaponinfo->num_strongfire_sounds] = trap_S_RegisterSound( token );
@@ -575,7 +575,7 @@ void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weaponid, int eff
 
 	//weapon
 	memset( &weapon, 0, sizeof( weapon ) );
-	Vector4Set( weapon.shaderRGBA, 255, 255, 255, 255 );
+	Vector4Set( weapon.shaderRGBA, 255, 255, 255, ent->shaderRGBA[3] );
 	weapon.scale = ent->scale;
 	weapon.renderfx = ent->renderfx;
 	weapon.frame = 0;
@@ -612,7 +612,7 @@ void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weaponid, int eff
 		{
 			entity_t expansion;
 			memset( &expansion, 0, sizeof( expansion ) );
-			Vector4Set( expansion.shaderRGBA, 255, 255, 255, 255 );
+			Vector4Set( expansion.shaderRGBA, 255, 255, 255, ent->shaderRGBA[3] );
 			expansion.model = weaponInfo->model[EXPANSION];
 			expansion.scale = ent->scale;
 			expansion.renderfx = ent->renderfx;
@@ -640,7 +640,7 @@ void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weaponid, int eff
 
 			entity_t barrel;
 			memset( &barrel, 0, sizeof( barrel ) );
-			Vector4Set( barrel.shaderRGBA, 255, 255, 255, 255 );
+			Vector4Set( barrel.shaderRGBA, 255, 255, 255, ent->shaderRGBA[3] );
 			barrel.model = weaponInfo->model[BARREL];
 			barrel.scale = ent->scale;
 			barrel.renderfx = ent->renderfx;
@@ -651,8 +651,7 @@ void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weaponid, int eff
 			if( barrel_time > cg.time )
 			{
 				intensity =  (float)( barrel_time - cg.time ) / (float)weaponInfo->barrelTime;
-				rotangles[2] = ( 360.0f * weaponInfo->barrelSpeed * intensity * intensity );
-				while( rotangles[2] > 360 ) rotangles[2] -= 360;
+				rotangles[2] = anglemod( 360.0f * weaponInfo->barrelSpeed * intensity * intensity );
 
 				// Check for tag_recoil
 				if( CG_GrabTag( &barrel_recoiled, &weapon, "tag_recoil" ) )
@@ -664,7 +663,7 @@ void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weaponid, int eff
 			// barrel requires special tagging
 			CG_PlaceRotatedModelOnTag( &barrel, &weapon, tag );
 
-			CG_AddColoredOutLineEffect( &barrel, effects, 0, 0, 0, 255 );
+			CG_AddColoredOutLineEffect( &barrel, effects, 0, 0, 0, ent->shaderRGBA[3] );
 
 			if( !( effects & EF_RACEGHOST ) )
 				CG_AddEntityToScene( &barrel ); // skelmod
@@ -683,12 +682,12 @@ void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weaponid, int eff
 	if( weaponInfo->model[FLASH] )
 	{
 		entity_t flash;
-		qbyte c;
+		uint8_t c;
 
 		if( weaponInfo->flashFade )
 		{
 			intensity = (float)( flash_time - cg.time )/(float)weaponInfo->flashTime;
-			c = ( qbyte )( 255 * intensity );
+			c = ( uint8_t )( 255 * intensity );
 		}
 		else
 		{

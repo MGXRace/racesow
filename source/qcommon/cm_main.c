@@ -23,7 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "cm_local.h"
 #include "../qalgo/md5.h"
 
-static qboolean	cm_initialized = qfalse;
+static bool	cm_initialized = false;
 
 static mempool_t *cmap_mempool;
 
@@ -181,9 +181,9 @@ MAP LOADING
 * Loads in the map and all submodels
 * 
 *  for spawning a server with no map at all, call like this:
-*  CM_LoadMap( "", qfalse, &checksum );	// no real map
+*  CM_LoadMap( "", false, &checksum );	// no real map
 */
-cmodel_t *CM_LoadMap( cmodel_state_t *cms, const char *name, qboolean clientload, unsigned *checksum )
+cmodel_t *CM_LoadMap( cmodel_state_t *cms, const char *name, bool clientload, unsigned *checksum )
 {
 	int length;
 	unsigned *buf;
@@ -195,7 +195,7 @@ cmodel_t *CM_LoadMap( cmodel_state_t *cms, const char *name, qboolean clientload
 	assert( name && strlen( name ) < MAX_CONFIGSTRING_CHARS );
 	assert( checksum );
 
-	if( !strcmp( cms->map_name, name ) && ( clientload || !Cvar_Value( "flushmap" ) ) )
+	if( name && !strcmp( cms->map_name, name ) && ( clientload || !Cvar_Value( "flushmap" ) ) )
 	{
 		*checksum = cms->checksum;
 
@@ -225,11 +225,11 @@ cmodel_t *CM_LoadMap( cmodel_state_t *cms, const char *name, qboolean clientload
 	if( !buf )
 		Com_Error( ERR_DROP, "Couldn't load %s", name );
 
-	cms->checksum = md5_digest32( ( const qbyte * )buf, length );
+	cms->checksum = md5_digest32( ( const uint8_t * )buf, length );
 	*checksum = cms->checksum;
 
 	// call the apropriate loader
-	descr = Q_FindFormatDescriptor( cm_supportedformats, ( const qbyte * )buf, (const bspFormatDesc_t **)&bspFormat );
+	descr = Q_FindFormatDescriptor( cm_supportedformats, ( const uint8_t * )buf, (const bspFormatDesc_t **)&bspFormat );
 	if( !descr )
 		Com_Error( ERR_DROP, "CM_LoadMap: unknown fileid for %s", name );
 
@@ -243,7 +243,7 @@ cmodel_t *CM_LoadMap( cmodel_state_t *cms, const char *name, qboolean clientload
 
 	// store map format description in cvars
 	Cvar_ForceSet( "cm_mapHeader", header );
-	Cvar_ForceSet( "cm_mapVersion", va( "%i", LittleLong( *((int *)((qbyte *)buf + descr->headerLen)) ) ) );
+	Cvar_ForceSet( "cm_mapVersion", va( "%i", LittleLong( *((int *)((uint8_t *)buf + descr->headerLen)) ) ) );
 
 	Mem_TempFree( header );
 
@@ -274,10 +274,10 @@ cmodel_t *CM_LoadMap( cmodel_state_t *cms, const char *name, qboolean clientload
 char *CM_LoadMapMessage( char *name, char *message, int size )
 {
 	int file, len;
-	qbyte h_v[8];
+	uint8_t h_v[8];
 	char *data, *entitystring;
 	lump_t l;
-	qboolean isworld;
+	bool isworld;
 	char key[MAX_KEY], value[MAX_VALUE], *token;
 	const modelFormatDescr_t *descr;
 	const bspFormatDesc_t *bspFormat = NULL;
@@ -324,7 +324,7 @@ char *CM_LoadMapMessage( char *name, char *message, int size )
 
 	for( data = entitystring; ( token = COM_Parse( &data ) ) && token[0] == '{'; )
 	{
-		isworld = qtrue;
+		isworld = true;
 
 		while( 1 )
 		{
@@ -346,7 +346,7 @@ char *CM_LoadMapMessage( char *name, char *message, int size )
 			if( !strcmp( key, "classname" ) )
 			{
 				if( strcmp( value, "worldspawn" ) )
-					isworld = qfalse;
+					isworld = false;
 			}
 			else if( !strcmp( key, "message" ) )
 			{
@@ -464,7 +464,7 @@ int CM_ClusterRowSize( cmodel_state_t *cms )
 /*
 * CM_ClusterRowLongs
 */
-int CM_ClusterRowLongs( cmodel_state_t *cms )
+static int CM_ClusterRowLongs( cmodel_state_t *cms )
 {
 	return cms->map_pvs ? (cms->map_pvs->rowsize + 3) / 4 : MAX_CM_LEAFS / 32;
 }
@@ -488,17 +488,17 @@ dvis_t *CM_PVSData( cmodel_state_t *cms )
 /*
 * CM_ClusterVS
 */
-static inline qbyte *CM_ClusterVS( int cluster, dvis_t *vis, qbyte *nullrow )
+static inline uint8_t *CM_ClusterVS( int cluster, dvis_t *vis, uint8_t *nullrow )
 {
 	if( cluster == -1 || !vis )
 		return nullrow;
-	return ( qbyte * )vis->data + cluster * vis->rowsize;
+	return ( uint8_t * )vis->data + cluster * vis->rowsize;
 }
 
 /*
 * CM_ClusterPVS
 */
-qbyte *CM_ClusterPVS( cmodel_state_t *cms, int cluster )
+static inline uint8_t *CM_ClusterPVS( cmodel_state_t *cms, int cluster )
 {
 	return CM_ClusterVS( cluster, cms->map_pvs, cms->nullrow );
 }
@@ -577,7 +577,7 @@ void CM_FloodAreaConnections( cmodel_state_t *cms )
 /*
 * CM_SetAreaPortalState
 */
-void CM_SetAreaPortalState( cmodel_state_t *cms, int area1, int area2, qboolean open )
+void CM_SetAreaPortalState( cmodel_state_t *cms, int area1, int area2, bool open )
 {
 	int row1, row2;
 
@@ -604,30 +604,30 @@ void CM_SetAreaPortalState( cmodel_state_t *cms, int area1, int area2, qboolean 
 /*
 * CM_AreasConnected
 */
-qboolean CM_AreasConnected( cmodel_state_t *cms, int area1, int area2 )
+bool CM_AreasConnected( cmodel_state_t *cms, int area1, int area2 )
 {
 	if( cm_noAreas->integer )
-		return qtrue;
+		return true;
 	if( cms->cmap_bspFormat->flags & BSP_NOAREAS )
-		return qtrue;
+		return true;
 
 	if( area1 == area2 )
-		return qtrue;
+		return true;
 	if( area1 < 0 || area2 < 0 )
-		return qtrue;
+		return true;
 
 	if( area1 >= cms->numareas || area2 >= cms->numareas )
 		Com_Error( ERR_DROP, "CM_AreasConnected: area >= numareas" );
 
 	if( cms->map_areas[area1].floodnum == cms->map_areas[area2].floodnum )
-		return qtrue;
-	return qfalse;
+		return true;
+	return false;
 }
 
 /*
 * CM_MergeAreaBits
 */
-static int CM_MergeAreaBits( cmodel_state_t *cms, qbyte *buffer, int area )
+static int CM_MergeAreaBits( cmodel_state_t *cms, uint8_t *buffer, int area )
 {
 	int i;
 
@@ -646,7 +646,7 @@ static int CM_MergeAreaBits( cmodel_state_t *cms, qbyte *buffer, int area )
 /*
 * CM_WriteAreaBits
 */
-int CM_WriteAreaBits( cmodel_state_t *cms, qbyte *buffer )
+int CM_WriteAreaBits( cmodel_state_t *cms, uint8_t *buffer )
 {
 	int i;
 	int rowsize, bytes;
@@ -661,7 +661,7 @@ int CM_WriteAreaBits( cmodel_state_t *cms, qbyte *buffer )
 	}
 	else
 	{
-		qbyte *row;
+		uint8_t *row;
 
 		memset( buffer, 0, bytes );
 
@@ -678,7 +678,7 @@ int CM_WriteAreaBits( cmodel_state_t *cms, qbyte *buffer )
 /*
 * CM_ReadAreaBits
 */
-void CM_ReadAreaBits( cmodel_state_t *cms, qbyte *buffer )
+void CM_ReadAreaBits( cmodel_state_t *cms, uint8_t *buffer )
 {
 	int i, j;
 	int rowsize;
@@ -688,7 +688,7 @@ void CM_ReadAreaBits( cmodel_state_t *cms, qbyte *buffer )
 	rowsize = CM_AreaRowSize( cms );
 	for( i = 0; i < cms->numareas; i++ )
 	{
-		qbyte *row;
+		uint8_t *row;
 
 		row = buffer + i * rowsize;
 		for( j = 0; j < cms->numareas; j++ )
@@ -741,7 +741,7 @@ void CM_ReadPortalState( cmodel_state_t *cms, int file )
 * Returns true if any leaf under headnode has a cluster that
 * is potentially visible
 */
-qboolean CM_HeadnodeVisible( cmodel_state_t *cms, int nodenum, qbyte *visbits )
+bool CM_HeadnodeVisible( cmodel_state_t *cms, int nodenum, uint8_t *visbits )
 {
 	int cluster;
 	cnode_t	*node;
@@ -750,16 +750,16 @@ qboolean CM_HeadnodeVisible( cmodel_state_t *cms, int nodenum, qbyte *visbits )
 	{
 		node = &cms->map_nodes[nodenum];
 		if( CM_HeadnodeVisible( cms, node->children[0], visbits ) )
-			return qtrue;
+			return true;
 		nodenum = node->children[1];
 	}
 
 	cluster = cms->map_leafs[-1 - nodenum].cluster;
 	if( cluster == -1 )
-		return qfalse;
+		return false;
 	if( visbits[cluster>>3] & ( 1<<( cluster&7 ) ) )
-		return qtrue;
-	return qfalse;
+		return true;
+	return false;
 }
 
 
@@ -767,12 +767,12 @@ qboolean CM_HeadnodeVisible( cmodel_state_t *cms, int nodenum, qbyte *visbits )
 * CM_MergePVS
 * Merge PVS at origin into out
 */
-void CM_MergePVS( cmodel_state_t *cms, vec3_t org, qbyte *out )
+void CM_MergePVS( cmodel_state_t *cms, vec3_t org, uint8_t *out )
 {
 	int leafs[128];
 	int i, j, count;
 	int longs;
-	qbyte *src;
+	uint8_t *src;
 	vec3_t mins, maxs;
 
 	for( i = 0; i < 3; i++ )
@@ -807,7 +807,7 @@ void CM_MergePVS( cmodel_state_t *cms, vec3_t org, qbyte *out )
 /*
 * CM_MergeVisSets
 */
-int CM_MergeVisSets( cmodel_state_t *cms, vec3_t org, qbyte *pvs, qbyte *areabits )
+int CM_MergeVisSets( cmodel_state_t *cms, vec3_t org, uint8_t *pvs, uint8_t *areabits )
 {
 	int area;
 
@@ -823,6 +823,36 @@ int CM_MergeVisSets( cmodel_state_t *cms, vec3_t org, qbyte *pvs, qbyte *areabit
 		CM_MergeAreaBits( cms, areabits, area );
 
 	return CM_AreaRowSize( cms ); // areabytes
+}
+
+/*
+* CM_InPVS
+*
+* Also checks portalareas so that doors block sight
+*/
+bool CM_InPVS( cmodel_state_t *cms, const vec3_t p1, const vec3_t p2 )
+{
+	int leafnum;
+	int cluster;
+	int area1, area2;
+	uint8_t *mask;
+
+	leafnum = CM_PointLeafnum( cms, p1 );
+	cluster = CM_LeafCluster( cms, leafnum );
+	area1 = CM_LeafArea( cms, leafnum );
+	mask = CM_ClusterPVS( cms, cluster );
+
+	leafnum = CM_PointLeafnum( cms, p2 );
+	cluster = CM_LeafCluster( cms, leafnum );
+	area2 = CM_LeafArea( cms, leafnum );
+
+	if( ( !( mask[cluster>>3] & ( 1<<( cluster&7 ) ) ) ) )
+		return false;
+
+	if( !CM_AreasConnected( cms, area1, area2 ) )
+		return false; // a door blocks sight
+
+	return true;
 }
 
 /*
@@ -895,7 +925,7 @@ void CM_Init( void )
 	cm_noAreas =	    Cvar_Get( "cm_noAreas", "0", CVAR_CHEAT );
 	cm_noCurves =	    Cvar_Get( "cm_noCurves", "0", CVAR_CHEAT );
 
-	cm_initialized = qtrue;
+	cm_initialized = true;
 }
 
 /*
@@ -908,5 +938,5 @@ void CM_Shutdown( void )
 
 	Mem_FreePool( &cmap_mempool );
 
-	cm_initialized = qfalse;
+	cm_initialized = false;
 }

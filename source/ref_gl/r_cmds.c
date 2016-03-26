@@ -29,9 +29,15 @@ void R_ScreenShot_f( void )
 {
 	const char *name;
 	const char *extension;
+	const char *mediadir;
+	size_t path_size;
+	char *path;
 	char *checkname = NULL;
-	size_t checkname_size = 0, gamepath_offset = 0;
+	size_t checkname_size = 0;
 	int quality;
+
+	if( !R_ScreenEnabled() )
+		return;
 
 	name = ri.Cmd_Argv( 1 );
 	if( r_screenshot_jpeg->integer ) {
@@ -43,21 +49,32 @@ void R_ScreenShot_f( void )
 		quality = 100;
 	}
 
+	mediadir = ri.FS_MediaDirectory( FS_MEDIA_IMAGES );
+	if( mediadir )
+	{
+		path_size = strlen( mediadir ) + 1 + strlen( glConfig.applicationName ) + sizeof( " Screenshots/" );
+		path = alloca( path_size );
+		Q_snprintfz( path, path_size, "%s/%s Screenshots/", mediadir, glConfig.applicationName );
+	}
+	else
+	{
+		path_size = strlen( ri.FS_WriteDirectory() ) + 1 + strlen( ri.FS_GameDirectory() ) + sizeof( "/screenshots/" );
+		path = alloca( path_size );
+		Q_snprintfz( path, path_size, "%s/%s/screenshots/", ri.FS_WriteDirectory(), ri.FS_GameDirectory() );
+	}
+
 	if( name && name[0] && Q_stricmp(name, "*") )
 	{
-		checkname_size = sizeof( char ) * ( strlen( "screenshots/" ) + strlen( name ) + strlen( extension ) + 1 );
-		checkname = malloc( checkname_size );
-		Q_snprintfz( checkname, checkname_size, "screenshots/%s", name );
-
-		COM_SanitizeFilePath( checkname );
-		COM_DefaultExtension( checkname, extension, checkname_size );
-
-		if( !COM_ValidateRelativeFilename( checkname ) )
+		if( !COM_ValidateRelativeFilename( name ) )
 		{
 			Com_Printf( "Invalid filename\n" );
-			free( checkname );
 			return;
 		}
+
+		checkname_size = ( path_size - 1 ) + strlen( name ) + strlen( extension ) + 1;
+		checkname = alloca( checkname_size );
+		Q_snprintfz( checkname, checkname_size, "%s%s", path, name );
+		COM_DefaultExtension( checkname, extension, checkname_size );
 	}
 
 	//
@@ -68,7 +85,7 @@ void R_ScreenShot_f( void )
 		int i;
 		const int maxFiles = 100000;
 		static int lastIndex = 0;
-		qboolean addIndex = qfalse;
+		bool addIndex = false;
 		time_t timestamp;
 		char timestamp_str[MAX_QPATH];
 		struct tm *timestampptr;
@@ -89,50 +106,43 @@ void R_ScreenShot_f( void )
 		// hm... shouldn't really happen, but check anyway
 		if( i == 2 )
 		{
-			Q_strncpyz( timestamp_str, rsh.screenshotPrefix, sizeof( timestamp_str ) );
-			ri.Cvar_ForceSet( r_screenshot_fmtstr->name, rsh.screenshotPrefix );
+			Q_strncpyz( timestamp_str, glConfig.screenshotPrefix, sizeof( timestamp_str ) );
+			ri.Cvar_ForceSet( r_screenshot_fmtstr->name, glConfig.screenshotPrefix );
 		}
 
-		gamepath_offset = strlen( ri.FS_WriteDirectory() ) + 1 + strlen( ri.FS_GameDirectory() ) + 1;
-
-		checkname_size =
-			sizeof( char ) * ( gamepath_offset + strlen( "screenshots/" ) + 
-			strlen( timestamp_str ) + 5 + 1 + strlen( extension ) + 1 );
-		checkname = malloc( checkname_size );
+		checkname_size = ( path_size - 1 ) + strlen( timestamp_str ) + 5 + 1 + strlen( extension );
+		checkname = alloca( checkname_size );
 
 		// if the string format is a constant or file already exists then iterate
 		if( !*timestamp_str || !strcmp( timestamp_str, r_screenshot_fmtstr->string ) )
 		{
-			addIndex = qtrue;
+			addIndex = true;
 
 			// force a rescan in case some vars have changed..
 			if( r_screenshot_fmtstr->modified )
 			{
 				lastIndex = 0;
-				r_screenshot_fmtstr->modified = qtrue;
+				r_screenshot_fmtstr->modified = true;
 			}
 			if( r_screenshot_jpeg->modified )
 			{
 				lastIndex = 0;
-				r_screenshot_jpeg->modified = qfalse;
+				r_screenshot_jpeg->modified = false;
 			}
 		}
 		else
 		{
-			Q_snprintfz( checkname, checkname_size, "%s/%s/screenshots/%s%s", 
-				ri.FS_WriteDirectory(), ri.FS_GameDirectory(), timestamp_str, extension );
+			Q_snprintfz( checkname, checkname_size, "%s%s%s", path, timestamp_str, extension );
 			if( ri.FS_FOpenAbsoluteFile( checkname, NULL, FS_READ ) != -1 )
 			{
 				lastIndex = 0;
-				addIndex = qtrue;
+				addIndex = true;
 			}
 		}
 
 		for( ; addIndex && lastIndex < maxFiles; lastIndex++ )
 		{
-			Q_snprintfz( checkname, checkname_size, "%s/%s/screenshots/%s%05i%s", 
-				ri.FS_WriteDirectory(), ri.FS_GameDirectory(), timestamp_str, lastIndex, 
-				extension );
+			Q_snprintfz( checkname, checkname_size, "%s%s%05i%s", path, timestamp_str, lastIndex, extension );
 			if( ri.FS_FOpenAbsoluteFile( checkname, NULL, FS_READ ) == -1 )
 				break; // file doesn't exist
 		}
@@ -140,19 +150,18 @@ void R_ScreenShot_f( void )
 		if( lastIndex == maxFiles )
 		{
 			Com_Printf( "Couldn't create a file\n" );
-			free( checkname );
 			return;
 		}
 
 		lastIndex++;
 	}
 
-	R_ScreenShot( checkname + gamepath_offset, 
+	R_ScreenShot( checkname, 
 		0, 0, glConfig.width, glConfig.height, quality, 
-		qfalse, qfalse, qfalse, 
-		ri.Cmd_Argc() >= 3 && !Q_stricmp( ri.Cmd_Argv( 2 ), "silent" ) ? qtrue : qfalse );
+		false, false, false, 
+		ri.Cmd_Argc() >= 3 && !Q_stricmp( ri.Cmd_Argv( 2 ), "silent" ) ? true : false );
 
-	free( checkname );
+	ri.FS_AddFileToMedia( checkname );
 }
 
 /*
@@ -162,6 +171,7 @@ void R_EnvShot_f( void )
 {
 	int i;
 	int size, maxSize;
+	const char *writedir, *gamedir;
 	int checkname_size;
 	char *checkname;
 	refdef_t fd;
@@ -177,7 +187,7 @@ void R_EnvShot_f( void )
 		{ "nz", { 90, 180, 0 }, IT_FLIPDIAGONAL }
 	};
 
-	if( !rsh.worldModel )
+	if( !R_ScreenEnabled() || !rsh.worldModel )
 		return;
 
 	if( ri.Cmd_Argc() != 3 )
@@ -194,9 +204,11 @@ void R_EnvShot_f( void )
 	if( size > maxSize )
 		size >>= 1;
 
-	checkname_size = sizeof( char ) * ( strlen( "env/" ) + 
-		strlen( ri.Cmd_Argv( 1 ) ) + 1 + strlen( cubemapShots[0].suf ) + 4 + 1 );
-	checkname = malloc( checkname_size );
+	writedir = ri.FS_WriteDirectory();
+	gamedir = ri.FS_GameDirectory();
+	checkname_size = strlen( writedir ) + 1 + strlen( gamedir ) + strlen( "/env/" ) + 
+		strlen( ri.Cmd_Argv( 1 ) ) + 1 + strlen( cubemapShots[0].suf ) + 4 + 1;
+	checkname = alloca( checkname_size );
 
 	fd = rsc.refdef;
 	fd.time = 0;
@@ -221,31 +233,29 @@ void R_EnvShot_f( void )
 
 		R_RenderView( &fd );
 
-		Q_snprintfz( checkname, checkname_size, "env/%s_%s", ri.Cmd_Argv( 1 ), cubemapShots[i].suf );
+		Q_snprintfz( checkname, checkname_size, "%s/%s/env/%s_%s", writedir, gamedir, ri.Cmd_Argv( 1 ), cubemapShots[i].suf );
 		COM_DefaultExtension( checkname, ".tga", checkname_size );
 
 		R_ScreenShot( checkname, 0, 0, size, size, 100, 
-			( cubemapShots[i].flags & IT_FLIPX ) ? qtrue : qfalse, 
-			( cubemapShots[i].flags & IT_FLIPY ) ? qtrue : qfalse, 
-			( cubemapShots[i].flags & IT_FLIPDIAGONAL ) ? qtrue : qfalse,
-			qfalse );
+			( cubemapShots[i].flags & IT_FLIPX ) ? true : false, 
+			( cubemapShots[i].flags & IT_FLIPY ) ? true : false, 
+			( cubemapShots[i].flags & IT_FLIPDIAGONAL ) ? true : false,
+			false );
 	}
 
 	// render non-bmodel entities again
 	rn.renderFlags &= ~RF_CUBEMAPVIEW;
-
-	free( checkname );
 }
 
 /*
 * R_GlobFilter
 */
-static qboolean R_GlobFilter( const char *pattern, const char *value )
+static bool R_GlobFilter( const char *pattern, const char *value )
 {
 	if( *pattern && !glob_match( pattern, value, 0 ) ) {
-		return qfalse;
+		return false;
 	}
-	return qtrue;
+	return true;
 }
 
 /*

@@ -122,52 +122,34 @@ typedef enum
 	//
 	// joystick buttons
 	//
-	K_JOY1,
-	K_JOY2,
-	K_JOY3,
-	K_JOY4,
-
-	//
-	// aux keys are for multi-buttoned joysticks to generate so they can use
-	// the normal binding process
-	//
-	K_AUX1,
-	K_AUX2,
-	K_AUX3,
-	K_AUX4,
-	K_AUX5,
-	K_AUX6,
-	K_AUX7,
-	K_AUX8,
-	K_AUX9,
-	K_AUX10,
-	K_AUX11,
-	K_AUX12,
-	K_AUX13,
-	K_AUX14,
-	K_AUX15,
-	K_AUX16,
-	K_AUX17,
-	K_AUX18,
-	K_AUX19,
-	K_AUX20,
-	K_AUX21,
-	K_AUX22,
-	K_AUX23,
-	K_AUX24,
-	K_AUX25,
-	K_AUX26,
-	K_AUX27,
-	K_AUX28,
-	K_AUX29,
-	K_AUX30,
-	K_AUX31,
-	K_AUX32,
+	K_A_BUTTON,
+	K_B_BUTTON,
+	K_C_BUTTON,
+	K_X_BUTTON,
+	K_Y_BUTTON,
+	K_Z_BUTTON,
+	K_LSHOULDER,
+	K_RSHOULDER,
+	K_LTRIGGER,
+	K_RTRIGGER,
+	K_LSTICK,
+	K_RSTICK,
+	K_DPAD_UP,
+	K_DPAD_DOWN,
+	K_DPAD_LEFT,
+	K_DPAD_RIGHT,
+	K_DPAD_CENTER,
 
 	K_MWHEELUP,
 	K_MWHEELDOWN,
 
 	K_MOUSE1DBLCLK,
 } keyNum_t;
+
+//
+// these are the special keys that should be passed to Key_CharEvent
+//
+#define KC_CTRLC 3
+#define KC_CTRLV 22
 
 #endif // __Q_KEYCODES_H__

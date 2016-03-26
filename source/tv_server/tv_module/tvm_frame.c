@@ -38,7 +38,7 @@ static void TVM_RunClients( tvm_relay_t *relay )
 	{
 		ent = relay->local_edicts + i;
 		if( ent->s.teleported )
-			ent->s.teleported = qfalse;
+			ent->s.teleported = false;
 		if( !ent->r.inuse || !ent->r.client )
 			continue;
 		if( trap_GetClientState( relay, PLAYERNUM( ent ) ) != CS_SPAWNED )
@@ -68,11 +68,11 @@ void TVM_RunLinearProjectiles( tvm_relay_t *relay )
 	for( i = relay->maxclients + 1; i < relay->numentities; i++ )
 	{
 		ent = relay->edicts + i;
-		if( !ent->s.linearProjectile || !ent->r.inuse )
+		if( !ent->s.linearMovement || !ent->r.inuse )
 			continue;
 
 		VectorCopy( ent->s.origin, old_origin );
-		GClip_MoveLinearProjectile( relay, ent );
+		GClip_LinearMovement( relay, ent );
 
 		// check if projectile has moved since TVM_NewPacketEntityState
 		// before calling GClip_LinkEntity to save CPU time

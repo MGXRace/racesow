@@ -95,7 +95,7 @@ static void asnullfunc(void) {}
 
 #define ASLIB_LOCAL_CLASS_DESCR(x)
 
-#define ASLIB_FOFFSET(s,m)						(size_t)&(((s *)0)->m)
+#define ASLIB_FOFFSET(s,m)						offsetof(s,m)
 
 #define ASLIB_ENUM_VAL(name)					{ #name,(int)name }
 #define ASLIB_ENUM_VAL_NULL						{ NULL, 0 }
@@ -224,6 +224,9 @@ static const asEnumVal_t asHUDStatEnumVals[] =
 	ASLIB_ENUM_VAL( STAT_MESSAGE_OTHER ),
 	ASLIB_ENUM_VAL( STAT_MESSAGE_ALPHA ),
 	ASLIB_ENUM_VAL( STAT_MESSAGE_BETA ),
+	ASLIB_ENUM_VAL( STAT_IMAGE_CLASSACTION1 ),
+	ASLIB_ENUM_VAL( STAT_IMAGE_CLASSACTION2 ),
+	ASLIB_ENUM_VAL( STAT_IMAGE_DROP_ITEM ),
 
 	ASLIB_ENUM_VAL_NULL
 };
@@ -263,6 +266,7 @@ static const asEnumVal_t asEntityTypeEnumVals[] =
 	ASLIB_ENUM_VAL( ET_ITEM_TIMER ),
 	ASLIB_ENUM_VAL( ET_PARTICLES ),
 	ASLIB_ENUM_VAL( ET_SPAWN_INDICATOR ),
+	ASLIB_ENUM_VAL( ET_RADAR ),
 
 	ASLIB_ENUM_VAL( ET_EVENT ),
 	ASLIB_ENUM_VAL( ET_SOUNDEVENT ),
@@ -519,6 +523,7 @@ static const asEnumVal_t asSVFlagEnumVals[] =
 	ASLIB_ENUM_VAL( SVF_ONLYTEAM ),
 	ASLIB_ENUM_VAL( SVF_FORCEOWNER ),
 	ASLIB_ENUM_VAL( SVF_ONLYOWNER ),
+	ASLIB_ENUM_VAL( SVF_FORCETEAM ),
 
 	ASLIB_ENUM_VAL_NULL
 };
@@ -1180,6 +1185,7 @@ static const asProperty_t gametypedescr_Properties[] =
 	{ ASLIB_PROPERTY_DECL(uint, pickableItemsMask), ASLIB_FOFFSET(gametype_descriptor_t, pickableItemsMask) },
 	{ ASLIB_PROPERTY_DECL(bool, isTeamBased), ASLIB_FOFFSET(gametype_descriptor_t, isTeamBased) },
 	{ ASLIB_PROPERTY_DECL(bool, isRace), ASLIB_FOFFSET(gametype_descriptor_t, isRace) },
+	{ ASLIB_PROPERTY_DECL(bool, isTutorial), ASLIB_FOFFSET(gametype_descriptor_t, isTutorial) },
 	{ ASLIB_PROPERTY_DECL(bool, inverseScore), ASLIB_FOFFSET(gametype_descriptor_t, inverseScore) },
 	{ ASLIB_PROPERTY_DECL(bool, hasChallengersQueue), ASLIB_FOFFSET(gametype_descriptor_t, hasChallengersQueue) },
 	{ ASLIB_PROPERTY_DECL(int, maxPlayersPerTeam), ASLIB_FOFFSET(gametype_descriptor_t, maxPlayersPerTeam) },
@@ -1199,9 +1205,12 @@ static const asProperty_t gametypedescr_Properties[] =
 	{ ASLIB_PROPERTY_DECL(bool, canForceModels), ASLIB_FOFFSET(gametype_descriptor_t, canForceModels) },
 	{ ASLIB_PROPERTY_DECL(bool, canShowMinimap), ASLIB_FOFFSET(gametype_descriptor_t, canShowMinimap) },
 	{ ASLIB_PROPERTY_DECL(bool, teamOnlyMinimap), ASLIB_FOFFSET(gametype_descriptor_t, teamOnlyMinimap) },
-	{ ASLIB_PROPERTY_DECL(int, spawnpointRadius), ASLIB_FOFFSET(gametype_descriptor_t, spawnpoint_radius) },
+	{ ASLIB_PROPERTY_DECL(int, spawnpointRadius), ASLIB_FOFFSET(gametype_descriptor_t, spawnpointRadius) },
 	{ ASLIB_PROPERTY_DECL(bool, customDeadBodyCam), ASLIB_FOFFSET(gametype_descriptor_t, customDeadBodyCam) },
+	{ ASLIB_PROPERTY_DECL(bool, removeInactivePlayers), ASLIB_FOFFSET(gametype_descriptor_t, removeInactivePlayers ) },
 	{ ASLIB_PROPERTY_DECL(bool, mmCompatible), ASLIB_FOFFSET(gametype_descriptor_t, mmCompatible ) },
+	{ ASLIB_PROPERTY_DECL(uint, numBots), ASLIB_FOFFSET(gametype_descriptor_t, numBots ) },
+	{ ASLIB_PROPERTY_DECL(bool, dummyBots), ASLIB_FOFFSET(gametype_descriptor_t, dummyBots ) },
 
 	// racesow
 	{ ASLIB_PROPERTY_DECL(bool, autoInactivityRemove), ASLIB_FOFFSET(gametype_descriptor_t, autoInactivityRemove) },
@@ -1520,8 +1529,7 @@ static int objectGameClient_PlayerNum( gclient_t *self )
 {
 	if( self->asFactored )
 		return -1;
-
-	return (int)( self - game.clients );
+	return PLAYERNUM( self );
 }
 
 static bool objectGameClient_isReady( gclient_t *self )
@@ -1537,10 +1545,7 @@ static bool objectGameClient_isBot( gclient_t *self )
 	int playerNum;
 	const edict_t *ent;
 
-	if( self->asFactored )
-		return false;
-
-	playerNum = (int)( self - game.clients );
+	playerNum = objectGameClient_PlayerNum( self );
 	if( playerNum < 0 && playerNum >= gs.maxclients )
 		return false;
 
@@ -1553,10 +1558,7 @@ static ai_handle_t *objectGameClient_getBot( gclient_t *self )
 	int playerNum;
 	const edict_t *ent;
 
-	if( self->asFactored )
-		return NULL;
-
-	playerNum = (int)( self - game.clients );
+	playerNum = objectGameClient_PlayerNum( self );
 	if( playerNum < 0 && playerNum >= gs.maxclients )
 		return NULL;
 
@@ -1582,7 +1584,7 @@ static void objectGameClient_ClearPlayerStateEvents( gclient_t *self )
 
 static asstring_t *objectGameClient_getName( gclient_t *self )
 {
-	char temp[MAX_NAME_BYTES*2];
+	char temp[MAX_NAME_BYTES+2];
 
 	Q_strncpyz( temp, self->netname, sizeof( temp ) );
 	Q_strncatz( temp, S_COLOR_WHITE, sizeof( temp ) );
@@ -1592,7 +1594,7 @@ static asstring_t *objectGameClient_getName( gclient_t *self )
 
 static asstring_t *objectGameClient_getClanName( gclient_t *self )
 {
-	char temp[MAX_CLANNAME_CHARS*2];
+	char temp[MAX_CLANNAME_BYTES+2];
 
 	Q_strncpyz( temp, self->clanname, sizeof( temp ) );
 	Q_strncatz( temp, S_COLOR_WHITE, sizeof( temp ) );
@@ -1607,8 +1609,8 @@ static void objectGameClient_Respawn( bool ghost, gclient_t *self )
 	if( self->asFactored )
 		return;
 
-	playerNum = (int)( self - game.clients );
-	assert( playerNum >= 0 && playerNum < gs.maxclients );
+	playerNum = objectGameClient_PlayerNum( self );
+
 	if( playerNum >= 0 && playerNum < gs.maxclients )
 		G_ClientRespawn( &game.edicts[playerNum + 1], ghost );
 }
@@ -1617,16 +1619,11 @@ static edict_t *objectGameClient_GetEntity( gclient_t *self )
 {
 	int playerNum;
 
-	if( self->asFactored )
-		return NULL;
-
-	playerNum = (int)( self - game.clients );
-	assert( playerNum >= 0 && playerNum < gs.maxclients );
-
+	playerNum = objectGameClient_PlayerNum( self );
 	if( playerNum < 0 || playerNum >= gs.maxclients )
 		return NULL;
 
-	return &game.edicts[playerNum + 1];
+	return PLAYERENT( playerNum );
 }
 
 static int objectGameClient_InventoryCount( int index, gclient_t *self )
@@ -1678,7 +1675,7 @@ static void objectGameClient_InventoryGiveItemExt( int index, int count, gclient
 	if( !(it->flags & ITFLAG_PICKABLE) )
 		return;
 
-	playerNum = self - game.clients;
+	playerNum = objectGameClient_PlayerNum( self );
 	if( playerNum < 0 || playerNum >= gs.maxclients )
 		return;
 
@@ -1704,7 +1701,7 @@ static bool objectGameClient_CanSelectWeapon( int index, gclient_t *self )
 	if( index < WEAP_NONE || index >= WEAP_TOTAL )
 		return false;
 
-	return ( GS_CheckAmmoInWeapon( &self->ps, index ) ) == qtrue;
+	return ( GS_CheckAmmoInWeapon( &self->ps, index ) ) == true;
 }
 
 static void objectGameClient_SelectWeapon( int index, gclient_t *self )
@@ -1723,48 +1720,42 @@ static void objectGameClient_addAward( asstring_t *msg, gclient_t *self )
 {
 	int playerNum;
 
-	if( self->asFactored || !msg )
+	if( !msg )
 		return;
 
-	playerNum = (int)( self - game.clients );
-	assert( playerNum >= 0 && playerNum < gs.maxclients );
-
+	playerNum = objectGameClient_PlayerNum( self );
 	if( playerNum < 0 || playerNum >= gs.maxclients )
 		return;
 
-	G_PlayerAward( &game.edicts[playerNum + 1], msg->buffer );
+	G_PlayerAward( PLAYERENT( playerNum ), msg->buffer );
 }
 
 static void objectGameClient_addMetaAward( asstring_t *msg, gclient_t *self )
 {
 	int playerNum;
 
-	if( self->asFactored || !msg )
+	if( !msg )
 		return;
 
-	playerNum = (int)( self - game.clients );
-	assert( playerNum >= 0 && playerNum < gs.maxclients );
-
+	playerNum = objectGameClient_PlayerNum( self );
 	if( playerNum < 0 || playerNum >= gs.maxclients )
 		return;
 
-	G_PlayerMetaAward( &game.edicts[playerNum + 1], msg->buffer );
+	G_PlayerMetaAward( PLAYERENT( playerNum ), msg->buffer );
 }
 
 static void objectGameClient_execGameCommand( asstring_t *msg, gclient_t *self )
 {
 	int playerNum;
 
-	if( self->asFactored || !msg )
+	if( !msg )
 		return;
 
-	playerNum = (int)( self - game.clients );
-	assert( playerNum >= 0 && playerNum < gs.maxclients );
-
+	playerNum = objectGameClient_PlayerNum( self );
 	if( playerNum < 0 || playerNum >= gs.maxclients )
 		return;
 
-	trap_GameCmd( &game.edicts[playerNum + 1], msg->buffer );
+	trap_GameCmd( PLAYERENT( playerNum ), msg->buffer );
 }
 
 static void objectGameClient_setHUDStat( int stat, int value, gclient_t *self )
@@ -1829,7 +1820,7 @@ static unsigned int objectGameClient_getPMoveFeatures( gclient_t *self )
 static void objectGameClient_setPMoveMaxSpeed( float speed, gclient_t *self )
 {
 	if( speed < 0.0f )
-		self->ps.pmove.stats[PM_STAT_MAXSPEED] = DEFAULT_PLAYERSPEED;
+		self->ps.pmove.stats[PM_STAT_MAXSPEED] = (short)DEFAULT_PLAYERSPEED;
 	else
 		self->ps.pmove.stats[PM_STAT_MAXSPEED] = ( (int)( speed + 0.5f ) & 0xFFFF );
 }
@@ -1842,7 +1833,7 @@ static float objectGameClient_getPMoveMaxSpeed( gclient_t *self )
 static void objectGameClient_setPMoveJumpSpeed( float speed, gclient_t *self )
 {
 	if( speed < 0.0f )
-		self->ps.pmove.stats[PM_STAT_JUMPSPEED] = DEFAULT_JUMPSPEED;
+		self->ps.pmove.stats[PM_STAT_JUMPSPEED] = (short)DEFAULT_JUMPSPEED;
 	else
 		self->ps.pmove.stats[PM_STAT_JUMPSPEED] = ( (int)( speed + 0.5f ) & 0xFFFF );
 }
@@ -1855,7 +1846,7 @@ static float objectGameClient_getPMoveJumpSpeed( gclient_t *self )
 static void objectGameClient_setPMoveDashSpeed( float speed, gclient_t *self )
 {
 	if( speed < 0.0f )
-		self->ps.pmove.stats[PM_STAT_DASHSPEED] = DEFAULT_DASHSPEED;
+		self->ps.pmove.stats[PM_STAT_DASHSPEED] = (short)DEFAULT_DASHSPEED;
 	else
 		self->ps.pmove.stats[PM_STAT_DASHSPEED] = ( (int)( speed + 0.5f ) & 0xFFFF );
 }
@@ -1886,38 +1877,34 @@ static void objectGameClient_printMessage( asstring_t *str, gclient_t *self )
 	if( !str || !str->buffer )
 		return;
 
-	playerNum = (int)( self - game.clients );
-	assert( playerNum >= 0 && playerNum < gs.maxclients );
-
+	playerNum = objectGameClient_PlayerNum( self );
 	if( playerNum < 0 || playerNum >= gs.maxclients )
 		return;
 
-	G_PrintMsg( &game.edicts[ playerNum + 1 ], "%s", str->buffer );
+	G_PrintMsg( PLAYERENT( playerNum ), "%s", str->buffer );
 }
 
 static void objectGameClient_ChaseCam( asstring_t *str, bool teamonly, gclient_t *self )
 {
 	int playerNum;
 
-	playerNum = (int)( self - game.clients );
+	playerNum = objectGameClient_PlayerNum( self );
 	if( playerNum < 0 || playerNum >= gs.maxclients )
 		return;
 
-	G_ChasePlayer( &game.edicts[ playerNum + 1 ], str ? str->buffer : NULL, teamonly, 0 );
+	G_ChasePlayer( PLAYERENT( playerNum ), str ? str->buffer : NULL, teamonly, 0 );
 }
 
 static void objectGameClient_SetChaseActive( bool active, gclient_t *self )
 {
 	int playerNum;
 
-	playerNum = (int)( self - game.clients );
-	assert( playerNum >= 0 && playerNum < gs.maxclients );
-
+	playerNum = objectGameClient_PlayerNum( self );
 	if( playerNum < 0 || playerNum >= gs.maxclients )
 		return;
 
 	self->resp.chase.active = active;
-	G_UpdatePlayerMatchMsg( &game.edicts[ playerNum + 1 ] );
+	G_UpdatePlayerMatchMsg( PLAYERENT( playerNum ) );
 }
 
 static bool objectGameClient_GetChaseActive( gclient_t *self )
@@ -1929,36 +1916,60 @@ static void objectGameClient_NewRaceRun( int numSectors, gclient_t *self )
 {
 	int playerNum;
 
-	playerNum = (int)( self - game.clients );
-	assert( playerNum >= 0 && playerNum < gs.maxclients );
-
+	playerNum = objectGameClient_PlayerNum( self );
 	if( playerNum < 0 || playerNum >= gs.maxclients )
 		return;
 
-	G_NewRaceRun( &game.edicts[ playerNum + 1 ], numSectors );
+	G_NewRaceRun( PLAYERENT( playerNum ), numSectors );
 }
 
 static void objectGameClient_SetRaceTime( int sector, unsigned int time, gclient_t *self )
 {
 	int playerNum;
 
-	playerNum = (int)( self - game.clients );
-	assert( playerNum >= 0 && playerNum < gs.maxclients );
-
+	playerNum = objectGameClient_PlayerNum( self );
 	if( playerNum < 0 || playerNum >= gs.maxclients )
 		return;
 
-	G_SetRaceTime( &game.edicts[ playerNum + 1 ], sector, time );
+	G_SetRaceTime( PLAYERENT( playerNum ), sector, time );
+}
+
+static void objectGameClient_SetHelpMessage( unsigned int index, gclient_t *self )
+{
+	int playerNum;
+
+	playerNum = objectGameClient_PlayerNum( self );
+	if( playerNum < 0 || playerNum >= gs.maxclients )
+		return;
+
+	G_SetPlayerHelpMessage( PLAYERENT( playerNum ), index );
+}
+
+static void objectGameClient_SetQuickMenuItems( asstring_t *str, gclient_t *self )
+{
+	int playerNum;
+
+	if( !str || !str->buffer )
+		return;
+
+	playerNum = objectGameClient_PlayerNum( self );
+	if( playerNum < 0 || playerNum >= gs.maxclients )
+		return;
+
+	if( objectGameClient_isBot( self ) )
+		return;
+
+	Q_strncpyz( self->level.quickMenuItems, str->buffer, sizeof( self->level.quickMenuItems ) );
+	trap_GameCmd( PLAYERENT( playerNum ), va( "qm %s", str->buffer ) );
 }
 
 static rs_authplayer_t *objectGameClient_getAuth( gclient_t *self )
 {
 	int playerNum;
 
-	playerNum = (int)( self - game.clients );
-	assert( playerNum >= 0 && playerNum < gs.maxclients );
+	playerNum = objectGameClient_PlayerNum( self );
 
-	if( playerNum < 0 || playerNum >= gs.maxclients )
+	if( playerNum < 0 || playerNum >= gs.maxclients || objectGameClient_isBot( self ) )
 		return NULL;
 
 	return &authplayers[playerNum];
@@ -2014,6 +2025,8 @@ static const asMethod_t gameclient_Methods[] =
 	{ ASLIB_FUNCTION_DECL(bool, get_chaseActive, () const ), asFUNCTION(objectGameClient_GetChaseActive), asCALL_CDECL_OBJLAST },
 	{ ASLIB_FUNCTION_DECL(void, newRaceRun, ( int numSectors )), asFUNCTION(objectGameClient_NewRaceRun), asCALL_CDECL_OBJLAST },
 	{ ASLIB_FUNCTION_DECL(void, setRaceTime, ( int sector, uint time )), asFUNCTION(objectGameClient_SetRaceTime), asCALL_CDECL_OBJLAST },
+	{ ASLIB_FUNCTION_DECL(void, setHelpMessage, ( uint msg )), asFUNCTION(objectGameClient_SetHelpMessage), asCALL_CDECL_OBJLAST },
+	{ ASLIB_FUNCTION_DECL(void, setQuickMenuItems, ( const String &in )), asFUNCTION(objectGameClient_SetQuickMenuItems), asCALL_CDECL_OBJLAST },
 	{ ASLIB_FUNCTION_DECL(RS_PlayerAuth @, getAuth, ()), asFUNCTION(objectGameClient_getAuth), asCALL_CDECL_OBJLAST }, // racesow
 
 	ASLIB_METHOD_NULL
@@ -2027,13 +2040,10 @@ static const asProperty_t gameclient_Properties[] =
 	{ ASLIB_PROPERTY_DECL(const bool, tv), ASLIB_FOFFSET(gclient_t, isTV) },
 	{ ASLIB_PROPERTY_DECL(int, team), ASLIB_FOFFSET(gclient_t, team) },
 	{ ASLIB_PROPERTY_DECL(const int, hand), ASLIB_FOFFSET(gclient_t, hand) },
-	{ ASLIB_PROPERTY_DECL(const int, fov), ASLIB_FOFFSET(gclient_t, fov) },
-	{ ASLIB_PROPERTY_DECL(const int, zoomFov), ASLIB_FOFFSET(gclient_t, zoomfov) },
 	{ ASLIB_PROPERTY_DECL(const bool, isOperator), ASLIB_FOFFSET(gclient_t, isoperator) },
 	{ ASLIB_PROPERTY_DECL(const uint, queueTimeStamp), ASLIB_FOFFSET(gclient_t, queueTimeStamp) },
 	{ ASLIB_PROPERTY_DECL(int, muted), ASLIB_FOFFSET(gclient_t, muted) }, // racesow - allow editing the int
 	{ ASLIB_PROPERTY_DECL(float, armor), ASLIB_FOFFSET(gclient_t, resp.armor) },
-	{ ASLIB_PROPERTY_DECL(uint, gunbladeChargeTimeStamp), ASLIB_FOFFSET(gclient_t, resp.gunbladeChargeTimeStamp) },
 	{ ASLIB_PROPERTY_DECL(const bool, chaseActive), ASLIB_FOFFSET(gclient_t, resp.chase.active) },
 	{ ASLIB_PROPERTY_DECL(int, chaseTarget), ASLIB_FOFFSET(gclient_t, resp.chase.target) },
 	{ ASLIB_PROPERTY_DECL(bool, chaseTeamonly), ASLIB_FOFFSET(gclient_t, resp.chase.teamonly) },
@@ -2408,7 +2418,6 @@ static void objectGameEntity_splashDamage( edict_t *attacker, int radius, float 
 
 static void objectGameEntity_explosionEffect( int radius, edict_t *self )
 {
-	edict_t *event;
 	int i, eventType, eventRadius;
 	vec3_t center;
 
@@ -2433,7 +2442,7 @@ static void objectGameEntity_explosionEffect( int radius, edict_t *self )
 	for( i = 0; i < 3; i++ )
 		center[i] = self->s.origin[i] + ( 0.5f * ( self->r.maxs[i] + self->r.mins[i] ) );
 
-	event = G_SpawnEvent( eventType, eventRadius, center );
+	G_SpawnEvent( eventType, eventRadius, center );
 }
 
 static const asFuncdef_t gedict_Funcdefs[] =
@@ -2873,6 +2882,45 @@ static void asFunc_CenterPrintMsg( edict_t *ent, asstring_t *str )
 	G_CenterPrintMsg( ent, "%s", str->buffer );
 }
 
+static void asFunc_CenterPrintFormatMsg1( edict_t *ent, asstring_t *format, asstring_t *arg1 )
+{
+	G_CenterPrintFormatMsg( ent, format->buffer, arg1->buffer, NULL );
+}
+
+static void asFunc_CenterPrintFormatMsg2( edict_t *ent, asstring_t *format, asstring_t *arg1, asstring_t *arg2 )
+{
+	G_CenterPrintFormatMsg( ent, format->buffer, arg1->buffer, arg2->buffer, NULL );
+}
+
+static void asFunc_CenterPrintFormatMsg3( edict_t *ent, asstring_t *format, asstring_t *arg1, asstring_t *arg2, asstring_t *arg3 )
+{
+	G_CenterPrintFormatMsg( ent, format->buffer, arg1->buffer, arg2->buffer, arg3->buffer, NULL );
+}
+
+static void asFunc_CenterPrintFormatMsg4( edict_t *ent, asstring_t *format, asstring_t *arg1, asstring_t *arg2, asstring_t *arg3,
+	asstring_t *arg4 )
+{
+	G_CenterPrintFormatMsg( ent, format->buffer, arg1->buffer, arg2->buffer, arg3->buffer, arg4->buffer, NULL );
+}
+
+static void asFunc_CenterPrintFormatMsg5( edict_t *ent, asstring_t *format, asstring_t *arg1, asstring_t *arg2, asstring_t *arg3,
+	asstring_t *arg4, asstring_t *arg5 )
+{
+	G_CenterPrintFormatMsg( ent, format->buffer, arg1->buffer, arg2->buffer, arg3->buffer, arg4->buffer, arg5->buffer, NULL );
+}
+
+static void asFunc_CenterPrintFormatMsg6( edict_t *ent, asstring_t *format, asstring_t *arg1, asstring_t *arg2, asstring_t *arg3,
+	asstring_t *arg4, asstring_t *arg5, asstring_t *arg6 )
+{
+	G_CenterPrintFormatMsg( ent, format->buffer, arg1->buffer, arg2->buffer, arg3->buffer, arg4->buffer, arg5->buffer, arg6->buffer, NULL );
+}
+
+static void asFunc_CenterPrintFormatMsg7( edict_t *ent, asstring_t *format, asstring_t *arg1, asstring_t *arg2, asstring_t *arg3,
+	asstring_t *arg4, asstring_t *arg5, asstring_t *arg6, asstring_t *arg7 )
+{
+	G_CenterPrintFormatMsg( ent, format->buffer, arg1->buffer, arg2->buffer, arg3->buffer, arg4->buffer, arg5->buffer, arg6->buffer, arg7->buffer, NULL );
+}
+
 static void asFunc_G_Sound( edict_t *owner, int channel, int soundindex, float attenuation )
 {
 	G_Sound( owner, channel, soundindex, attenuation );
@@ -2938,7 +2986,7 @@ static bool asFunc_AppendToFile( asstring_t *path, asstring_t *data )
 static asstring_t *asFunc_LoadFile( asstring_t *path )
 {
 	int filelen, filehandle;
-	qbyte *buf = NULL;
+	uint8_t *buf = NULL;
 	asstring_t *data;
 
 	if( !path || !path->len )
@@ -2947,7 +2995,7 @@ static asstring_t *asFunc_LoadFile( asstring_t *path )
 	filelen = trap_FS_FOpenFile( path->buffer, &filehandle, FS_READ );
 	if( filehandle && filelen > 0 )
 	{
-		buf = ( qbyte * )G_Malloc( filelen + 1 );
+		buf = ( uint8_t * )G_Malloc( filelen + 1 );
 		filelen = trap_FS_Read( buf, filelen, filehandle );
 	}
 
@@ -3381,6 +3429,21 @@ static edict_t *asFunc_FireBlast( asvec3_t *origin, asvec3_t *angles, int speed,
 	return W_Fire_GunbladeBlast( owner, origin->v, angles->v, damage, min( 1, knockback ), knockback, stun, min( 1, damage ), radius, speed, 5000, MOD_SPLASH, 0 );
 }
 
+static unsigned asFunc_G_RegisterHelpMessage( asstring_t *str )
+{
+	return G_RegisterHelpMessage( str->buffer );
+}
+
+static void asFunc_G_SetColorCorrection( int index )
+{
+	gs.gameState.stats[GAMESTAT_COLORCORRECTION] = index;
+}
+
+static int asFunc_G_GetDefaultColorCorrection( void )
+{
+	return level.colorCorrection;
+}
+
 static const asglobfuncs_t asGlobFuncs[] =
 {
 	// racesow
@@ -3416,6 +3479,18 @@ static const asglobfuncs_t asGlobFuncs[] =
 	{ "void G_Print( const String &in )", asFUNCTION(asFunc_Print), NULL },
 	{ "void G_PrintMsg( Entity @, const String &in )", asFUNCTION(asFunc_PrintMsg), NULL },
 	{ "void G_CenterPrintMsg( Entity @, const String &in )", asFUNCTION(asFunc_CenterPrintMsg), NULL },
+	{ "void G_CenterPrintFormatMsg( Entity @, const String &in, const String &in )", asFUNCTION(asFunc_CenterPrintFormatMsg1), NULL },
+	{ "void G_CenterPrintFormatMsg( Entity @, const String &in, const String &in, const String &in )", asFUNCTION(asFunc_CenterPrintFormatMsg2), NULL },
+	{ "void G_CenterPrintFormatMsg( Entity @, const String &in, const String &in, const String &in" 
+		", const String &in )", asFUNCTION(asFunc_CenterPrintFormatMsg3), NULL },
+	{ "void G_CenterPrintFormatMsg( Entity @, const String &in, const String &in, const String &in" 
+		", const String &in, const String &in )", asFUNCTION(asFunc_CenterPrintFormatMsg4), NULL },
+	{ "void G_CenterPrintFormatMsg( Entity @, const String &in, const String &in, const String &in" 
+		", const String &in, const String &in, const String &in )", asFUNCTION(asFunc_CenterPrintFormatMsg5), NULL },
+	{ "void G_CenterPrintFormatMsg( Entity @, const String &in, const String &in, const String &in" 
+		", const String &in, const String &in, const String &in, const String &in )", asFUNCTION(asFunc_CenterPrintFormatMsg6), NULL },
+	{ "void G_CenterPrintFormatMsg( Entity @, const String &in, const String &in, const String &in" 
+		", const String &in, const String &in, const String &in, const String &in, const String &in )", asFUNCTION(asFunc_CenterPrintFormatMsg7), NULL },
 	{ "void G_Sound( Entity @, int channel, int soundindex, float attenuation )", asFUNCTION(asFunc_G_Sound), NULL },
 	{ "void G_PositionedSound( const Vec3 &in, int channel, int soundindex, float attenuation )", asFUNCTION(asFunc_PositionedSound), NULL },
 	{ "void G_GlobalSound( int channel, int soundindex )", asFUNCTION(asFunc_G_GlobalSound), NULL },
@@ -3463,6 +3538,12 @@ static const asglobfuncs_t asGlobFuncs[] =
 
 	{ "bool ML_FilenameExists( String & )", asFUNCTION(asFunc_ML_FilenameExists), NULL },
 	{ "const String @ML_GetMapByNum( int num )", asFUNCTION(asFunc_ML_GetMapByNum), NULL },
+
+	{ "uint G_RegisterHelpMessage( const String &in )", asFUNCTION(asFunc_G_RegisterHelpMessage), NULL },
+
+	// color correction
+	{ "void G_SetColorCorrection( int index )", asFUNCTION(asFunc_G_SetColorCorrection), NULL },
+	{ "int G_GetDefaultColorCorrection()", asFUNCTION(asFunc_G_GetDefaultColorCorrection), NULL },
 
 	{ NULL }
 };
@@ -3619,7 +3700,7 @@ bool G_asCallMapEntitySpawnScript( const char *classname, edict_t *ent )
 	}
 
 	// the spawn function may remove the entity
-	return ent->r.inuse == qtrue;
+	return ent->r.inuse == true;
 }
 
 /*
@@ -3855,7 +3936,7 @@ bool G_ExecutionErrorReport( int error )
 static char *G_LoadScriptSection( const char *dir, const char *script, int sectionNum )
 {
 	char filename[MAX_QPATH];
-	qbyte *data;
+	uint8_t *data;
 	int length, filenum;
 	char *sectionName;
 
@@ -3883,7 +3964,7 @@ static char *G_LoadScriptSection( const char *dir, const char *script, int secti
 	}
 
 	//load the script data into memory
-	data = ( qbyte * )G_Malloc( length + 1 );
+	data = ( uint8_t * )G_Malloc( length + 1 );
 	trap_FS_Read( data, length, filenum );
 	trap_FS_FCloseFile( filenum );
 
@@ -3904,7 +3985,7 @@ static asIScriptModule *G_BuildGameScript( const char *moduleName, const char *d
 	
 	asEngine = GAME_AS_ENGINE();
 	if( asEngine == NULL ) {
-		G_Printf( "G_BuildGameScript: Angelscript API unavailable\n" );
+		G_Printf( S_COLOR_RED "G_BuildGameScript: Angelscript API unavailable\n" );
 		return NULL;
 	}
 
@@ -3914,7 +3995,7 @@ static asIScriptModule *G_BuildGameScript( const char *moduleName, const char *d
 	for( numSections = 0; ( section = G_ListNameForPosition( script, numSections, SECTIONS_SEPARATOR ) ) != NULL; numSections++ );
 
 	if( !numSections ) {
-		G_Printf( "* Error: script '%s' has no sections\n", scriptName );
+		G_Printf( S_COLOR_RED "* Error: script '%s' has no sections\n", scriptName );
 		return NULL;
 	}
 
@@ -3922,32 +4003,32 @@ static asIScriptModule *G_BuildGameScript( const char *moduleName, const char *d
 
 	asModule = asEngine->GetModule( moduleName, asGM_CREATE_IF_NOT_EXISTS );
 	if( asModule == NULL ) {
-		G_Printf( "G_BuildGameScript: GetModule '%s' failed\n", moduleName );
+		G_Printf( S_COLOR_RED "G_BuildGameScript: GetModule '%s' failed\n", moduleName );
 		return NULL;
 	}
 
 	for( sectionNum = 0; ( section = G_LoadScriptSection( dir, script, sectionNum ) ) != NULL; sectionNum++ ) {
-		char *sectionName = G_ListNameForPosition( script, sectionNum, SECTIONS_SEPARATOR );
+		const char *sectionName = G_ListNameForPosition( script, sectionNum, SECTIONS_SEPARATOR );
 		error = asModule->AddScriptSection( sectionName, section, strlen( section ) );
 
 		G_Free( section );
 
 		if( error ) {
-			G_Printf( "* Failed to add the script section %s with error %i\n", sectionName, error );
+			G_Printf( S_COLOR_RED "* Failed to add the script section %s with error %i\n", sectionName, error );
 			asEngine->DiscardModule( moduleName );
 			return NULL;
 		}
 	}
 
 	if( sectionNum != numSections ) {
-		G_Printf( "* Error: couldn't load all script sections.\n" );
+		G_Printf( S_COLOR_RED "* Error: couldn't load all script sections.\n" );
 		asEngine->DiscardModule( moduleName );
 		return NULL;
 	}
 
 	error = asModule->Build();
 	if( error ) {
-		G_Printf( "* Failed to build the script '%s'\n", scriptName );
+		G_Printf( S_COLOR_RED "* Failed to build the script '%s'\n", scriptName );
 		asEngine->DiscardModule( moduleName );
 		return NULL;
 	}

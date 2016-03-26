@@ -24,7 +24,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // cin_public.h -- cinematics playback as a separate dll, making the engine
 // container- and format- agnostic
 
-#define	CIN_API_VERSION				5
+#define	CIN_API_VERSION				8
+
+#define CIN_LOOP					1
+#define CIN_NOAUDIO					2
 
 //===============================================================
 
@@ -68,7 +71,7 @@ typedef struct {
 } cin_yuv_t;
 
 typedef void (*cin_raw_samples_cb_t)(void*,unsigned int, unsigned int, 
-	unsigned short, unsigned short, const qbyte *);
+	unsigned short, unsigned short, const uint8_t *);
 typedef unsigned int (*cin_get_raw_samples_cb_t)(void*);
 
 //
@@ -114,13 +117,16 @@ typedef struct
 	int ( *FS_Eof )( int file );
 	int ( *FS_Flush )( int file );
 	void ( *FS_FCloseFile )( int file );
-	qboolean ( *FS_RemoveFile )( const char *filename );
+	bool ( *FS_RemoveFile )( const char *filename );
 	int ( *FS_GetFileList )( const char *dir, const char *extension, char *buf, size_t bufsize, int start, int end );
-	qboolean ( *FS_IsUrl )( const char *url );
+	bool ( *FS_IsUrl )( const char *url );
 
 	// clock
-	unsigned int	( *Milliseconds )( void );
-	quint64			( *Microseconds )( void );
+	unsigned int ( *Sys_Milliseconds )( void );
+	uint64_t ( *Sys_Microseconds )( void );
+
+	void *( *Sys_LoadLibrary )( const char *name, dllfunc_t *funcs );
+	void ( *Sys_UnloadLibrary )( void **lib );
 
 	// managed memory allocation
 	struct mempool_s *( *Mem_AllocPool )( const char *name, const char *filename, int fileline );
@@ -139,16 +145,18 @@ typedef struct
 	int ( *API )( void );
 
 	// the init function will be called at each restart
-	qboolean ( *Init )( qboolean verbose );
-	void ( *Shutdown )( qboolean verbose );
+	bool ( *Init )( bool verbose );
+	void ( *Shutdown )( bool verbose );
 
-	struct cinematics_s *( *Open )( const char *name, unsigned int start_time, qboolean loop, qboolean *yuv, float *framerate );
-	qboolean ( *NeedNextFrame )( struct cinematics_s *cin, unsigned int curtime );
-	qbyte *( *ReadNextFrame )( struct cinematics_s *cin, int *width, int *height, int *aspect_numerator, int *aspect_denominator, qboolean *redraw );
-	cin_yuv_t *( *ReadNextFrameYUV )( struct cinematics_s *cin, int *width, int *height, int *aspect_numerator, int *aspect_denominator, qboolean *redraw );
-	qboolean ( *AddRawSamplesListener )( struct cinematics_s *cin, void *listener, cin_raw_samples_cb_t rs, cin_get_raw_samples_cb_t grs );
+	struct cinematics_s *( *Open )( const char *name, unsigned int start_time, int flags, bool *yuv, float *framerate );
+	bool ( *HasOggAudio )( struct cinematics_s *cin );
+	bool ( *NeedNextFrame )( struct cinematics_s *cin, unsigned int curtime );
+	uint8_t *( *ReadNextFrame )( struct cinematics_s *cin, int *width, int *height, int *aspect_numerator, int *aspect_denominator, bool *redraw );
+	cin_yuv_t *( *ReadNextFrameYUV )( struct cinematics_s *cin, int *width, int *height, int *aspect_numerator, int *aspect_denominator, bool *redraw );
+	bool ( *AddRawSamplesListener )( struct cinematics_s *cin, void *listener, cin_raw_samples_cb_t rs, cin_get_raw_samples_cb_t grs );
 	void ( *Reset )( struct cinematics_s *cin, unsigned int cur_time );
 	void ( *Close )( struct cinematics_s *cin );
+	const char *( *FileName )( struct cinematics_s *cin );
 } cin_export_t;
 
 #endif

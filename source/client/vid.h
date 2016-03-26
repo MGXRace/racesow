@@ -29,19 +29,27 @@ typedef struct
 
 extern viddef_t	viddef;             // global video state
 
+typedef struct
+{
+	int width, height;
+} vidmode_t;
+
 // Video module initialisation etc
-void	VID_Init( void );
-void	VID_Shutdown( void );
-void	VID_CheckChanges( void );
-void	VID_Restart( qboolean verbose, qboolean soundRestart );
+void VID_Init( void );
+void VID_Shutdown( void );
+void VID_CheckChanges( void );
+void VID_Restart( bool verbose, bool soundRestart );
 // The sound module may require the handle when using directsound
-void	*VID_GetWindowHandle( void );
-void	VID_FlashWindow( int count );
-qboolean VID_GetDisplaySize( int *width, int *height );
-qboolean VID_GetModeInfo( int *width, int *height, qboolean *wideScreen, int mode );
-void	VID_AppActivate( qboolean active, qboolean destroy );
-qboolean VID_RefreshActive( void );
-int		VID_GetWindowWidth( void );
-int		VID_GetWindowHeight( void );
+void *VID_GetWindowHandle( void );
+void VID_FlashWindow( int count );
+bool VID_GetDefaultMode( int *width, int *height );
+unsigned int VID_GetSysModes( vidmode_t *modes );
+bool VID_GetModeInfo( int *width, int *height, unsigned int mode );
+void VID_AppActivate( bool active, bool destroy );
+bool VID_RefreshIsActive( void );
+bool VID_AppIsActive( void );
+int	VID_GetWindowWidth( void );
+int	VID_GetWindowHeight( void );
+float VID_GetPixelRatio( void );
 
 #endif

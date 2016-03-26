@@ -31,7 +31,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /*
 * TV_Downstream_ClientResetCommandBuffers
 */
-void TV_Downstream_ClientResetCommandBuffers( client_t *client, qboolean resetReliable )
+void TV_Downstream_ClientResetCommandBuffers( client_t *client, bool resetReliable )
 {
 	// clear the sounds datagram
 	MSG_Init( &client->soundsmsg, client->soundsmsgData, sizeof( client->soundsmsgData ) );
@@ -92,7 +92,7 @@ void TV_Downstream_AddGameCommand( relay_t *relay, client_t *client, const char 
 * 
 * NULL sends to all the message to all clients
 */
-void TV_Downstream_Msg( client_t *client, relay_t *relay, client_t *who, qboolean chat, const char *format, ... )
+void TV_Downstream_Msg( client_t *client, relay_t *relay, client_t *who, bool chat, const char *format, ... )
 {
 	int i;
 	char msg[1024];
@@ -298,13 +298,13 @@ void TV_Downstream_UserinfoChanged( client_t *client )
 /*
 * TV_Downstream_Netchan_Transmit
 */
-static qboolean TV_Downstream_Netchan_Transmit( netchan_t *netchan, msg_t *msg )
+static bool TV_Downstream_Netchan_Transmit( netchan_t *netchan, msg_t *msg )
 {
 	int zerror;
 
 	// if we got here with unsent fragments, fire them all now
 	if( !Netchan_PushAllFragments( netchan ) )
-		return qfalse;
+		return false;
 
 	if( tv_compresspackets->integer )
 	{
@@ -447,7 +447,7 @@ void TV_Downstream_AddReliableCommandsToMessage( client_t *client, msg_t *msg )
 /*
 * TV_Downstream_InitClientMessage
 */
-void TV_Downstream_InitClientMessage( client_t *client, msg_t *msg, qbyte *data, size_t size )
+void TV_Downstream_InitClientMessage( client_t *client, msg_t *msg, uint8_t *data, size_t size )
 {
 	assert( client );
 
@@ -470,7 +470,7 @@ void TV_Downstream_InitClientMessage( client_t *client, msg_t *msg, qbyte *data,
 /*
 * TV_Downstream_SendMessageToClient
 */
-qboolean TV_Downstream_SendMessageToClient( client_t *client, msg_t *msg )
+bool TV_Downstream_SendMessageToClient( client_t *client, msg_t *msg )
 {
 	assert( client );
 
@@ -487,7 +487,7 @@ void TV_Downstream_DropClient( client_t *drop, int type, const char *format, ...
 	va_list	argptr;
 	char string[1024];
 	msg_t Message;
-	qbyte MessageData[MAX_MSGLEN];
+	uint8_t MessageData[MAX_MSGLEN];
 
 	va_start( argptr, format );
 	Q_vsnprintfz( string, sizeof( string ), format, argptr );
@@ -507,7 +507,7 @@ void TV_Downstream_DropClient( client_t *drop, int type, const char *format, ...
 		TV_Relay_ClientDisconnect( drop->relay, drop );
 
 	// make sure everything is clean
-	TV_Downstream_ClientResetCommandBuffers( drop, qtrue );
+	TV_Downstream_ClientResetCommandBuffers( drop, true );
 
 	SNAP_FreeClientFrames( drop );
 
@@ -532,14 +532,14 @@ void TV_Downstream_DropClient( client_t *drop, int type, const char *format, ...
 	if( drop->mv )
 	{
 		tvs.nummvclients--;
-		drop->mv = qfalse;
+		drop->mv = false;
 	}
 
 	memset( &drop->flood, 0, sizeof( drop->flood ) );
 
 	drop->edict = NULL;
 	drop->relay = NULL;
-	drop->tv = qfalse;
+	drop->tv = false;
 	drop->state = CS_ZOMBIE;    // become free in a few seconds
 	drop->name[0] = 0;
 }
@@ -547,7 +547,7 @@ void TV_Downstream_DropClient( client_t *drop, int type, const char *format, ...
 /*
 * TV_Downstream_ChangeStream
 */
-qboolean TV_Downstream_ChangeStream( client_t *client, relay_t *relay )
+bool TV_Downstream_ChangeStream( client_t *client, relay_t *relay )
 {
 	relay_t *oldrelay;
 
@@ -558,12 +558,12 @@ qboolean TV_Downstream_ChangeStream( client_t *client, relay_t *relay )
 	if( relay )
 	{
 		if( !TV_Relay_CanConnect( relay, client, client->userinfo ) )
-			return qfalse;
+			return false;
 	}
 	else
 	{
 		if( !TV_Lobby_CanConnect( client, client->userinfo ) )
-			return qfalse;
+			return false;
 	}
 
 	if( oldrelay )
@@ -571,7 +571,7 @@ qboolean TV_Downstream_ChangeStream( client_t *client, relay_t *relay )
 	else
 		TV_Lobby_ClientDisconnect( client );
 
-	TV_Downstream_ClientResetCommandBuffers( client, qfalse );
+	TV_Downstream_ClientResetCommandBuffers( client, false );
 
 	if( relay )
 		TV_Relay_ClientConnect( relay, client );
@@ -583,22 +583,22 @@ qboolean TV_Downstream_ChangeStream( client_t *client, relay_t *relay )
 	client->state = CS_CONNECTED;
 
 	// let upstream servers know how many clients are connected
-	userinfo_modified = qtrue;
+	userinfo_modified = true;
 
-	return qtrue;
+	return true;
 }
 
 /*
 * TV_Downstream_ProcessPacket
 */
-static qboolean TV_Downstream_ProcessPacket( netchan_t *netchan, msg_t *msg )
+static bool TV_Downstream_ProcessPacket( netchan_t *netchan, msg_t *msg )
 {
 	/*int sequence, sequence_ack;
 	int game_port = -1;*/
 	int zerror;
 
 	if( !Netchan_Process( netchan, msg ) )
-		return qfalse; // wasn't accepted for some reason
+		return false; // wasn't accepted for some reason
 
 	// now if compressed, expand it
 	MSG_BeginReading( msg );
@@ -611,11 +611,11 @@ static qboolean TV_Downstream_ProcessPacket( netchan_t *netchan, msg_t *msg )
 		if( zerror < 0 )
 		{          // compression error. Drop the packet
 			Com_DPrintf( "TV_Downstream_ProcessPacket: Compression error %i. Dropping packet\n", zerror );
-			return qfalse;
+			return false;
 		}
 	}
 
-	return qtrue;
+	return true;
 }
 
 /*
@@ -625,15 +625,15 @@ void TV_Downstream_ReadPackets( void )
 {
 	int i, socketind, ret, game_port;
 	client_t *cl;
-#ifdef TCP_ALLOW_CONNECT
+#ifdef TCP_ALLOW_TVCONNECT
 	socket_t newsocket;
 #endif
 	socket_t *socket;
 	netadr_t address;
 	msg_t msg;
-	qbyte msgData[MAX_MSGLEN];
+	uint8_t msgData[MAX_MSGLEN];
 
-#ifdef TCP_ALLOW_CONNECT
+#ifdef TCP_ALLOW_TVCONNECT
 	socket_t* tcpsockets [] =
 	{
 		&tvs.socket_tcp,
@@ -649,14 +649,14 @@ void TV_Downstream_ReadPackets( void )
 
 	MSG_Init( &msg, msgData, sizeof( msgData ) );
 
-#ifdef TCP_ALLOW_CONNECT
+#ifdef TCP_ALLOW_TVCONNECT
 	for( socketind = 0; socketind < sizeof( tcpsockets ) / sizeof( tcpsockets[0] ); socketind++ )
 	{
 		socket = tcpsockets[socketind];
 
 		if( socket->open )
 		{
-			while( qtrue )
+			while( true )
 			{
 				// find a free slot
 				for( i = 0; i < MAX_INCOMING_CONNECTIONS; i++ )
@@ -675,7 +675,7 @@ void TV_Downstream_ReadPackets( void )
 					continue;
 				}
 
-				tvs.incoming[i].active = qtrue;
+				tvs.incoming[i].active = true;
 				tvs.incoming[i].socket = newsocket;
 				tvs.incoming[i].address = address;
 				tvs.incoming[i].time = tvs.realtime;
@@ -691,7 +691,7 @@ void TV_Downstream_ReadPackets( void )
 			if( ret == -1 )
 			{
 				NET_CloseSocket( &tvs.incoming[i].socket );
-				tvs.incoming[i].active = qfalse;
+				tvs.incoming[i].active = false;
 			}
 			else if( ret == 1 )
 			{
@@ -699,7 +699,7 @@ void TV_Downstream_ReadPackets( void )
 				{
 					// sequence packet without upstreams
 					NET_CloseSocket( &tvs.incoming[i].socket );
-					tvs.incoming[i].active = qfalse;
+					tvs.incoming[i].active = false;
 					continue;
 				}
 
@@ -814,7 +814,7 @@ void TV_Downstream_CheckTimeouts( void )
 	client_t *client;
 	int i;
 
-#ifdef TCP_ALLOW_CONNECT
+#ifdef TCP_ALLOW_TVCONNECT
 	// timeout incoming upstreams
 	for( i = 0; i < MAX_INCOMING_CONNECTIONS; i++ )
 	{
@@ -822,7 +822,7 @@ void TV_Downstream_CheckTimeouts( void )
 		{
 			Com_Printf( "Incoming TCP upstream from %s timed out\n", NET_AddressToString( &tvs.incoming[i].address ) );
 			NET_CloseSocket( &tvs.incoming[i].socket );
-			tvs.incoming[i].active = qfalse;
+			tvs.incoming[i].active = false;
 		}
 	}
 #endif
@@ -836,7 +836,7 @@ void TV_Downstream_CheckTimeouts( void )
 
 		if( client->state == CS_ZOMBIE && client->lastPacketReceivedTime + 1000 * tv_zombietime->value < tvs.realtime )
 		{
-			userinfo_modified = qtrue;
+			userinfo_modified = true;
 			client->state = CS_FREE; // can now be reused
 			if( client->individual_socket )
 				NET_CloseSocket( &client->socket );
@@ -846,7 +846,7 @@ void TV_Downstream_CheckTimeouts( void )
 		if( ( client->state != CS_FREE && client->state != CS_ZOMBIE ) &&
 			( client->lastPacketReceivedTime + 1000 * tv_timeout->value < tvs.realtime ) )
 		{
-			userinfo_modified = qtrue;
+			userinfo_modified = true;
 			TV_Downstream_DropClient( client, DROP_TYPE_GENERAL, "Upstream timed out" );
 			client->state = CS_FREE; // don't bother with zombie state
 			if( client->socket.open )
@@ -877,11 +877,11 @@ void TV_Downstream_CheckTimeouts( void )
 /*
 * TV_Downstream_SendClientsFragments
 */
-qboolean TV_Downstream_SendClientsFragments( void )
+bool TV_Downstream_SendClientsFragments( void )
 {
 	client_t *client;
 	int i;
-	qboolean remaining = qfalse;
+	bool remaining = false;
 
 	// send a message to each connected client
 	for( i = 0, client = tvs.clients; i < tv_maxclients->integer; i++, client++ )
@@ -904,7 +904,7 @@ qboolean TV_Downstream_SendClientsFragments( void )
 		}
 
 		if( client->netchan.unsentFragments )
-			remaining = qtrue;
+			remaining = true;
 	}
 
 	return remaining;
@@ -918,7 +918,7 @@ void TV_Downstream_SendClientMessages( void )
 	int i;
 	client_t *client;
 	msg_t message;
-	qbyte messageData[MAX_MSGLEN];
+	uint8_t messageData[MAX_MSGLEN];
 
 	// send a message to each connected client
 	for( i = 0, client = tvs.clients; i < tv_maxclients->integer; i++, client++ )
@@ -1005,10 +1005,6 @@ void TV_Downstream_ExecuteClientThinks( relay_t *relay, client_t *client )
 		msec = ucmd->serverTimeStamp - client->UcmdTime;
 		clamp( msec, 1, 200 );
 		ucmd->msec = msec;
-		// convert push fractions to push times
-		ucmd->forwardmove = ucmd->forwardfrac * msec;
-		ucmd->sidemove = ucmd->sidefrac * msec;
-		ucmd->upmove = ucmd->upfrac * msec;
 		timeDelta = 0;
 		if( client->lastframe > 0 )
 			timeDelta = -(int)( higherTime - ucmd->serverTimeStamp );
@@ -1029,17 +1025,23 @@ void TV_Downstream_ExecuteClientThinks( relay_t *relay, client_t *client )
 //
 //==============================================================================
 
-static netadr_t tv_master_adr[MAX_MASTERS];    // address of group servers
+typedef struct sv_master_s
+{
+	netadr_t address;
+	bool steam;
+} tv_master_t;
+
+static tv_master_t tv_masters[MAX_MASTERS];    // address of group servers
 
 /*
 * TV_Downstream_AddMaster_f
 * Add a master server to the list
 */
-static void TV_Downstream_AddMaster_f( const char *master )
+static void TV_Downstream_AddMaster_f( const char *address, bool steam )
 {
 	int i;
 
-	if( !master || !master[0] )
+	if( !address || !address[0] )
 		return;
 
 	if( !tv_public->integer )
@@ -1050,18 +1052,22 @@ static void TV_Downstream_AddMaster_f( const char *master )
 
 	for( i = 0; i < MAX_MASTERS; i++ )
 	{
-		if( tv_master_adr[i].type != NA_NOTRANSMIT )
+		tv_master_t *master = &tv_masters[i];
+
+		if( master->address.type != NA_NOTRANSMIT )
 			continue;
 
-		if( !NET_StringToAddress( master, &tv_master_adr[i] ) )
+		if( !NET_StringToAddress( address, &master->address ) )
 		{
-			Com_Printf( "'SV_AddMaster_f' Bad Master server address: %s\n", master );
+			Com_Printf( "'TV_Downstream_AddMaster_f' Bad Master server address: %s\n", address );
 			return;
 		}
-		if( NET_GetAddressPort( &tv_master_adr[i] ) == 0 )
-			NET_SetAddressPort( &tv_master_adr[i], PORT_MASTER );
+		if( NET_GetAddressPort( &master->address ) == 0 )
+			NET_SetAddressPort( &master->address, steam ? PORT_MASTER_STEAM : PORT_MASTER );
 
-		Com_Printf( "Added new master server #%i at %s\n", i, NET_AddressToString( &tv_master_adr[i] ) );
+		master->steam = steam;
+
+		Com_Printf( "Added new master server #%i at %s\n", i, NET_AddressToString( &master->address ) );
 		return;
 	}
 
@@ -1074,12 +1080,10 @@ static void TV_Downstream_AddMaster_f( const char *master )
 */
 void TV_Downstream_InitMaster( void )
 {
-	int i;
 	const char *master, *mlist;
 
 	// wsw : jal : initialize masters list
-	for( i = 0; i < MAX_MASTERS; i++ )
-		memset( &tv_master_adr[i], 0, sizeof( tv_master_adr[i] ) );
+	memset( tv_masters, 0, sizeof( tv_masters ) );
 
 	if( !tv_public->integer )
 		return;
@@ -1093,11 +1097,26 @@ void TV_Downstream_InitMaster( void )
 			if( !master[0] )
 				break;
 
-			TV_Downstream_AddMaster_f( master );
+			TV_Downstream_AddMaster_f( master, false );
 		}
 	}
 
-	tvs.lobby.last_heartbeat = HEARTBEAT_SECONDS * 1000; // wait a while before sending first heartbeat
+#if APP_STEAMID
+	mlist = tv_masterservers_steam->string;
+	if( *mlist )
+	{
+		while( mlist )
+		{
+			master = COM_Parse( &mlist );
+			if( !master[0] )
+				break;
+
+			TV_Downstream_AddMaster_f( master, true );
+		}
+	}
+#endif
+
+	tvs.lobby.next_heartbeat = Sys_Milliseconds() + HEARTBEAT_SECONDS * 1000; // wait a while before sending first heartbeat
 }
 
 /*
@@ -1107,14 +1126,14 @@ void TV_Downstream_InitMaster( void )
 */
 void TV_Downstream_MasterHeartbeat( void )
 {
+	unsigned int time = Sys_Milliseconds();
 	int i;
 	const socket_t *socket;
 
-	tvs.lobby.last_heartbeat -= tvs.lobby.snapFrameTime;
-	if( tvs.lobby.last_heartbeat > 0 )
+	if( tvs.lobby.next_heartbeat > time )
 		return;
 
-	tvs.lobby.last_heartbeat = HEARTBEAT_SECONDS * 1000;
+	tvs.lobby.next_heartbeat = time + HEARTBEAT_SECONDS * 1000;
 
 	if( !tv_public->integer )
 		return;
@@ -1122,14 +1141,70 @@ void TV_Downstream_MasterHeartbeat( void )
 	// send to group master
 	for( i = 0; i < MAX_MASTERS; i++ )
 	{
-		if( tv_master_adr[i].type != NA_NOTRANSMIT )
+		tv_master_t *master = &tv_masters[i];
+
+		if( master->address.type != NA_NOTRANSMIT )
 		{
-			Com_Printf( "Sending heartbeat to %s\n", NET_AddressToString( &tv_master_adr[i] ) );
+			Com_Printf( "Sending heartbeat to %s\n", NET_AddressToString( &master->address ) );
 
-			socket = ( tv_master_adr[i].type == NA_IP6 ? &tvs.socket_udp6 : &tvs.socket_udp );
+			socket = ( master->address.type == NA_IP6 ? &tvs.socket_udp6 : &tvs.socket_udp );
 
-			// warning: "DarkPlaces" is a protocol name here, not a game name. Do not replace it.
-			Netchan_OutOfBandPrint( socket, &tv_master_adr[i], "heartbeat %s\n", "DarkPlaces" );
+			if( master->steam )
+			{
+				uint8_t steamHeartbeat = 'q';
+				NET_SendPacket( socket, &steamHeartbeat, sizeof( steamHeartbeat ), &master->address );
+			}
+			else
+			{
+				// warning: "DarkPlaces" is a protocol name here, not a game name. Do not replace it.
+				Netchan_OutOfBandPrint( socket, &master->address, "heartbeat DarkPlaces\n" );
+			}
 		}
 	}
+}
+
+/*
+* TV_Downstream_MasterSendQuit
+* Notifies Steam master servers that the server is shutting down.
+*/
+void TV_Downstream_MasterSendQuit( void )
+{
+	int i;
+	const char quitMessage[] = "b\n";
+
+	if( !tv_public->integer || ( tv_maxclients->integer == 1 ) )
+		return;
+
+	// send to group master
+	for( i = 0; i < MAX_MASTERS; i++ )
+	{
+		tv_master_t *master = &tv_masters[i];
+
+		if( master->steam && ( master->address.type != NA_NOTRANSMIT ) )
+		{
+			socket_t *socket = ( master->address.type == NA_IP6 ? &tvs.socket_udp6 : &tvs.socket_udp );
+			Com_Printf( "Sending quit to %s\n", NET_AddressToString( &master->address ) );
+			NET_SendPacket( socket, ( const uint8_t * )quitMessage, sizeof( quitMessage ), &master->address );
+		}
+	}
+}
+
+/*
+* TV_Downstream_IsMaster
+* Check whether the address belongs to a master servers.
+* Also may return whether it's a Steam master server.
+*/
+bool TV_Downstream_IsMaster( const netadr_t *address, bool *isSteam )
+{
+	int i;
+	for( i = 0; i < MAX_MASTERS; i++ )
+	{
+		if( NET_CompareAddress( address, &tv_masters[i].address ) )
+		{
+			if( isSteam )
+				*isSteam = tv_masters[i].steam;
+			return true;
+		}
+	}
+	return false;
 }

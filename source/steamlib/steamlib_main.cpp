@@ -66,4 +66,21 @@ int SteamLib_GetAuthSessionTicket( void (*callback)( void *, size_t ) )
 	return 0;
 }
 
+/*
+* SteamLib_AdvertiseGame
+*/
+void SteamLib_AdvertiseGame( const uint8_t *ip, unsigned short port )
+{
+}
+
+/*
+* SteamLib_GetPersonaName
+*/
+void SteamLib_GetPersonaName( char *name, size_t namesize )
+{
+	if( namesize ) {
+		name[0] = '\0';
+	}
+}
+
 }

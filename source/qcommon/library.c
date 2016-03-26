@@ -35,9 +35,9 @@ void Com_UnloadLibrary( void **lib )
 }
 
 /*
-* Com_LoadLibrary
+* Com_LoadLibraryExt
 */
-void *Com_LoadLibrary( const char *name, dllfunc_t *funcs )
+void *Com_LoadLibraryExt( const char *name, dllfunc_t *funcs, bool sys )
 {
 	void *lib;
 	dllfunc_t *func;
@@ -48,7 +48,10 @@ void *Com_LoadLibrary( const char *name, dllfunc_t *funcs )
 
 	Com_DPrintf( "LoadLibrary (%s)\n", name );
 
-	fullname = Sys_Library_GetFullName( name );
+	if( sys )
+		fullname = name;
+	else
+		fullname = Sys_Library_GetFullName( name );
 	if( !fullname )
 	{
 		Com_DPrintf( "LoadLibrary (%s):(Not found)\n", name );
@@ -58,7 +61,8 @@ void *Com_LoadLibrary( const char *name, dllfunc_t *funcs )
 	lib = Sys_Library_Open( fullname );
 	if( !lib )
 	{
-		Com_Printf( "LoadLibrary (%s):(%s)\n", fullname, Sys_Library_ErrorString() );
+		if( !sys )
+			Com_Printf( "LoadLibrary (%s):(%s)\n", fullname, Sys_Library_ErrorString() );
 		return NULL;
 	}
 
@@ -69,11 +73,57 @@ void *Com_LoadLibrary( const char *name, dllfunc_t *funcs )
 		if( !( *( func->funcPointer ) ) )
 		{
 			Com_UnloadLibrary( &lib );
+			if( sys )
+				return NULL;
 			Com_Error( ERR_FATAL, "%s: Sys_GetProcAddress failed for %s", fullname, func->name );
 		}
 	}
 
 	return lib;
+}
+
+/*
+* Com_LoadSysLibrary
+*/
+void *Com_LoadSysLibrary( const char *name, dllfunc_t *funcs )
+{
+	char *names;
+	size_t names_size;
+	char *s, *saveptr;
+	void *lib = NULL;
+
+	names_size = strlen( name ) + 1;
+	names = Q_malloc( names_size );
+	memcpy( names, name, names_size );
+
+	s = strtok_r( names, "|", &saveptr );
+	while( s != NULL ) {
+		lib = Com_LoadLibraryExt( s, funcs, true );
+		if( lib ) {
+			Com_Printf( "Loaded %s\n", s );
+			break;
+		}
+		s = strtok_r( NULL, "|", &saveptr );
+	}
+
+	free( names );
+	return lib;
+}
+
+/*
+* Com_LoadLibrary
+*/
+void *Com_LoadLibrary( const char *name, dllfunc_t *funcs )
+{
+	return Com_LoadLibraryExt( name, funcs, false );
+}
+
+/*
+* Com_LibraryProcAddress
+*/
+void *Com_LibraryProcAddress( void *lib, const char *name )
+{
+	return Sys_Library_ProcAddress( lib, name );
 }
 
 //==============================================
@@ -213,10 +263,10 @@ static void Com_LoadGameLibraryManifest( const char *libname, char *manifest )
 /*
 * Com_LoadGameLibrary
 */
-void *Com_LoadGameLibrary( const char *basename, const char *apifuncname, void **handle, void *parms, qboolean pure, char *manifest )
+void *Com_LoadGameLibrary( const char *basename, const char *apifuncname, void **handle, void *parms, bool pure, char *manifest )
 {
 	static int randomizer = 0; // random part of tempmodules dir, always the same for one launch of Warsow
-	static qint64 randomizer_time;
+	static int64_t randomizer_time;
 	const char *temppath;
 	char *tempname, *libname;
 	int libname_size;
@@ -236,9 +286,9 @@ void *Com_LoadGameLibrary( const char *basename, const char *apifuncname, void *
 	gamelib->lib = NULL;
 	gamelib->fullname = NULL;
 
-	libname_size = strlen( basename ) + 1 + strlen( ARCH ) + strlen( LIB_SUFFIX ) + 1;
+	libname_size = strlen( LIB_PREFIX ) + strlen( basename ) + 1 + strlen( ARCH ) + strlen( LIB_SUFFIX ) + 1;
 	libname = ( char* )Mem_TempMalloc( libname_size );
-	Q_snprintfz( libname, libname_size, "%s_" ARCH LIB_SUFFIX, basename );
+	Q_snprintfz( libname, libname_size, LIB_PREFIX "%s_" ARCH LIB_SUFFIX, basename );
 
 	// it exists?
 	if( FS_FOpenFile( libname, NULL, FS_READ ) == -1 )

@@ -24,9 +24,11 @@
 
 //=============================================================================
 
-#define	MAX_MASTERS			8               // max recipients for heartbeat packets
-#define	HEARTBEAT_SECONDS   300
-#define TTL_MASTERS			24*60*60
+#define	MAX_MASTERS						16 // max recipients for heartbeat packets
+#define	HEARTBEAT_SECONDS				300
+#define TTL_MASTERS						24*60*60
+
+#define USERINFO_UPDATE_COOLDOWN_MSEC	2000
 
 typedef enum
 {
@@ -81,18 +83,18 @@ struct edict_s
 	entity_shared_t	r;
 };
 
-#define EDICT_NUM( n ) ( (edict_t *)( (qbyte *)sv.gi.edicts + sv.gi.edict_size*( n ) ) )
-#define NUM_FOR_EDICT( e ) ( ( (qbyte *)( e )-(qbyte *)sv.gi.edicts ) / sv.gi.edict_size )
+#define EDICT_NUM( n ) ( (edict_t *)( (uint8_t *)sv.gi.edicts + sv.gi.edict_size*( n ) ) )
+#define NUM_FOR_EDICT( e ) ( ( (uint8_t *)( e )-(uint8_t *)sv.gi.edicts ) / sv.gi.edict_size )
 
 typedef struct
 {
-	qboolean allentities;
-	qboolean multipov;
-	qboolean relay;
+	bool allentities;
+	bool multipov;
+	bool relay;
 	int clientarea;
 	int numareas;
 	int areabytes;
-	qbyte *areabits;					// portalarea visibility bits
+	uint8_t *areabits;					// portalarea visibility bits
 	int numplayers;
 	int ps_size;
 	player_state_t *ps;                 // [numplayers]
@@ -106,7 +108,7 @@ typedef struct
 typedef struct
 {
 	char *name;
-	qbyte *data;            // file being downloaded
+	int file;
 	int size;               // total bytes (can't use EOF because of paks)
 	unsigned int timeout;   // so we can free the file being downloaded
 	                        // if client omits sending success or failure message
@@ -121,15 +123,19 @@ typedef struct
 #define	LATENCY_COUNTS	16
 #define	RATE_MESSAGES	25  // wsw : jal : was 10: I think it must fit sv_pps, I have to calculate it
 
+#define HTTP_CLIENT_SESSION_SIZE 16
+
 typedef struct client_s
 {
 	sv_client_state_t state;
 
-	char userinfo[MAX_INFO_STRING];     // name, etc
+	char userinfo[MAX_INFO_STRING];			// name, etc
+	char userinfoLatched[MAX_INFO_STRING];	// flood prevention - actual userinfo updates are delayed
+	unsigned int userinfoLatchTimeout;
 
-	qboolean reliable;                  // no need for acks, connection is reliable
-	qboolean mv;                        // send multiview data to the client
-	qboolean individual_socket;         // client has it's own socket that has to be checked separately
+	bool reliable;                  // no need for acks, connection is reliable
+	bool mv;                        // send multiview data to the client
+	bool individual_socket;         // client has it's own socket that has to be checked separately
 
 	socket_t socket;
 
@@ -153,7 +159,7 @@ typedef struct client_s
 	unsigned lastconnect;
 
 	int lastframe;                  // used for delta compression etc.
-	qboolean nodelta;               // send one non delta compressed frame trough
+	bool nodelta;               // send one non delta compressed frame trough
 	int nodelta_frame;              // when we get confirmation of this frame, the non-delta frame is trough
 	unsigned int lastSentFrameNum;  // for knowing which was last frame we sent
 
@@ -166,7 +172,7 @@ typedef struct client_s
 #endif
 	edict_t	*edict;                 // EDICT_NUM(clientnum+1)
 	char name[MAX_INFO_VALUE];      // extracted from userinfo, high bits masked
-	char session[16];               // session id for HTTP requests
+	char session[HTTP_CLIENT_SESSION_SIZE];  // session id for HTTP requests
 
 	client_snapshot_t snapShots[UPDATE_BACKUP]; // updates can be delta'd from here
 
@@ -176,7 +182,7 @@ typedef struct client_s
 
 	netchan_t netchan;
 
-	qboolean tvclient;
+	bool tvclient;
 
 	int mm_session;
 	unsigned int mm_ticket;
@@ -226,7 +232,7 @@ typedef server_static_demo_t demorec_t;
 #define MAX_INCOMING_CONNECTIONS 256
 typedef struct
 {
-	qboolean active;
+	bool active;
 	unsigned int time;      // for timeout
 	socket_t socket;
 	netadr_t address;
@@ -245,13 +251,13 @@ typedef struct client_entities_s
 typedef struct fatvis_s
 {
 	vec_t *skyorg;
-	qbyte pvs[MAX_MAP_LEAFS/8];
-	qbyte phs[MAX_MAP_LEAFS/8];
+	uint8_t pvs[MAX_MAP_LEAFS/8];
+	uint8_t phs[MAX_MAP_LEAFS/8];
 } fatvis_t;
 
 typedef struct
 {
-	qboolean initialized;               // sv_init has completed
+	bool initialized;               // sv_init has completed
 	unsigned int realtime;                  // real world time - always increasing, no clamping, etc
 	unsigned int gametime;                  // game world time - always increasing, no clamping, etc
 
@@ -285,15 +291,17 @@ typedef struct
 	fatvis_t fatvis;
 
 	char *motd;
+
+	void *wakelock;
 } server_static_t;
 
 typedef struct
 {
-	int	lastHeartbeat;
+	unsigned int nextHeartbeat;
 	unsigned int lastActivity;
 	unsigned int snapFrameTime;		// msecs between server packets
 	unsigned int gameFrameTime;		// msecs between game code executions
-	qboolean autostarted;
+	bool autostarted;
 	unsigned int lastMasterResolve;
 } server_constant_t;
 
@@ -301,7 +309,7 @@ typedef struct
 
 // shared message buffer to be used for occasional messages
 extern msg_t tmpMessage;
-extern qbyte tmpMessageData[MAX_MSGLEN];
+extern uint8_t tmpMessageData[MAX_MSGLEN];
 
 extern mempool_t *sv_mempool;
 
@@ -347,6 +355,7 @@ extern cvar_t *sv_debug_serverCmd;
 
 extern cvar_t *sv_uploads_http;
 extern cvar_t *sv_uploads_baseurl;
+extern cvar_t *sv_uploads_demos;
 extern cvar_t *sv_uploads_demos_baseurl;
 
 extern cvar_t *sv_pure;
@@ -380,7 +389,7 @@ int SV_SkinIndex( const char *name );
 
 void SV_WriteClientdataToMessage( client_t *client, msg_t *msg );
 
-void SV_AutoUpdateFromWeb( qboolean checkOnly );
+void SV_AutoUpdateFromWeb( bool checkOnly );
 void SV_InitOperatorCommands( void );
 void SV_ShutdownOperatorCommands( void );
 
@@ -388,6 +397,7 @@ void SV_SendServerinfo( client_t *client );
 void SV_UserinfoChanged( client_t *cl );
 
 void SV_MasterHeartbeat( void );
+void SV_MasterSendQuit( void );
 
 void SVC_MasterInfoResponse( const socket_t *socket, const netadr_t *address );
 int SVC_FakeConnect( char *fakeUserinfo, char *fakeSocketType, const char *fakeIP );
@@ -405,7 +415,7 @@ void SV_UpdateMaster( void );
 // sv_init.c
 //
 void SV_InitGame( void );
-void SV_Map( const char *level, qboolean devmap );
+void SV_Map( const char *level, bool devmap );
 void SV_SetServerConfigStrings( void );
 
 void SV_AddPureFile( const char *filename );
@@ -419,14 +429,14 @@ void SV_PrepWorldFrame( void );
 //
 // sv_send.c
 //
-qboolean SV_Netchan_Transmit( netchan_t *netchan, msg_t *msg );
+bool SV_Netchan_Transmit( netchan_t *netchan, msg_t *msg );
 void SV_AddServerCommand( client_t *client, const char *cmd );
 void SV_SendServerCommand( client_t *cl, const char *format, ... );
 void SV_AddGameCommand( client_t *client, const char *cmd );
 void SV_AddReliableCommandsToMessage( client_t *client, msg_t *msg );
-qboolean SV_SendClientsFragments( void );
-void SV_InitClientMessage( client_t *client, msg_t *msg, qbyte *data, size_t size );
-qboolean SV_SendMessageToClient( client_t *client, msg_t *msg );
+bool SV_SendClientsFragments( void );
+void SV_InitClientMessage( client_t *client, msg_t *msg, uint8_t *data, size_t size );
+bool SV_SendMessageToClient( client_t *client, msg_t *msg );
 void SV_ResetClientFrameCounters( void );
 
 typedef enum { RD_NONE, RD_PACKET } redirect_t;
@@ -459,18 +469,18 @@ void SV_BroadcastCommand( const char *format, ... );
 // sv_client.c
 //
 void SV_ParseClientMessage( client_t *client, msg_t *msg );
-qboolean SV_ClientConnect( const socket_t *socket, const netadr_t *address, client_t *client, char *userinfo,
-                           int game_port, int challenge, qboolean fakeClient, qboolean tvClient,
+bool SV_ClientConnect( const socket_t *socket, const netadr_t *address, client_t *client, char *userinfo,
+                           int game_port, int challenge, bool fakeClient, bool tvClient,
                            unsigned int ticket_id, int session_id );
 void SV_DropClient( client_t *drop, int type, const char *format, ... );
 void SV_ExecuteClientThinks( int clientNum );
 void SV_ClientResetCommandBuffers( client_t *client );
-qboolean SV_ClientAllowHttpRequest( int clientNum, const char *session );
+void SV_ClientCloseDownload( client_t *client );
 
 //
 // sv_mv.c
 //
-qboolean SV_Multiview_CreateStartMessages( qboolean ( *callback )( msg_t *msg, void *extra ), void *extra );
+bool SV_Multiview_CreateStartMessages( bool ( *callback )( msg_t *msg, void *extra ), void *extra );
 
 
 //
@@ -513,7 +523,7 @@ void SV_DemoGet_f( client_t *client );
 
 #define SV_SetDemoMetaKeyValue(k,v) svs.demo.meta_data_realsize = SNAP_SetDemoMetaKeyValue(svs.demo.meta_data, sizeof(svs.demo.meta_data), svs.demo.meta_data_realsize, k, v)
 
-qboolean SV_IsDemoDownloadRequest( const char *request );
+bool SV_IsDemoDownloadRequest( const char *request );
 
 //
 // sv_motd.c
@@ -525,9 +535,9 @@ void SV_MOTD_Get_f( client_t *client );
 // sv_mm.c
 //
 void SV_MM_Init( void );
-void SV_MM_Shutdown( qboolean logout );
+void SV_MM_Shutdown( bool logout );
 void SV_MM_Frame( void );
-qboolean SV_MM_Initialized( void );
+bool SV_MM_Initialized( void );
 
 int SV_MM_ClientConnect( const netadr_t *address, char *userinfo, unsigned int ticket, int session );
 void SV_MM_ClientDisconnect( client_t *client );
@@ -536,15 +546,21 @@ int SV_MM_GenerateLocalSession( void );
 
 // match report
 #include "../matchmaker/mm_common.h"
+struct stat_query_s *SV_MM_CreateQuery( const char *iface, const char *url, bool get );
 void SV_MM_SendQuery( stat_query_t *query );
-void SV_MM_GameState( qboolean state );
+void SV_MM_GameState( bool state );
 void SV_MM_GetMatchUUID( void (*callback_fn)( const char *uuid ) );
 
 // 
 // sv_web.c
 //
+typedef http_response_code_t ( *http_game_query_cb )( http_query_method_t method, const char *resource, 
+		const char *query_string, char **content, size_t *content_length );
+
 void SV_Web_Init( void );
-void SV_Web_Frame( void );
 void SV_Web_Shutdown( void );
-qboolean SV_Web_Running( void );
+bool SV_Web_Running( void );
 const char *SV_Web_UpstreamBaseUrl( void );
+bool SV_Web_AddGameClient( const char *session, int clientNum, const netadr_t *netAdr );
+void SV_Web_RemoveGameClient( const char *session );
+void SV_Web_GameFrame( http_game_query_cb cb );

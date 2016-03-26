@@ -33,16 +33,16 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /*
 * private vars
 */
-static qboolean sv_mm_initialized = qfalse;
+static bool sv_mm_initialized = false;
 static int sv_mm_session;
 
 // local session counter
 static unsigned int sv_mm_localsession;
 static unsigned int sv_mm_last_heartbeat;
-static qboolean sv_mm_logout_semaphore = qfalse;
+static bool sv_mm_logout_semaphore = false;
 
 // flag for gamestate = game-on
-static qboolean sv_mm_gameon = qfalse;
+static bool sv_mm_gameon = false;
 
 static stat_query_t *sv_login_query = NULL;
 
@@ -65,8 +65,8 @@ cvar_t *sv_mm_debug_reportbots;
 * prototypes
 */
 static void SV_MM_ReportMatch( const char *report );
-static qboolean SV_MM_Login( void );
-static void SV_MM_Logout( qboolean force );
+static bool SV_MM_Login( void );
+static void SV_MM_Logout( bool force );
 static void SV_MM_GetMatchUUIDThink( void );
 
 /*
@@ -110,6 +110,11 @@ int SV_MM_GenerateLocalSession( void )
 //		HTTP REQUESTS
 //======================================
 
+struct stat_query_s *SV_MM_CreateQuery( const char *iface, const char *url, bool get )
+{
+	return sq_api->CreateQuery( sv_ip->string, url, false );
+}
+
 void SV_MM_SendQuery( struct stat_query_s *query )
 {
 	// add our session id
@@ -119,12 +124,12 @@ void SV_MM_SendQuery( struct stat_query_s *query )
 
 // TODO: instead of this, factor ClientDisconnect to game module which can flag
 // the gamestate in that function
-void SV_MM_GameState( qboolean gameon )
+void SV_MM_GameState( bool gameon )
 {
 	sv_mm_gameon = gameon;
 }
 
-static void sv_mm_heartbeat_done( stat_query_t *query, qboolean success, void *customp )
+static void sv_mm_heartbeat_done( stat_query_t *query, bool success, void *customp )
 {
 }
 
@@ -136,7 +141,7 @@ void SV_MM_Heartbeat( void )
 		return;
 
 	// push a request
-	query = sq_api->CreateQuery( "shb", qfalse );
+	query = sq_api->CreateQuery( sv_ip->string, "shb", false );
 	if( query == NULL )
 		return;
 
@@ -152,10 +157,12 @@ void SV_MM_Heartbeat( void )
 * sv_mm_clientdisconnect_done
 * This only exists so that we are sure the message got through
 */
-static void sv_mm_clientdisconnect_done( stat_query_t *query, qboolean success, void *customp )
+static void sv_mm_clientdisconnect_done( stat_query_t *query, bool success, void *customp )
 {
-	if( success == qtrue )
-		Com_Printf("SV_MM_ClientDisconnect: Acknowledged %d\n", (int)customp );
+	intptr_t p = (uintptr_t)customp;
+
+	if( success == true )
+		Com_Printf("SV_MM_ClientDisconnect: Acknowledged %i\n", (int)p);
 	else
 		Com_Printf("SV_MM_ClientDisconnect: Error\n" );
 }
@@ -172,7 +179,7 @@ void SV_MM_ClientDisconnect( client_t *client )
 		return;
 
 	// push a request
-	query = sq_api->CreateQuery( "scd", qfalse );
+	query = sq_api->CreateQuery( sv_ip->string, "scd", false );
 	if( query == NULL )
 		return;
 
@@ -181,9 +188,9 @@ void SV_MM_ClientDisconnect( client_t *client )
 
 	// clients session
 	sq_api->SetField( query, "csession", va("%d", client->mm_session ) );
-	sq_api->SetField( query, "gameon", sv_mm_gameon == qtrue ? "1" : "0" );
+	sq_api->SetField( query, "gameon", sv_mm_gameon == true ? "1" : "0" );
 
-	sq_api->SetCallback( query, sv_mm_clientdisconnect_done, (void*)client->mm_session );
+	sq_api->SetCallback( query, sv_mm_clientdisconnect_done, (void *)((intptr_t)client->mm_session) );
 	sq_api->Send( query );
 }
 
@@ -191,12 +198,13 @@ void SV_MM_ClientDisconnect( client_t *client )
 * sv_clientconnect_done
 * callback for clientconnect POST request
 */
-static void sv_mm_clientconnect_done( stat_query_t *query, qboolean success, void *customp )
+static void sv_mm_clientconnect_done( stat_query_t *query, bool success, void *customp )
 {
 	stat_query_section_t *root, *ratings_section;
 	int session_id, isession_id;
 	client_t *cl;
 	edict_t *ent;
+	bool userinfo_changed = false;
 
 	/*
 	 * ch : JSON API
@@ -217,7 +225,7 @@ static void sv_mm_clientconnect_done( stat_query_t *query, qboolean success, voi
 	 * (currently we dont even tell MM about these so ignore)
 	 */
 	
-	session_id = (int)customp;
+	session_id = (int)((intptr_t )customp);
 	isession_id = 0;
 	cl = SV_MM_ClientForSession( session_id );
 
@@ -239,6 +247,17 @@ static void sv_mm_clientconnect_done( stat_query_t *query, qboolean success, voi
 		}
 		else
 		{
+			int banned = (int)sq_api->GetNumber( root, "banned" );
+			if( banned != 0 ) 
+			{
+				const char *reason = sq_api->GetString( root, "reason" );
+				if( !reason || *reason == '\0' )
+					reason = "Your account at " APP_URL " has been banned.";
+
+				SV_DropClient( cl, DROP_TYPE_GENERAL, "Error: %s", reason );
+				return;
+			}
+
 			isession_id = (int)sq_api->GetNumber( root, "id" );
 			if( isession_id == 0 )
 			{
@@ -255,10 +274,10 @@ static void sv_mm_clientconnect_done( stat_query_t *query, qboolean success, voi
 				ratings_section = sq_api->GetSection( root, "ratings" );
 
 				Q_strncpyz( cl->mm_login, login, sizeof( cl->mm_login ) );
-
 				if( !Info_SetValueForKey( cl->userinfo, "cl_mm_login", login ) ) {
 					Com_Printf( "Failed to set infokey cl_mm_login for player %s\n", login );
 				}
+				userinfo_changed = true;
 
 				if( ge != NULL && ratings_section != NULL )
 				{
@@ -273,7 +292,6 @@ static void sv_mm_clientconnect_done( stat_query_t *query, qboolean success, voi
 						element = sq_api->GetArraySection( ratings_section, idx++ );
 					}
 				}
-				SV_UserinfoChanged( cl );
 			}
 		}
 	}
@@ -283,7 +301,7 @@ static void sv_mm_clientconnect_done( stat_query_t *query, qboolean success, voi
 	{
 		if( sv_mm_loginonly->integer )
 		{
-			SV_DropClient( cl, DROP_TYPE_GENERAL, "Error: This server requires login. Create account at " APP_URL );
+			SV_DropClient( cl, DROP_TYPE_GENERAL, "%s", "Error: This server requires login. Create account at " APP_URL );
 			return;
 		}
 
@@ -291,11 +309,7 @@ static void sv_mm_clientconnect_done( stat_query_t *query, qboolean success, voi
 		isession_id = SV_MM_GenerateLocalSession();
 		Com_Printf("SV_MM_ClientConnect: Forcing local_session %d on client %s\n", isession_id, cl->name );
 		cl->mm_session = isession_id;
-		// TODO: reflect this to the userinfo
-		// racesow - Let UserinfoChanged update it
-		// Info_SetValueForKey( cl->userinfo, "cl_mm_session", va("%d", isession_id ) );
-		SV_UserinfoChanged( cl );
-		// !racesow
+		userinfo_changed = true;
 
 		// We should also notify MM about the new local session id?
 		// Or another option would be that MM doesnt track local sessions at all,
@@ -304,6 +318,9 @@ static void sv_mm_clientconnect_done( stat_query_t *query, qboolean success, voi
 		// resend scc query
 		// cl->socket->address
 	}
+
+	if( userinfo_changed )
+		SV_UserinfoChanged( cl );
 
 	Com_Printf("SV_MM_ClientConnect: %s with session id %d\n", cl->name, cl->mm_session );
 }
@@ -351,7 +368,7 @@ int SV_MM_ClientConnect( const netadr_t *address, char *userinfo, unsigned int t
 	}
 
 	// push a request
-	query = sq_api->CreateQuery( "scc", qfalse );
+	query = sq_api->CreateQuery( sv_ip->string, "scc", false );
 	if( query == NULL )
 		return 0;
 
@@ -363,7 +380,7 @@ int SV_MM_ClientConnect( const netadr_t *address, char *userinfo, unsigned int t
 	sq_api->SetField( query, "csession", va("%d", session_id ) );
 	sq_api->SetField( query, "cip", NET_AddressToString( address ) );
 
-	sq_api->SetCallback( query, sv_mm_clientconnect_done, (void*)session_id );
+	sq_api->SetCallback( query, sv_mm_clientconnect_done, (void*)((intptr_t)session_id) );
 	sq_api->Send( query );
 
 	return session_id;
@@ -378,9 +395,9 @@ void SV_MM_Frame( void )
 		if( sv_mm_enable->integer && !sv_mm_initialized )
 			SV_MM_Login();
 		else if( !sv_mm_enable->integer && sv_mm_initialized )
-			SV_MM_Logout(qfalse);
+			SV_MM_Logout(false);
 
-		sv_mm_enable->modified = qfalse;
+		sv_mm_enable->modified = false;
 	}
 
 	if( sv_mm_initialized )
@@ -388,8 +405,8 @@ void SV_MM_Frame( void )
 		if( sv_mm_logout_semaphore )
 		{
 			// logout process is finished so we can shutdown game
-			SV_MM_Shutdown( qfalse );
-			sv_mm_logout_semaphore = qfalse;
+			SV_MM_Shutdown( false );
+			sv_mm_logout_semaphore = false;
 			return;
 		}
 
@@ -405,24 +422,24 @@ void SV_MM_Frame( void )
 	}
 }
 
-qboolean SV_MM_Initialized( void )
+bool SV_MM_Initialized( void )
 {
 	return sv_mm_initialized;
 }
 
 
-static void sv_mm_logout_done( stat_query_t *query, qboolean success, void *customp )
+static void sv_mm_logout_done( stat_query_t *query, bool success, void *customp )
 {
 	Com_Printf("SV_MM_Logout: Loggin off..\n");
 
 	// ignore response-status and just mark us as logged-out
-	sv_mm_logout_semaphore = qtrue;
+	sv_mm_logout_semaphore = true;
 }
 
 /*
 * SV_MM_Logout
 */
-static void SV_MM_Logout( qboolean force )
+static void SV_MM_Logout( bool force )
 {
 	stat_query_t *query;
 	unsigned int timeout;
@@ -430,11 +447,11 @@ static void SV_MM_Logout( qboolean force )
 	if( !sv_mm_initialized || !sv_mm_session )
 		return;
 
-	query = sq_api->CreateQuery( "slogout", qfalse );
+	query = sq_api->CreateQuery( sv_ip->string, "slogout", false );
 	if( query == NULL )
 		return;
 
-	sv_mm_logout_semaphore = qfalse;
+	sv_mm_logout_semaphore = false;
 
 	// TODO: pull the authkey out of cvar into file
 	sq_api->SetField( query, "ssession", va( "%d", sv_mm_session ) );
@@ -456,10 +473,10 @@ static void SV_MM_Logout( qboolean force )
 		else
 			Com_Printf("SV_MM_Logout: force logout successful\n");
 
-		sv_mm_logout_semaphore = qfalse;
+		sv_mm_logout_semaphore = false;
 
 		// dont call this, we are coming from shutdown
-		// SV_MM_Shutdown( qfalse );
+		// SV_MM_Shutdown( false );
 	}
 }
 
@@ -467,11 +484,11 @@ static void SV_MM_Logout( qboolean force )
 * sv_mm_login_done
 * callback for login post request
 */
-static void sv_mm_login_done( stat_query_t *query, qboolean success, void *customp )
+static void sv_mm_login_done( stat_query_t *query, bool success, void *customp )
 {
 	stat_query_section_t *root;
 
-	sv_mm_initialized = qfalse;
+	sv_mm_initialized = false;
 	sv_login_query = NULL;
 
 	if( !success )
@@ -497,7 +514,7 @@ static void sv_mm_login_done( stat_query_t *query, qboolean success, void *custo
 	else
 	{
 		sv_mm_session = (int)sq_api->GetNumber( root, "id" );
-		sv_mm_initialized = ( sv_mm_session == 0 ? qfalse : qtrue );
+		sv_mm_initialized = ( sv_mm_session == 0 ? false : true );
 	}
 
 	if( sv_mm_initialized )
@@ -512,21 +529,22 @@ static void sv_mm_login_done( stat_query_t *query, qboolean success, void *custo
 /*
 * SV_MM_Login
 */
-static qboolean SV_MM_Login( void )
+static bool SV_MM_Login( void )
 {
 	stat_query_t *query;
 
 	if( sv_login_query != NULL || sv_mm_initialized )
-		return qfalse;
+		return false;
 	if( sv_mm_authkey->string[0] == '\0' ) {
-		return qfalse;
+		Cvar_ForceSet( sv_mm_enable->name, "0" );
+		return false;
 	}
 
 	Com_Printf( "SV_MM_Login: Creating query\n" );
 
-	query = sq_api->CreateQuery( "slogin", qfalse );
+	query = sq_api->CreateQuery( sv_ip->string, "slogin", false );
 	if( query == NULL )
-		return qfalse;
+		return false;
 
 	sq_api->SetField( query, "authkey", sv_mm_authkey->string );
 	sq_api->SetField( query, "port", va( "%d", sv_port->integer ) );
@@ -537,14 +555,14 @@ static qboolean SV_MM_Login( void )
 
 	sv_login_query = query;
 
-	return qtrue;
+	return true;
 }
 
 /*
 * sv_mm_match_uuid_done
 * callback for match uuid fetching
 */
-static void sv_mm_match_uuid_done( stat_query_t *query, qboolean success, void *customp )
+static void sv_mm_match_uuid_done( stat_query_t *query, bool success, void *customp )
 {
 	stat_query_section_t *root;
 
@@ -607,7 +625,7 @@ static void SV_MM_GetMatchUUIDThink( void )
 	// ok, get it now!
 	Com_DPrintf( "SV_MM_GetMatchUUIDThink: Creating query\n" );
 
-	query = sq_api->CreateQuery( "smuuid", qfalse );
+	query = sq_api->CreateQuery( sv_ip->string, "smuuid", false );
 	if( query == NULL ) {
 		return;
 	}
@@ -652,13 +670,13 @@ void SV_MM_GetMatchUUID( void (*callback_fn)( const char *uuid ) )
 */
 void SV_MM_Init( void )
 {
-	sv_mm_initialized = qfalse;
+	sv_mm_initialized = false;
 	sv_mm_session = 0;
 	sv_mm_localsession = 0;
 	sv_mm_last_heartbeat = 0;
-	sv_mm_logout_semaphore = qfalse;
+	sv_mm_logout_semaphore = false;
 
-	sv_mm_gameon = qfalse;
+	sv_mm_gameon = false;
 
 	sv_mm_match_uuid[0] = '\0';
 	sv_mm_next_match_uuid_fetch = Sys_Milliseconds();
@@ -689,10 +707,10 @@ void SV_MM_Init( void )
 	sv_login_query = NULL;
 	//if( sv_mm_enable->integer )
 	//	SV_MM_Login();
-	sv_mm_enable->modified = qtrue;
+	sv_mm_enable->modified = true;
 }
 
-void SV_MM_Shutdown( qboolean logout )
+void SV_MM_Shutdown( bool logout )
 {
 	if( !sv_mm_initialized )
 		return;
@@ -701,16 +719,16 @@ void SV_MM_Shutdown( qboolean logout )
 
 	if( logout )
 		// logout is always force in here
-		SV_MM_Logout( qtrue );
+		SV_MM_Logout( true );
 
 	Cvar_ForceSet( "sv_mm_enable", "0" );
 
-	sv_mm_gameon = qfalse;
+	sv_mm_gameon = false;
 
 	sv_mm_last_heartbeat = 0;
-	sv_mm_logout_semaphore = qfalse;
+	sv_mm_logout_semaphore = false;
 
-	sv_mm_initialized = qfalse;
+	sv_mm_initialized = false;
 	sv_mm_session = 0;
 
 	StatQuery_Shutdown();

@@ -46,7 +46,7 @@ static bool G_Teleport( edict_t *ent, vec3_t origin, vec3_t angles )
 	VectorCopy( origin, ent->s.origin );
 	VectorCopy( origin, ent->s.old_origin );
 	VectorCopy( origin, ent->olds.origin );
-	ent->s.teleported = qtrue;
+	ent->s.teleported = true;
 
 	VectorClear( ent->velocity );
 	ent->r.client->ps.pmove.pm_time = 1;
@@ -280,7 +280,7 @@ static void Cmd_GameOperator_f( edict_t *ent )
 	if( !Q_stricmp( trap_Cmd_Argv( 1 ), g_operator_password->string ) )
 	{
 		if( !ent->r.client->isoperator )
-			G_PrintMsg( NULL, "%s"S_COLOR_WHITE" is now a game operator\n", ent->r.client->netname );
+			G_PrintMsg( NULL, "%s" S_COLOR_WHITE " is now a game operator\n", ent->r.client->netname );
 
 		ent->r.client->isoperator = true;
 		return;
@@ -478,11 +478,26 @@ static void Cmd_PlayersExt_f( edict_t *ent, bool onlyspecs )
 	{
 		if( trap_GetClientState( i ) >= CS_SPAWNED )
 		{
-			if( onlyspecs && game.edicts[i+1].s.team != TEAM_SPECTATOR )
+			edict_t *ent = &game.edicts[i+1];
+			gclient_t *cl;
+			const char *login;
+
+			if( onlyspecs && ent->s.team != TEAM_SPECTATOR )
 				continue;
 
-			Q_snprintfz( line, sizeof( line ), "%3i %s%s\n", i, game.clients[i].netname,
-				game.clients[i].isoperator ? " op" : "" );
+			cl = ent->r.client;
+
+			login = NULL;
+			if( cl->mm_session > 0 ) {
+				login = Info_ValueForKey( cl->userinfo, "cl_mm_login" );
+			}
+			if( !login ) {
+				login = "";
+			}
+
+			Q_snprintfz( line, sizeof( line ), "%3i %s" S_COLOR_WHITE "%s%s%s%s\n", i, cl->netname,
+				login[0] ? "(" S_COLOR_YELLOW : "", login, login[0] ? S_COLOR_WHITE ")" : "",
+				cl->isoperator ? " op" : "" );
 
 			if( strlen( line ) + strlen( msg ) > sizeof( msg ) - 100 )
 			{
@@ -494,7 +509,7 @@ static void Cmd_PlayersExt_f( edict_t *ent, bool onlyspecs )
 			if( count == 0 )
 			{
 				Q_strncatz( msg, "num name\n", sizeof( msg ) );
-				Q_strncatz( msg, "--- ---------------\n", sizeof( msg ) );
+				Q_strncatz( msg, "--- ------------------------------\n", sizeof( msg ) );
 			}
 
 			Q_strncatz( msg, line, sizeof( msg ) );
@@ -503,7 +518,7 @@ static void Cmd_PlayersExt_f( edict_t *ent, bool onlyspecs )
 	}
 
 	if( count )
-		Q_strncatz( msg, "--- ---------------\n", sizeof( msg ) );
+		Q_strncatz( msg, "--- ------------------------------\n", sizeof( msg ) );
 	Q_strncatz( msg, va( "%3i %s\n", count, trap_Cmd_Argv( 0 ) ), sizeof( msg ) );
 	G_PrintMsg( ent, "%s", msg );
 
@@ -543,7 +558,7 @@ bool CheckFlood( edict_t *ent, bool teamonly )
 			trap_Cvar_Set( "g_floodprotection_messages", "0" );
 		if( g_floodprotection_messages->integer > MAX_FLOOD_MESSAGES )
 			trap_Cvar_Set( "g_floodprotection_messages", va( "%i", MAX_FLOOD_MESSAGES ) );
-		g_floodprotection_messages->modified = qfalse;
+		g_floodprotection_messages->modified = false;
 	}
 
 	if( g_floodprotection_team->modified )
@@ -552,21 +567,21 @@ bool CheckFlood( edict_t *ent, bool teamonly )
 			trap_Cvar_Set( "g_floodprotection_team", "0" );
 		if( g_floodprotection_team->integer > MAX_FLOOD_MESSAGES )
 			trap_Cvar_Set( "g_floodprotection_team", va( "%i", MAX_FLOOD_MESSAGES ) );
-		g_floodprotection_team->modified = qfalse;
+		g_floodprotection_team->modified = false;
 	}
 
 	if( g_floodprotection_seconds->modified )
 	{
 		if( g_floodprotection_seconds->value <= 0 )
 			trap_Cvar_Set( "g_floodprotection_seconds", "4" );
-		g_floodprotection_seconds->modified = qfalse;
+		g_floodprotection_seconds->modified = false;
 	}
 
 	if( g_floodprotection_penalty->modified )
 	{
 		if( g_floodprotection_penalty->value < 0 )
 			trap_Cvar_Set( "g_floodprotection_penalty", "10" );
-		g_floodprotection_penalty->modified = qfalse;
+		g_floodprotection_penalty->modified = false;
 	}
 
 	// old protection still active
@@ -671,6 +686,19 @@ void Cmd_Say_f( edict_t *ent, bool arg0, bool checkflood )
 {
 	char *p;
 	char text[2048];
+	size_t arg0len = 0;
+
+#ifdef AUTHED_SAY
+	if( sv_mm_enable->integer && ent->r.client && ent->r.client->mm_session <= 0 )
+	{
+		// unauthed players are only allowed to chat to public at non play-time
+		if( GS_MatchState() == MATCH_STATE_PLAYTIME )
+		{
+			G_PrintMsg( ent, "%s", S_COLOR_YELLOW "You must authenticate to be able to communicate to other players during the match.\n");
+			return;
+		}
+	}
+#endif
 
 	if( checkflood )
 	{
@@ -678,7 +706,7 @@ void Cmd_Say_f( edict_t *ent, bool arg0, bool checkflood )
 			return;
 	}
 
-	if( ent->r.client && ent->r.client->muted & 1 )
+	if( ent->r.client && ( ent->r.client->muted & 1 ) )
 		return;
 
 	if( trap_Cmd_Argc() < 2 && !arg0 )
@@ -690,6 +718,7 @@ void Cmd_Say_f( edict_t *ent, bool arg0, bool checkflood )
 	{
 		Q_strncatz( text, trap_Cmd_Argv( 0 ), sizeof( text ) );
 		Q_strncatz( text, " ", sizeof( text ) );
+		arg0len = strlen( text );
 		Q_strncatz( text, trap_Cmd_Args(), sizeof( text ) );
 	}
 	else
@@ -706,8 +735,10 @@ void Cmd_Say_f( edict_t *ent, bool arg0, bool checkflood )
 	}
 
 	// don't let text be too long for malicious reasons
-	if( strlen( text ) > 150 )
-		text[150] = 0;
+	text[arg0len + (MAX_CHAT_BYTES - 1)] = 0;
+
+	if( !Q_stricmp( text, "gg" ) || !Q_stricmp( text, "good game" ) )
+		G_AwardFairPlay( ent );
 
 	G_ChatMsg( NULL, ent, false, "%s", text );
 }
@@ -735,7 +766,7 @@ typedef struct
 	const char *message;
 } g_vsays_t;
 
-static g_vsays_t g_vsays[] = {
+static const g_vsays_t g_vsays[] = {
 	{ "needhealth", VSAY_NEEDHEALTH, "Need health!" },
 	{ "needweapon", VSAY_NEEDWEAPON, "Need weapon!" },
 	{ "needarmor", VSAY_NEEDARMOR, "Need armor!" },
@@ -761,18 +792,22 @@ static g_vsays_t g_vsays[] = {
 	{ "roger", VSAY_ROGER, "Roger!" },
 	{ "armorfree", VSAY_ARMORFREE, "Armor free!" },
 	{ "areasecured", VSAY_AREASECURED, "Area secured!" },
-	{ "shutup", VSAY_SHUTUP, "Shut up!" },
 	{ "boomstick", VSAY_BOOMSTICK, "Need a weapon!" },
 	{ "gotopowerup", VSAY_GOTOPOWERUP, "Go to main powerup!" },
 	{ "gotoquad", VSAY_GOTOQUAD, "Go to quad!" },
 	{ "ok", VSAY_OK, "Ok!" },
-	{ NULL, 0, NULL }
+	{ "defend_a", VSAY_DEFEND_A, "Defend A!" },
+	{ "attack_a", VSAY_ATTACK_A, "Attack A!" },
+	{ "defend_b", VSAY_DEFEND_B, "Defend B!" },
+	{ "attack_b", VSAY_ATTACK_B, "Attack B!" },
+
+	{ NULL, 0 }
 };
 
 void G_BOTvsay_f( edict_t *ent, const char *msg, bool team )
 {
 	edict_t	*event = NULL;
-	g_vsays_t *vsay;
+	const g_vsays_t *vsay;
 	const char *text = NULL;
 
 	if( !( ent->r.svflags & SVF_FAKECLIENT ) )
@@ -814,18 +849,18 @@ void G_BOTvsay_f( edict_t *ent, const char *msg, bool team )
 static void G_vsay_f( edict_t *ent, bool team )
 {
 	edict_t	*event = NULL;
-	g_vsays_t *vsay;
+	const g_vsays_t *vsay;
 	const char *text = NULL;
 	char *msg = trap_Cmd_Argv( 1 );
 
-	if( ent->r.client && ent->r.client->muted & 2 )
+	if( ent->r.client && ( ent->r.client->muted & 2 ) )
 		return;
 
 	if( ( !GS_TeamBasedGametype() || GS_InvidualGameType() ) && ent->s.team != TEAM_SPECTATOR )
 		team = false;
 
-	if( !( ent->r.svflags & SVF_FAKECLIENT ) )
-	{                                      // ignore flood checks on bots
+	if( !( ent->r.svflags & SVF_FAKECLIENT ) ) // ignore flood checks on bots
+	{
 		if( ent->r.client->level.last_vsay > game.realtime - 500 )
 			return; // ignore silently vsays in that come in rapid succession
 		ent->r.client->level.last_vsay = game.realtime;
@@ -854,6 +889,10 @@ static void G_vsay_f( edict_t *ent, bool team )
 		{
 			event->s.team = ent->s.team;
 			event->r.svflags |= SVF_ONLYTEAM; // send only to clients with the same ->s.team value
+		}
+
+		if( !team && ( vsay->id == VSAY_GOODGAME ) ) {
+			G_AwardFairPlay( ent );
 		}
 
 		if( trap_Cmd_Argc() > 2 )
@@ -1023,7 +1062,7 @@ static void Cmd_Awards_f ( edict_t *ent )
 	assert( ent && ent->r.client );
 	client = ent->r.client;
 
-	Q_snprintfz ( entry, sizeof( entry ), "Awards for %s \n", client->netname );
+	Q_snprintfz ( entry, sizeof( entry ), "Awards for %s\n", client->netname );
 
 	if ( client->level.stats.awardAllocator )
 	{
@@ -1181,7 +1220,7 @@ static void Cmd_Whois_f( edict_t *ent )
 
 	login = Info_ValueForKey( cl->userinfo, "cl_mm_login" );
 
-	G_PrintMsg( ent, "%s%s is %s\n", cl->netname, S_COLOR_WHITE, login );
+	G_PrintMsg( ent, "%s%s is %s\n", cl->netname, S_COLOR_WHITE, login ? login : "unknown" );
 }
 
 /*
@@ -1192,6 +1231,18 @@ static void Cmd_Whois_f( edict_t *ent )
 static void Cmd_TVConnect_f( edict_t *ent )
 {
 	G_MoveClientToTV( ent );
+}
+
+/*
+* Cmd_Upstate_f
+*
+* Update client on the state of things
+*/
+static void Cmd_Upstate_f( edict_t *ent )
+{
+	G_UpdatePlayerMatchMsg( ent, true );
+	G_SetPlayerHelpMessage( ent, ent->r.client->level.helpmessage, true );
+	trap_GameCmd( ent, va( "qm %s", ent->r.client->level.quickMenuItems ) );
 }
 
 //===========================================================
@@ -1304,6 +1355,7 @@ void G_InitGameCommands( void )
 	G_AddCommand( "chaseprev", Cmd_ChasePrev_f );
 	G_AddCommand( "spec", Cmd_Spec_f );
 	G_AddCommand( "playtime", Cmd_Playtime_f );  // racesow
+	G_AddCommand( "prevmap" , RS_Cmd_Prevmap_f );  // racesow
 	G_AddCommand( "enterqueue", G_Teams_JoinChallengersQueue );
 	G_AddCommand( "leavequeue", G_Teams_LeaveChallengersQueue );
 	G_AddCommand( "camswitch", Cmd_SwitchChaseCamMode_f );
@@ -1346,6 +1398,9 @@ void G_InitGameCommands( void )
 
 	// TV
 	G_AddCommand( "tvconnect", Cmd_TVConnect_f );
+
+	// misc
+	G_AddCommand( "upstate", Cmd_Upstate_f );
 }
 
 /*

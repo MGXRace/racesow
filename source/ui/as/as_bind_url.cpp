@@ -169,17 +169,6 @@ void ASURL::ClearParameters( void )
 	rocketURL.ClearParameters();
 }
 
-asstring_t *ASURL::CastToString( const ASURL &url )
-{
-	return url.GetURL();
-}
-
-ASURL ASURL::CastFromString( const asstring_t &str )
-{
-	return ASURL( str );
-}
-
-
 /// This makes AS aware of this class so other classes may reference
 /// it in their properties and methods
 void PrebindURL( ASInterface *as )
@@ -231,13 +220,6 @@ void BindURL( ASInterface *as )
 		.method( &ASURL::ClearParameters, "clearParameters" )
 
 		.method( &ASURL::GetQueryString, "getQueryString" )
-
-		.refcast( &ASURL::CastToString, true, true )
-	;
-
-	// Cast behavior for the String class
-	ASBind::GetClass<asstring_t>( as->getEngine() )
-		.cast( &ASURL::CastFromString, true, true )
 	;
 }
 

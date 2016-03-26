@@ -238,6 +238,7 @@ static edict_t *CopyToBodyQue( edict_t *ent, edict_t *attacker, int damage )
 	VectorCopy( ent->r.absmin, body->r.absmin );
 	VectorCopy( ent->r.absmax, body->r.absmax );
 	VectorCopy( ent->r.size, body->r.size );
+	VectorCopy( ent->velocity, body->velocity );
 	body->r.maxs[2] = body->r.mins[2] + 8;
 
 	body->r.solid = SOLID_YES;
@@ -251,7 +252,11 @@ static edict_t *CopyToBodyQue( edict_t *ent, edict_t *attacker, int damage )
 		|| meansOfDeath == MOD_ELECTROBOLT_S /* electrobolt always gibs */ )
 	{
 		ThrowSmallPileOfGibs( body, damage );
+
+		// reset gib impulse
+		VectorClear( body->velocity );
 		ThrowClientHead( body, damage ); // sets ET_GIB
+
 		body->s.frame = 0;
 		body->nextThink = level.time + 3000 + random() * 3000;
 		body->deadflag = DEAD_DEAD;
@@ -263,10 +268,7 @@ static edict_t *CopyToBodyQue( edict_t *ent, edict_t *attacker, int damage )
 		body->s.modelindex = ent->s.modelindex;
 		body->s.bodyOwner = ent->s.number; // bodyOwner is the same as modelindex2
 		body->s.skinnum = ent->s.skinnum;
-		body->s.teleported = qtrue;
-
-		// when it's not a gib (they get their own impulse) copy player's velocity (knockback deads)
-		VectorCopy( ent->velocity, body->velocity );
+		body->s.teleported = true;
 
 		// launch the death animation on the body
 		{
@@ -295,6 +297,7 @@ static edict_t *CopyToBodyQue( edict_t *ent, edict_t *attacker, int damage )
 	}
 	else // wasn't a player, just copy it's model
 	{
+		VectorClear( body->velocity );
 		body->s.modelindex = ent->s.modelindex;
 		body->s.frame = ent->s.frame;
 		body->nextThink = level.time + 5000 + random()*10000;
@@ -309,7 +312,8 @@ static edict_t *CopyToBodyQue( edict_t *ent, edict_t *attacker, int damage )
 */
 void player_die( edict_t *ent, edict_t *inflictor, edict_t *attacker, int damage, const vec3_t point )
 {
-	edict_t	*body;
+	snap_edict_t snap_backup = ent->snap;
+	client_snapreset_t resp_snap_backup = ent->r.client->resp.snap;
 
 	VectorClear( ent->avelocity );
 
@@ -326,33 +330,38 @@ void player_die( edict_t *ent, edict_t *inflictor, edict_t *attacker, int damage
 	ClientObituary( ent, inflictor, attacker );
 
 	// create a body
-	body = CopyToBodyQue( ent, attacker, damage );
+	CopyToBodyQue( ent, attacker, damage );
 	ent->enemy = NULL;
 
 	// clear his combo stats
 	G_AwardResetPlayerComboStats( ent );
 
-	// go ghost
+	// go ghost (also resets snap)
 	G_GhostClient( ent );
 
 	ent->deathTimeStamp = level.time;
 
 	VectorClear( ent->velocity );
 	VectorClear( ent->avelocity );
+	ent->snap = snap_backup;
+	ent->r.client->resp.snap = resp_snap_backup;
 	ent->r.client->resp.snap.buttons = 0;
 	GClip_LinkEntity( ent );
 }
 
+/*
+* G_Client_UpdateActivity
+*/
 void G_Client_UpdateActivity( gclient_t *client )
 {
 	if( !client )
 		return;
-
-	//G_Printf( "Activity updated\n" );
-
 	client->level.last_activity = level.time;
 }
 
+/*
+* G_Client_InactivityRemove
+*/
 void G_Client_InactivityRemove( gclient_t *client )
 {
 	if( !client )
@@ -366,6 +375,9 @@ void G_Client_InactivityRemove( gclient_t *client )
 	if( trap_GetClientState( client - game.clients ) < CS_SPAWNED )
 		return;
 
+	if( client->ps.pmove.pm_type != PM_NORMAL )
+		return;
+
 	if( g_inactivity_maxtime->modified )
 	{
 		if( g_inactivity_maxtime->value <= 0.0f )
@@ -373,13 +385,13 @@ void G_Client_InactivityRemove( gclient_t *client )
 		else if( g_inactivity_maxtime->value < 15.0f )
 			trap_Cvar_ForceSet( "g_inactivity_maxtime", "15.0" );
 
-		g_inactivity_maxtime->modified = qfalse;
+		g_inactivity_maxtime->modified = false;
 	}
 
 	if( g_inactivity_maxtime->value == 0.0f )
 		return;
 
-	if( GS_MatchState() != MATCH_STATE_PLAYTIME )
+	if( ( GS_MatchState() != MATCH_STATE_PLAYTIME ) || !level.gametype.removeInactivePlayers )
 		return;
 
 	// inactive for too long
@@ -394,7 +406,7 @@ void G_Client_InactivityRemove( gclient_t *client )
 			G_SpawnQueue_RemoveClient( ent ); // racesow - set player in free-view
 			client->queueTimeStamp = 0;
 
-			G_PrintMsg( NULL, "%s"S_COLOR_YELLOW" has been moved to spectator after %.1f seconds of inactivity\n", client->netname, g_inactivity_maxtime->value );
+			G_PrintMsg( NULL, "%s" S_COLOR_YELLOW " has been moved to spectator after %.1f seconds of inactivity\n", client->netname, g_inactivity_maxtime->value );
 		}
 	}
 }
@@ -477,6 +489,8 @@ void G_GhostClient( edict_t *ent )
 	ent->r.client->ps.weaponState = WEAPON_STATE_READY;
 	ent->r.client->ps.stats[STAT_WEAPON_TIME] = 0;
 
+	G_SetPlayerHelpMessage( ent, 0 );
+
 	GClip_LinkEntity( ent );
 }
 
@@ -515,7 +529,6 @@ void G_ClientRespawn( edict_t *self, bool ghost )
 	memset( &client->resp, 0, sizeof( client->resp ) );
 	memset( &client->ps, 0, sizeof( client->ps ) );
 	client->resp.timeStamp = level.time;
-	client->resp.gunbladeChargeTimeStamp = level.time;
 	client->ps.playerNum = PLAYERNUM( self );
 
 	// clear entity values
@@ -540,7 +553,7 @@ void G_ClientRespawn( edict_t *self, bool ghost )
 	self->pain = player_pain;
 	self->die = player_die;
 	self->viewheight = playerbox_stand_viewheight;
-	self->r.inuse = qtrue;
+	self->r.inuse = true;
 	self->mass = PLAYER_MASS;
 	self->air_finished = level.time + ( 12 * 1000 );
 	self->r.clipmask = MASK_PLAYERSOLID;
@@ -577,9 +590,9 @@ void G_ClientRespawn( edict_t *self, bool ghost )
 	client->ps.POVnum = ENTNUM( self );
 
 	// set movement info
-	client->ps.pmove.stats[PM_STAT_MAXSPEED] = DEFAULT_PLAYERSPEED;
-	client->ps.pmove.stats[PM_STAT_JUMPSPEED] = DEFAULT_JUMPSPEED;
-	client->ps.pmove.stats[PM_STAT_DASHSPEED] = DEFAULT_DASHSPEED;
+	client->ps.pmove.stats[PM_STAT_MAXSPEED] = (short)DEFAULT_PLAYERSPEED;
+	client->ps.pmove.stats[PM_STAT_JUMPSPEED] = (short)DEFAULT_JUMPSPEED;
+	client->ps.pmove.stats[PM_STAT_DASHSPEED] = (short)DEFAULT_DASHSPEED;
 
 	if( ghost )
 	{
@@ -628,7 +641,7 @@ void G_ClientRespawn( edict_t *self, bool ghost )
 
 	self->s.attenuation = ATTN_NORM;
 
-	self->s.teleported = qtrue;
+	self->s.teleported = true;
 
 	// hold in place briefly
 	client->ps.pmove.pm_flags = PMF_TIME_TELEPORT;
@@ -654,6 +667,86 @@ void G_ClientRespawn( edict_t *self, bool ghost )
 		G_Gametype_GENERIC_ClientRespawn( self, old_team, self->s.team );
 }
 
+/*
+* G_PlayerCanTeleport
+*
+* Checks if the player can be teleported.
+*/
+bool G_PlayerCanTeleport( edict_t *player )
+{
+	if ( !player->r.client )
+		return false;
+	if ( player->r.client->ps.pmove.pm_type > PM_SPECTATOR )
+		return false;
+	if ( GS_MatchState( ) == MATCH_STATE_COUNTDOWN ) // match countdown
+		return false;
+	return true;
+}
+
+/*
+* G_TeleportPlayer
+*/
+void G_TeleportPlayer( edict_t *player, edict_t *dest )
+{
+	int i;
+	vec3_t velocity;
+	mat3_t axis;
+	float speed;
+	gclient_t *client = player->r.client;
+
+	if( !dest ) {
+		return;
+	}
+	if( !client ) {
+		return;
+	}
+
+	// draw the teleport entering effect
+	G_TeleportEffect( player, false );
+
+	//
+	// teleport the player
+	//
+
+	// from racesow - use old pmove velocity
+	VectorCopy( client->old_pmove.velocity, velocity );
+
+	velocity[2] = 0; // ignore vertical velocity
+	speed = VectorLengthFast( velocity );
+
+	AnglesToAxis( dest->s.angles, axis );
+	VectorScale( &axis[AXIS_FORWARD], speed, client->ps.pmove.velocity );
+
+	VectorCopy( dest->s.angles, client->ps.viewangles );
+	VectorCopy( dest->s.origin, client->ps.pmove.origin );
+
+	// set the delta angle
+	for ( i = 0; i < 3; i++ )
+		client->ps.pmove.delta_angles[i] = ANGLE2SHORT( client->ps.viewangles[i] ) - client->ucmd.angles[i];
+
+	client->ps.pmove.pm_flags |= PMF_TIME_TELEPORT;
+	client->ps.pmove.pm_time = 1; // force the minimum no control delay
+	player->s.teleported = true;
+
+	// update the entity from the pmove
+	VectorCopy( client->ps.viewangles, player->s.angles );
+	VectorCopy( client->ps.pmove.origin, player->s.origin );
+	VectorCopy( client->ps.pmove.origin, player->s.old_origin );
+	VectorCopy( client->ps.pmove.origin, player->olds.origin );
+	VectorCopy( client->ps.pmove.velocity, player->velocity );
+
+	// unlink to make sure it can't possibly interfere with KillBox
+	GClip_UnlinkEntity( player );
+
+	// kill anything at the destination
+	KillBox( player );
+
+	GClip_LinkEntity( player );
+
+	// add the teleport effect at the destination
+	G_TeleportEffect( player, true );
+}
+
 //==============================================================
 
 /*
@@ -663,32 +756,41 @@ void G_ClientRespawn( edict_t *self, bool ghost )
 */
 void ClientBegin( edict_t *ent )
 {
-	memset( &ent->r.client->ucmd, 0, sizeof( ent->r.client->ucmd ) );
-	memset( &ent->r.client->level, 0, sizeof( ent->r.client->level ) );
-	ent->r.client->level.timeStamp = level.time;
-	G_Client_UpdateActivity( ent->r.client ); // activity detected
+	gclient_t *client = ent->r.client;
+	const char *mm_login;
 
-	ent->r.client->team = TEAM_SPECTATOR;
+	memset( &client->ucmd, 0, sizeof( client->ucmd ) );
+	memset( &client->level, 0, sizeof( client->level ) );
+	client->level.timeStamp = level.time;
+	G_Client_UpdateActivity( client ); // activity detected
+
+	client->team = TEAM_SPECTATOR;
 	G_ClientRespawn( ent, true ); // respawn as ghost
 	ent->movetype = MOVETYPE_NOCLIP; // allow freefly
 
 	G_UpdatePlayerMatchMsg( ent );
 
-	G_PrintMsg( NULL, "%s%s entered the game\n", ent->r.client->netname, S_COLOR_WHITE );
+	mm_login = Info_ValueForKey( client->userinfo, "cl_mm_login" );
+	if( mm_login && *mm_login && client->mm_session > 0 ) {
+		G_PrintMsg( NULL, "%s" S_COLOR_WHITE " (" S_COLOR_YELLOW "%s" S_COLOR_WHITE ") entered the game\n", client->netname, mm_login );
+	}
+	else {
+		G_PrintMsg( NULL, "%s" S_COLOR_WHITE " entered the game\n", client->netname );
+	}
 
-	ent->r.client->level.respawnCount = 0; // clear respawncount
-	ent->r.client->connecting = false;
+	client->level.respawnCount = 0; // clear respawncount
+	client->connecting = false;
 
 	// schedule the next scoreboard update
-	ent->r.client->level.scoreboard_time = game.realtime + scoreboardInterval - ( game.realtime%scoreboardInterval );
+	client->level.scoreboard_time = game.realtime + scoreboardInterval - ( game.realtime%scoreboardInterval );
 
 	AI_EnemyAdded( ent );
 
 	G_ClientEndSnapFrame( ent ); // make sure all view stuff is valid
 
 	// let the gametype scripts now this client just entered the level
-	RS_PlayerEnter( ent->r.client ); // racesow
-	G_Gametype_ScoreEvent( ent->r.client, "enterGame", NULL );
+	RS_PlayerEnter( client ); // racesow
+	G_Gametype_ScoreEvent( client, "enterGame", NULL );
 }
 
 /*
@@ -940,7 +1042,6 @@ static void G_UpdatePlayerInfoString( int playerNum )
 
 	Info_SetValueForKey( playerString, "name", client->netname );
 	Info_SetValueForKey( playerString, "hand", va( "%i", client->hand ) );
-	Info_SetValueForKey( playerString, "fov", va( "%i %i", client->fov, client->zoomfov ) );
 	Info_SetValueForKey( playerString, "color",
 		va( "%i %i %i", client->color[0], client->color[1], client->color[2] ) );
 
@@ -1050,7 +1151,7 @@ void ClientUserinfoChanged( edict_t *ent, char *userinfo )
 		}
 	}
 
-	s = Info_ValueForKey( userinfo, "cg_oldMovement" );
+	s = Info_ValueForKey( userinfo, "cg_movementStyle" );
 	if( s )
 	{
 		i = bound( atoi( s ), 0, GS_MAXBUNNIES - 1 );
@@ -1095,29 +1196,6 @@ void ClientUserinfoChanged( edict_t *ent, char *userinfo )
 			cl->ps.pmove.stats[PM_STAT_FEATURES] &= ~PMFEAT_CONTINOUSJUMP;
 		else
 			cl->ps.pmove.stats[PM_STAT_FEATURES] |= PMFEAT_CONTINOUSJUMP;
-	}
-
-	// fov
-	s = Info_ValueForKey( userinfo, "fov" );
-	if( !s )
-	{
-		cl->fov = DEFAULT_FOV;
-	}
-	else
-	{
-		cl->fov = atoi( s );
-		clamp( cl->fov, MIN_FOV, MAX_FOV );
-	}
-
-	s = Info_ValueForKey( userinfo, "zoomfov" );
-	if( !s )
-	{
-		cl->zoomfov = DEFAULT_ZOOMFOV;
-	}
-	else
-	{
-		cl->zoomfov = atoi( s );
-		clamp( cl->zoomfov, MIN_ZOOMFOV, MAX_ZOOMFOV );
 	}
 
 #ifdef UCMDTIMENUDGE
@@ -1179,7 +1257,7 @@ void ClientUserinfoChanged( edict_t *ent, char *userinfo )
 * Changing levels will NOT cause this to be called again, but
 * loadgames will.
 */
-qboolean ClientConnect( edict_t *ent, char *userinfo, qboolean fakeClient, qboolean tvClient )
+bool ClientConnect( edict_t *ent, char *userinfo, bool fakeClient, bool tvClient )
 {
 	char *value;
 	char message[MAX_STRING_CHARS];
@@ -1194,7 +1272,7 @@ qboolean ClientConnect( edict_t *ent, char *userinfo, qboolean fakeClient, qbool
 		Info_SetValueForKey( userinfo, "rejtype", va( "%i", DROP_TYPE_GENERAL ) );
 		Info_SetValueForKey( userinfo, "rejflag", va( "%i", 0 ) );
 		Info_SetValueForKey( userinfo, "rejmsg", "Invalid userinfo" );
-		return qfalse;
+		return false;
 	}
 
 	if( !Info_ValueForKey( userinfo, "ip" ) )
@@ -1202,7 +1280,7 @@ qboolean ClientConnect( edict_t *ent, char *userinfo, qboolean fakeClient, qbool
 		Info_SetValueForKey( userinfo, "rejtype", va( "%i", DROP_TYPE_GENERAL ) );
 		Info_SetValueForKey( userinfo, "rejflag", va( "%i", 0 ) );
 		Info_SetValueForKey( userinfo, "rejmsg", "Error: Server didn't provide client IP" );
-		return qfalse;
+		return false;
 	}
 
 	if( !Info_ValueForKey( userinfo, "ip" ) )
@@ -1210,7 +1288,7 @@ qboolean ClientConnect( edict_t *ent, char *userinfo, qboolean fakeClient, qbool
 		Info_SetValueForKey( userinfo, "rejtype", va( "%i", DROP_TYPE_GENERAL ) );
 		Info_SetValueForKey( userinfo, "rejflag", va( "%i", 0 ) );
 		Info_SetValueForKey( userinfo, "rejmsg", "Error: Server didn't provide client socket" );
-		return qfalse;
+		return false;
 	}
 
 	// check to see if they are on the banned IP list
@@ -1220,7 +1298,7 @@ qboolean ClientConnect( edict_t *ent, char *userinfo, qboolean fakeClient, qbool
 		Info_SetValueForKey( userinfo, "rejtype", va( "%i", DROP_TYPE_GENERAL ) );
 		Info_SetValueForKey( userinfo, "rejflag", va( "%i", 0 ) );
 		Info_SetValueForKey( userinfo, "rejmsg", "You're banned from this server" );
-		return qfalse;
+		return false;
 	}
 
 	// check for a password
@@ -1237,7 +1315,7 @@ qboolean ClientConnect( edict_t *ent, char *userinfo, qboolean fakeClient, qbool
 		{
 			Info_SetValueForKey( userinfo, "rejmsg", "Password required" );
 		}
-		return qfalse;
+		return false;
 	}
 
 	// they can connect
@@ -1250,7 +1328,7 @@ qboolean ClientConnect( edict_t *ent, char *userinfo, qboolean fakeClient, qbool
 	memset( ent->r.client, 0, sizeof( gclient_t ) );
 	ent->r.client->ps.playerNum = PLAYERNUM( ent );
 	ent->r.client->connecting = true;
-	ent->r.client->isTV = tvClient == qtrue;
+	ent->r.client->isTV = tvClient == true;
 	ent->r.client->team = TEAM_SPECTATOR;
 	G_Client_UpdateActivity( ent->r.client ); // activity detected
 
@@ -1266,7 +1344,7 @@ qboolean ClientConnect( edict_t *ent, char *userinfo, qboolean fakeClient, qbool
 
 	G_CallVotes_ResetClient( PLAYERNUM( ent ) );
 
-	return qtrue;
+	return true;
 }
 
 /*
@@ -1282,8 +1360,9 @@ void ClientDisconnect( edict_t *ent, const char *reason )
 		return;
 
 	// always report in RACE mode
-	if( GS_RaceGametype() || ( ent->r.client->team != TEAM_SPECTATOR && GS_MatchState() == MATCH_STATE_PLAYTIME ) )
-		G_AddPlayerReport( ent, false );
+	if( GS_RaceGametype() 
+		|| ( ent->r.client->team != TEAM_SPECTATOR && ( GS_MatchState() == MATCH_STATE_PLAYTIME || GS_MatchState() == MATCH_STATE_POSTMATCH ) ) )
+		G_AddPlayerReport( ent, GS_MatchState() == MATCH_STATE_POSTMATCH );
 
 	for( team = TEAM_PLAYERS; team < GS_MAX_TEAMS; team++ )
 		G_Teams_UnInvitePlayer( team, ent );
@@ -1308,7 +1387,7 @@ void ClientDisconnect( edict_t *ent, const char *reason )
 	G_FreeAI( ent );
 	AI_EnemyRemoved( ent );
 
-	ent->r.inuse = qfalse;
+	ent->r.inuse = false;
 	ent->r.svflags = SVF_NOCLIENT;
 
 	memset( ent->r.client, 0, sizeof( *ent->r.client ) );
@@ -1384,7 +1463,7 @@ void G_MoveClientToTV( edict_t *ent )
 	port = isIPv6 ? best->tv.port6 : best->tv.port;
 
 	last_tv = best - game.clients;
-	trap_GameCmd( ent, va( "cmd connect %s:%hu#%i", ip, port, best->tv.channel ) );
+	trap_GameCmd( ent, va( "memo tv_moveto \"%s\" %s:%hu#%i", COM_RemoveColorTokens( best->netname ), ip, port, best->tv.channel ) );
 }
 
 //==============================================================
@@ -1473,11 +1552,11 @@ static void ClientMakePlrkeys( gclient_t *client, usercmd_t *ucmd )
 * This will be called when client tries to change multiview mode
 * Mode change can be disallowed by returning false
 */
-qboolean ClientMultiviewChanged( edict_t *ent, qboolean multiview )
+bool ClientMultiviewChanged( edict_t *ent, bool multiview )
 {
-	ent->r.client->multiview = multiview == qtrue;
+	ent->r.client->multiview = multiview == true;
 
-	return qtrue;
+	return true;
 }
 
 /*
@@ -1577,7 +1656,7 @@ void ClientThink( edict_t *ent, usercmd_t *ucmd, int timeDelta )
 		pm.cmd = *ucmd;
 
 	if( memcmp( &client->old_pmove, &client->ps.pmove, sizeof( pmove_state_t ) ) )
-		pm.snapinitial = qtrue;
+		pm.snapinitial = true;
 
 	// perform a pmove
 	Pmove( &pm );
@@ -1645,15 +1724,6 @@ void ClientThink( edict_t *ent, usercmd_t *ucmd, int timeDelta )
 
 	ent->s.weapon = GS_ThinkPlayerWeapon( &client->ps, ucmd->buttons, ucmd->msec, client->timeDelta );
 
-	// set fov
-	if( !client->ps.pmove.stats[PM_STAT_ZOOMTIME] )
-		client->ps.fov = client->fov;
-	else
-	{
-		float frac = (float)client->ps.pmove.stats[PM_STAT_ZOOMTIME] / (float)ZOOMTIME;
-		client->ps.fov = client->fov - ( (float)( client->fov - client->zoomfov ) * frac );
-	}
-
 	if( G_IsDead( ent ) )
 	{
 		if( ent->deathTimeStamp + g_respawn_delay_min->integer <= level.time )
@@ -1673,6 +1743,10 @@ void ClientThink( edict_t *ent, usercmd_t *ucmd, int timeDelta )
 			G_Sound( ent, CHAN_AUTO, trap_SoundIndex( GS_FindItemByTag( POWERUP_SHELL )->pickup_sound ), ATTN_NORM );
 		}
 	}	
+
+	// 
+	if( client->ps.pmove.pm_type == PM_NORMAL )
+		client->level.stats.had_playtime = true;
 
 	// generating plrkeys (optimized for net communication)
 	ClientMakePlrkeys( client, ucmd );

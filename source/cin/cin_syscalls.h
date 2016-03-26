@@ -145,7 +145,7 @@ static inline void trap_FS_FCloseFile( int file )
 	CIN_IMPORT.FS_FCloseFile( file );
 }
 
-static inline qboolean trap_FS_RemoveFile( const char *filename )
+static inline bool trap_FS_RemoveFile( const char *filename )
 {
 	return CIN_IMPORT.FS_RemoveFile( filename );
 }
@@ -155,7 +155,7 @@ static inline int trap_FS_GetFileList( const char *dir, const char *extension, c
 	return CIN_IMPORT.FS_GetFileList( dir, extension, buf, bufsize, start, end );
 }
 
-static inline qboolean trap_FS_IsUrl( const char *url )
+static inline bool trap_FS_IsUrl( const char *url )
 {
 	return CIN_IMPORT.FS_IsUrl( url );
 }
@@ -163,12 +163,12 @@ static inline qboolean trap_FS_IsUrl( const char *url )
 // clock
 static inline unsigned int trap_Milliseconds( void )
 {
-	return CIN_IMPORT.Milliseconds();
+	return CIN_IMPORT.Sys_Milliseconds();
 }
 
-static inline quint64 trap_Microseconds( void )
+static inline uint64_t trap_Microseconds( void )
 {
-	return CIN_IMPORT.Microseconds();
+	return CIN_IMPORT.Sys_Microseconds();
 }
 
 // memory
@@ -195,4 +195,14 @@ static inline void trap_MemFreePool( struct mempool_s **pool, const char *filena
 static inline void trap_MemEmptyPool( struct mempool_s *pool, const char *filename, int fileline )
 {
 	CIN_IMPORT.Mem_EmptyPool( pool, filename, fileline );
+}
+
+static inline void *trap_LoadLibrary( char *name, dllfunc_t *funcs )
+{
+	return CIN_IMPORT.Sys_LoadLibrary( name, funcs );
+}
+
+static inline void trap_UnloadLibrary( void **lib )
+{
+	CIN_IMPORT.Sys_UnloadLibrary( lib );
 }

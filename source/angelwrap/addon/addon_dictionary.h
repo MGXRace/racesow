@@ -42,6 +42,7 @@ public:
 	// Memory management
 	CScriptDictionary(asIScriptEngine *engine);
 	CScriptDictionary(asBYTE *buffer);
+	CScriptDictionary(const CScriptDictionary &other);
 	void AddRef() const;
 	void Release() const;
 
@@ -52,8 +53,8 @@ public:
     bool Get(const asstring_t &key, void *value, int typeId) const;
 
 	// Sets/Gets an integer number value for a key
-    void Set(const asstring_t &key, qint64 &value);
-    bool Get(const asstring_t &key, qint64 &value) const;
+    void Set(const asstring_t &key, int64_t &value);
+    bool Get(const asstring_t &key, int64_t &value) const;
 
 	// Sets/Gets a real number value for a key
     void Set(const asstring_t &key, double &value);
@@ -101,6 +102,7 @@ protected:
 
 	// Helper methods
 	void FreeValue(valueStruct &value);
+	void Initialize(asIScriptEngine *engine);
 
 	void Set_(const char *key, void *value, int typeId);
 	

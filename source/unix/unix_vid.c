@@ -32,22 +32,13 @@ static int VID_WndProc( x11display_t *wnd, int ev, int p1, int p2 )
 /*
 * VID_Sys_Init
 */
-int VID_Sys_Init( int x, int y, int width, int height, int displayFrequency,
-	void *parentWindow, qboolean fullScreen, qboolean wideScreen, qboolean verbose )
+rserr_t VID_Sys_Init( const char *applicationName, const char *screenshotsPrefix, int startupColor, 
+	const int *iconXPM, void *parentWindow, bool verbose )
 {
 	x11display.dpy = NULL;
 
-	return re.Init( APPLICATION, APP_SCREENSHOTS_PREFIX,
-		NULL, &VID_WndProc, parentWindow, 
-		x, y, width, height, displayFrequency,
-		fullScreen, wideScreen, verbose );
-}
-
-/*
-* VID_Front_f
-*/
-void VID_Front_f( void )
-{
+	return re.Init( applicationName, screenshotsPrefix, startupColor, 0, iconXPM,
+		NULL, &VID_WndProc, parentWindow, verbose );
 }
 
 /*
@@ -60,7 +51,7 @@ void VID_UpdateWindowPosAndSize( int x, int y )
 /*
 * VID_EnableAltTab
 */
-void VID_EnableAltTab( qboolean enable )
+void VID_EnableAltTab( bool enable )
 {
 }
 
@@ -75,7 +66,7 @@ void *VID_GetWindowHandle( void )
 /*
 * VID_EnableWinKeys
 */
-void VID_EnableWinKeys( qboolean enable )
+void VID_EnableWinKeys( bool enable )
 {
 }
 
@@ -122,9 +113,42 @@ void VID_FlashWindow( int count )
 }
 
 /*
-** VID_GetDisplaySize
+** VID_GetSysModes
 */
-qboolean VID_GetDisplaySize( int *width, int *height )
+unsigned int VID_GetSysModes( vidmode_t *modes )
+{
+	XRRScreenConfiguration *xrrConfig;
+	XRRScreenSize *xrrSizes;
+	Display *dpy;
+	Window root;
+	int num_sizes = 0, i;
+
+	dpy = XOpenDisplay( NULL );
+	if( dpy )
+	{
+		root = DefaultRootWindow( dpy );
+		xrrConfig = XRRGetScreenInfo( dpy, root );
+		xrrSizes = XRRConfigSizes( xrrConfig, &num_sizes );
+
+		if( modes )
+		{
+			for( i = 0; i < num_sizes; i++ )
+			{
+				modes[i].width = xrrSizes[i].width;
+				modes[i].height = xrrSizes[i].height;
+			}
+		}
+
+		XCloseDisplay( dpy );
+	}
+
+	return max( num_sizes, 0 );
+}
+
+/*
+** VID_GetDefaultMode
+*/
+bool VID_GetDefaultMode( int *width, int *height )
 {
 	XRRScreenConfiguration *xrrConfig;
 	XRRScreenSize *xrrSizes;
@@ -146,8 +170,16 @@ qboolean VID_GetDisplaySize( int *width, int *height )
 		*height = xrrSizes[size_id].height;
 
 		XCloseDisplay( dpy );
-		return qtrue;
+		return true;
 	}
 
-	return qfalse;
+	return false;
+}
+
+/*
+** VID_GetPixelRatio
+*/
+float VID_GetPixelRatio( void )
+{
+	return 1.0f;
 }

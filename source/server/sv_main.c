@@ -20,7 +20,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "server.h"
 
-static qboolean sv_initialized = qfalse;
+static bool sv_initialized = false;
 
 mempool_t *sv_mempool;
 
@@ -41,6 +41,7 @@ cvar_t *rcon_password;         // password for remote server commands
 
 cvar_t *sv_uploads_http;
 cvar_t *sv_uploads_baseurl;
+cvar_t *sv_uploads_demos;
 cvar_t *sv_uploads_demos_baseurl;
 
 cvar_t *sv_pure;
@@ -82,6 +83,7 @@ cvar_t *sv_reconnectlimit; // minimum seconds between connect messages
 cvar_t *sv_maxrate;
 cvar_t *sv_compresspackets;
 cvar_t *sv_masterservers;
+cvar_t *sv_masterservers_steam;
 cvar_t *sv_skilllevel;
 
 // wsw : debug netcode
@@ -149,12 +151,12 @@ static void SV_CalcPings( void )
 /*
 * SV_ProcessPacket
 */
-static qboolean SV_ProcessPacket( netchan_t *netchan, msg_t *msg )
+static bool SV_ProcessPacket( netchan_t *netchan, msg_t *msg )
 {
 	int zerror;
 
 	if( !Netchan_Process( netchan, msg ) )
-		return qfalse; // wasn't accepted for some reason
+		return false; // wasn't accepted for some reason
 
 	// now if compressed, expand it
 	MSG_BeginReading( msg );
@@ -168,11 +170,11 @@ static qboolean SV_ProcessPacket( netchan_t *netchan, msg_t *msg )
 		{
 			// compression error. Drop the packet
 			Com_DPrintf( "SV_ProcessPacket: Compression error %i. Dropping packet\n", zerror );
-			return qfalse;
+			return false;
 		}
 	}
 
-	return qtrue;
+	return true;
 }
 
 /*
@@ -190,7 +192,7 @@ static void SV_ReadPackets( void )
 	netadr_t address;
 
 	static msg_t msg;
-	static qbyte msgData[MAX_MSGLEN];
+	static uint8_t msgData[MAX_MSGLEN];
 
 #ifdef TCP_ALLOW_CONNECT
 	socket_t* tcpsockets [] =
@@ -216,7 +218,7 @@ static void SV_ReadPackets( void )
 
 		if( socket->open )
 		{
-			while( qtrue )
+			while( true )
 			{
 				// find a free slot
 				for( i = 0; i < MAX_INCOMING_CONNECTIONS; i++ )
@@ -237,7 +239,7 @@ static void SV_ReadPackets( void )
 
 				Com_Printf( "New TCP connection from %s\n", NET_AddressToString( &address ) );
 
-				svs.incoming[i].active = qtrue;
+				svs.incoming[i].active = true;
 				svs.incoming[i].socket = newsocket;
 				svs.incoming[i].address = address;
 				svs.incoming[i].time = svs.realtime;
@@ -254,7 +256,7 @@ static void SV_ReadPackets( void )
 			{
 				Com_Printf( "NET_GetPacket: Error: %s\n", NET_ErrorString() );
 				NET_CloseSocket( &svs.incoming[i].socket );
-				svs.incoming[i].active = qfalse;
+				svs.incoming[i].active = false;
 			}
 			else if( ret == 1 )
 			{
@@ -262,7 +264,7 @@ static void SV_ReadPackets( void )
 				{
 					Com_Printf( "Sequence packet without connection\n" );
 					NET_CloseSocket( &svs.incoming[i].socket );
-					svs.incoming[i].active = qfalse;
+					svs.incoming[i].active = false;
 					continue;
 				}
 
@@ -393,7 +395,7 @@ static void SV_CheckTimeouts( void )
 		{
 			Com_Printf( "Incoming TCP connection from %s timed out\n", NET_AddressToString( &svs.incoming[i].address ) );
 			NET_CloseSocket( &svs.incoming[i].socket );
-			svs.incoming[i].active = qfalse;
+			svs.incoming[i].active = false;
 		}
 	}
 #endif
@@ -420,7 +422,7 @@ static void SV_CheckTimeouts( void )
 		if( ( cl->state != CS_FREE && cl->state != CS_ZOMBIE ) &&
 			( cl->lastPacketReceivedTime + 1000 * sv_timeout->value < svs.realtime ) )
 		{
-			SV_DropClient( cl, DROP_TYPE_GENERAL, "Error: Connection timed out" );
+			SV_DropClient( cl, DROP_TYPE_GENERAL, "%s", "Error: Connection timed out" );
 			cl->state = CS_FREE; // don't bother with zombie state
 			if( cl->socket.open )
 				NET_CloseSocket( &cl->socket );
@@ -431,18 +433,36 @@ static void SV_CheckTimeouts( void )
 			( cl->download.name && cl->download.timeout < svs.realtime ) )
 		{
 			Com_Printf( "Download of %s to %s%s timed out\n", cl->download.name, cl->name, S_COLOR_WHITE );
+			SV_ClientCloseDownload( cl );
+		}
+	}
+}
 
-			if( cl->download.data )
-			{
-				FS_FreeBaseFile( cl->download.data );
-				cl->download.data = NULL;
-			}
+/*
+* SV_CheckLatchedUserinfoChanges
+*
+* To prevent flooding other players, consecutive userinfo updates are delayed,
+* and only the last one is applied.
+* Applies latched userinfo updates if the timeout is over.
+*/
+static void SV_CheckLatchedUserinfoChanges( void )
+{
+	client_t *cl;
+	int i;
+	unsigned int time = Sys_Milliseconds();
 
-			Mem_ZoneFree( cl->download.name );
-			cl->download.name = NULL;
+	for( i = 0, cl = svs.clients; i < sv_maxclients->integer; i++, cl++ )
+	{
+		if( cl->state == CS_FREE || cl->state == CS_ZOMBIE )
+			continue;
 
-			cl->download.size = 0;
-			cl->download.timeout = 0;
+		if( cl->userinfoLatched[0] && cl->userinfoLatchTimeout <= time )
+		{
+			Q_strncpyz( cl->userinfo, cl->userinfoLatched, sizeof( cl->userinfo ) );
+
+			cl->userinfoLatched[0] = '\0';
+
+			SV_UserinfoChanged( cl );
 		}
 	}
 }
@@ -453,29 +473,29 @@ static void SV_CheckTimeouts( void )
 /*
 * SV_RunGameFrame
 */
-static qboolean SV_RunGameFrame( int msec )
+static bool SV_RunGameFrame( int msec )
 {
 	static unsigned int accTime = 0;
-	qboolean refreshSnapshot;
-	qboolean refreshGameModule;
-	qboolean sentFragments;
+	bool refreshSnapshot;
+	bool refreshGameModule;
+	bool sentFragments;
 
 	accTime += msec;
 
-	refreshSnapshot = qfalse;
-	refreshGameModule = qfalse;
+	refreshSnapshot = false;
+	refreshGameModule = false;
 
 	sentFragments = SV_SendClientsFragments();
 
 	// see if it's time to run a new game frame
 	if( accTime >= WORLDFRAMETIME )
-		refreshGameModule = qtrue;
+		refreshGameModule = true;
 
 	// see if it's time for a new snapshot
 	if( !sentFragments && svs.gametime >= sv.nextSnapTime )
 	{
-		refreshSnapshot = qtrue;
-		refreshGameModule = qtrue;
+		refreshSnapshot = true;
+		refreshGameModule = true;
 	}
 
 	// if there aren't pending packets to be sent, we can sleep
@@ -551,15 +571,15 @@ static qboolean SV_RunGameFrame( int msec )
 
 		sv.nextSnapTime = svs.gametime + ( svc.snapFrameTime - extraSnapTime );
 
-		return qtrue;
+		return true;
 	}
 
-	return qfalse;
+	return false;
 }
 
 
 /*
-static qboolean SV_RunGameFrame( int msec )
+static bool SV_RunGameFrame( int msec )
 {
 int extraTime = 0;
 static unsigned int accTime = 0;
@@ -574,7 +594,7 @@ if( svs.gametime + svc.snapFrameTime < sv.nextSnapTime )
 if( sv_showclamp->integer )
 Com_Printf( "sv lowclamp\n" );
 sv.nextSnapTime = svs.gametime + svc.snapFrameTime;
-return qfalse;
+return false;
 }
 
 // see if it's time to advance the world
@@ -601,7 +621,7 @@ NET_Sleep( min( WORLDFRAMETIME - accTime, sv.nextSnapTime - svs.gametime ), sock
 }
 }
 
-return qfalse;
+return false;
 }
 
 if( sv.nextSnapTime <= svs.gametime )
@@ -626,7 +646,7 @@ SV_CalcPings();
 sv.framenum++;
 ge->SnapFrame();
 
-return qtrue;
+return true;
 }
 */
 static void SV_CheckDefaultMap( void )
@@ -634,7 +654,7 @@ static void SV_CheckDefaultMap( void )
 	if( svc.autostarted )
 		return;
 
-	svc.autostarted = qtrue;
+	svc.autostarted = true;
 	if( dedicated->integer )
 	{
 		if( ( sv.state == ss_dead ) && sv_defaultmap && strlen( sv_defaultmap->string ) && !strlen( sv.mapname ) )
@@ -667,15 +687,34 @@ static void SV_CheckAutoUpdate( void )
 	if( !sv_autoUpdate->integer || !dedicated->integer )
 		return;
 
-	// do not if there has been any activity in the last 2 hours
-	if( ( svc.lastActivity + 1800000 ) > Sys_Milliseconds() )
-		return;
-
 	days = (unsigned int)sv_lastAutoUpdate->integer;
 
 	// daily check
 	if( days < Com_DaysSince1900() )
-		SV_AutoUpdateFromWeb( qfalse );
+		SV_AutoUpdateFromWeb( false );
+}
+
+/*
+* SV_CheckPostUpdateRestart
+*/
+static void SV_CheckPostUpdateRestart( void )
+{
+	// do not if there has been any activity in last 5 minutes
+	if( ( svc.lastActivity + 300000 ) > Sys_Milliseconds() )
+		return;
+
+	// if there are any new filesystem entries, restart
+	if( FS_GetNotifications() & FS_NOTIFY_NEWPAKS )
+	{
+		if( sv.state != ss_dead )
+		{
+			// restart the current map, SV_Map also rescans the filesystem
+			Com_Printf( "The server will now restart...\n\n" );
+
+			// start the default map if current map isn't available
+			Cbuf_ExecuteText( EXEC_APPEND, va( "map %s\n", svs.mapcmd[0] ? svs.mapcmd : sv_defaultmap->string ) );
+		}
+	}
 }
 
 /*
@@ -724,7 +763,7 @@ void SV_Frame( int realmsec, int gamemsec )
 	if( svs.realtime > wrappingPoint || svs.gametime > wrappingPoint || sv.framenum >= wrappingPoint )
 	{
 		Cbuf_AddText( "wait; vstr nextmap\n" );
-		SV_ShutdownGame( "Restarting server due to time wrapping", qtrue );
+		SV_ShutdownGame( "Restarting server due to time wrapping", true );
 		return;
 	}
 
@@ -733,6 +772,9 @@ void SV_Frame( int realmsec, int gamemsec )
 
 	// get packets from clients
 	SV_ReadPackets();
+
+	// apply latched userinfo changes
+	SV_CheckLatchedUserinfoChanges();
 
 	// let everything in the world think and move
 	if( SV_RunGameFrame( gamemsec ) )
@@ -756,9 +798,11 @@ void SV_Frame( int realmsec, int gamemsec )
 	}
 
 	// handle HTTP connections
-	SV_Web_Frame();
+	SV_Web_GameFrame( ge->WebRequest );
 
 	SV_CheckAutoUpdate();
+
+	SV_CheckPostUpdateRestart();
 }
 
 //============================================================================
@@ -782,12 +826,12 @@ void SV_UserinfoChanged( client_t *client )
 		// force the IP key/value pair so the game can filter based on ip
 		if( !Info_SetValueForKey( client->userinfo, "socket", NET_SocketTypeToString( client->netchan.socket->type ) ) )
 		{
-			SV_DropClient( client, DROP_TYPE_GENERAL, "Error: Couldn't set userinfo (socket)\n" );
+			SV_DropClient( client, DROP_TYPE_GENERAL, "%s", "Error: Couldn't set userinfo (socket)\n" );
 			return;
 		}
 		if( !Info_SetValueForKey( client->userinfo, "ip", NET_AddressToString( &client->netchan.remoteAddress ) ) )
 		{
-			SV_DropClient( client, DROP_TYPE_GENERAL, "Error: Couldn't set userinfo (ip)\n" );
+			SV_DropClient( client, DROP_TYPE_GENERAL, "%s", "Error: Couldn't set userinfo (ip)\n" );
 			return;
 		}
 	}
@@ -813,7 +857,7 @@ void SV_UserinfoChanged( client_t *client )
 
 	if( !Info_Validate( client->userinfo ) )
 	{
-		SV_DropClient( client, DROP_TYPE_GENERAL, "Error: Invalid userinfo (after game)" );
+		SV_DropClient( client, DROP_TYPE_GENERAL, "%s", "Error: Invalid userinfo (after game)" );
 		return;
 	}
 
@@ -821,7 +865,7 @@ void SV_UserinfoChanged( client_t *client )
 	val = Info_ValueForKey( client->userinfo, "name" );
 	if( !val || !val[0] )
 	{
-		SV_DropClient( client, DROP_TYPE_GENERAL, "Error: No name set" );
+		SV_DropClient( client, DROP_TYPE_GENERAL, "%s", "Error: No name set" );
 		return;
 	}
 	Q_strncpyz( client->name, val, sizeof( client->name ) );
@@ -915,6 +959,7 @@ void SV_Init( void )
 
 	sv_uploads_http	=       Cvar_Get( "sv_uploads_http", "1", CVAR_READONLY );
 	sv_uploads_baseurl =	Cvar_Get( "sv_uploads_baseurl", "", CVAR_ARCHIVE );
+	sv_uploads_demos =	    Cvar_Get( "sv_uploads_demos", "1", CVAR_ARCHIVE );
 	sv_uploads_demos_baseurl =	Cvar_Get( "sv_uploads_demos_baseurl", "", CVAR_ARCHIVE );
 	if( dedicated->integer )
 	{
@@ -951,12 +996,12 @@ void SV_Init( void )
 
 	// fix invalid sv_maxclients values
 	if( sv_maxclients->integer < 1 )
-		Cvar_FullSet( "sv_maxclients", "1", CVAR_ARCHIVE|CVAR_SERVERINFO|CVAR_LATCH, qtrue );
+		Cvar_FullSet( "sv_maxclients", "1", CVAR_ARCHIVE|CVAR_SERVERINFO|CVAR_LATCH, true );
 	else if( sv_maxclients->integer > MAX_CLIENTS )
-		Cvar_FullSet( "sv_maxclients", va( "%i", MAX_CLIENTS ), CVAR_ARCHIVE|CVAR_SERVERINFO|CVAR_LATCH, qtrue );
+		Cvar_FullSet( "sv_maxclients", va( "%i", MAX_CLIENTS ), CVAR_ARCHIVE|CVAR_SERVERINFO|CVAR_LATCH, true );
 
 	sv_demodir = Cvar_Get( "sv_demodir", "", CVAR_NOSET );
-	if( sv_demodir->string[0] && Com_GlobMatch( "*[^0-9a-zA-Z_@]*", sv_demodir->string, qfalse ) )
+	if( sv_demodir->string[0] && Com_GlobMatch( "*[^0-9a-zA-Z_@]*", sv_demodir->string, false ) )
 	{
 		Com_Printf( "Invalid demo prefix string: %s\n", sv_demodir->string );
 		Cvar_ForceSet( "sv_demodir", "" );
@@ -965,14 +1010,15 @@ void SV_Init( void )
 	// wsw : jal : cap client's exceding server rules
 	sv_maxrate =		    Cvar_Get( "sv_maxrate", "0", CVAR_DEVELOPER );
 	sv_compresspackets =	    Cvar_Get( "sv_compresspackets", "1", CVAR_DEVELOPER );
-	sv_skilllevel =		    Cvar_Get( "sv_skilllevel", "1", CVAR_SERVERINFO|CVAR_ARCHIVE|CVAR_LATCH );
+	sv_skilllevel =		    Cvar_Get( "sv_skilllevel", "2", CVAR_SERVERINFO|CVAR_ARCHIVE|CVAR_LATCH );
 
 	if( sv_skilllevel->integer > 2 )
 		Cvar_ForceSet( "sv_skilllevel", "2" );
 	if( sv_skilllevel->integer < 0 )
 		Cvar_ForceSet( "sv_skilllevel", "0" );
 
-	sv_masterservers =	    Cvar_Get( "masterservers", DEFAULT_MASTER_SERVERS_IPS, CVAR_LATCH );
+	sv_masterservers =			Cvar_Get( "masterservers", DEFAULT_MASTER_SERVERS_IPS, CVAR_LATCH );
+	sv_masterservers_steam =	Cvar_Get( "masterservers_steam", DEFAULT_MASTER_SERVERS_STEAM_IPS, CVAR_LATCH );
 
 	sv_debug_serverCmd =	    Cvar_Get( "sv_debug_serverCmd", "0", CVAR_ARCHIVE );
 
@@ -1020,7 +1066,7 @@ void SV_Init( void )
 
 	SV_Web_Init();
 
-	sv_initialized = qtrue;
+	sv_initialized = true;
 }
 
 /*
@@ -1032,15 +1078,14 @@ void SV_Shutdown( const char *finalmsg )
 {
 	if( !sv_initialized )
 		return;
+	sv_initialized = false;
 
 	SV_Web_Shutdown();
 	ML_Shutdown();
-	SV_MM_Shutdown( qtrue );
-	SV_ShutdownGame( finalmsg, qfalse );
+	SV_MM_Shutdown( true );
+	SV_ShutdownGame( finalmsg, false );
 
 	SV_ShutdownOperatorCommands();
 
 	Mem_FreePool( &sv_mempool );
-
-	sv_initialized = qfalse;
 }

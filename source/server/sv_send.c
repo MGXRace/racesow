@@ -23,7 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 // shared message buffer to be used for occasional messages
 msg_t tmpMessage;
-qbyte tmpMessageData[MAX_MSGLEN];
+uint8_t tmpMessageData[MAX_MSGLEN];
 
 
 
@@ -129,7 +129,7 @@ void SV_AddServerCommand( client_t *client, const char *cmd )
 			Com_DPrintf( "cmd %5d: %s\n", i, client->reliableCommands[i & ( MAX_RELIABLE_COMMANDS-1 )] );
 		}
 		Com_DPrintf( "cmd %5d: %s\n", i, cmd );
-		SV_DropClient( client, DROP_TYPE_GENERAL, "Error: Server command overflow" );
+		SV_DropClient( client, DROP_TYPE_GENERAL, "%s", "Error: Server command overflow" );
 		return;
 	}
 	index = client->reliableSequence & ( MAX_RELIABLE_COMMANDS - 1 );
@@ -255,11 +255,11 @@ void SV_BroadcastCommand( const char *format, ... )
 /*
 * SV_SendClientsFragments
 */
-qboolean SV_SendClientsFragments( void )
+bool SV_SendClientsFragments( void )
 {
 	client_t *client;
 	int i;
-	qboolean sent = qfalse;
+	bool sent = false;
 
 	// send a message to each connected client
 	for( i = 0, client = svs.clients; i < sv_maxclients->integer; i++, client++ )
@@ -280,7 +280,7 @@ qboolean SV_SendClientsFragments( void )
 			continue;
 		}
 
-		sent = qtrue;
+		sent = true;
 	}
 
 	return sent;
@@ -289,13 +289,13 @@ qboolean SV_SendClientsFragments( void )
 /*
 * SV_Netchan_Transmit
 */
-qboolean SV_Netchan_Transmit( netchan_t *netchan, msg_t *msg )
+bool SV_Netchan_Transmit( netchan_t *netchan, msg_t *msg )
 {
 	int zerror;
 
 	// if we got here with unsent fragments, fire them all now
 	if( !Netchan_PushAllFragments( netchan ) )
-		return qfalse;
+		return false;
 
 	if( sv_compresspackets->integer )
 	{
@@ -312,7 +312,7 @@ qboolean SV_Netchan_Transmit( netchan_t *netchan, msg_t *msg )
 /*
 * SV_InitClientMessage
 */
-void SV_InitClientMessage( client_t *client, msg_t *msg, qbyte *data, size_t size )
+void SV_InitClientMessage( client_t *client, msg_t *msg, uint8_t *data, size_t size )
 {
 	if( client->edict && ( client->edict->r.svflags & SVF_FAKECLIENT ) )
 		return;
@@ -333,12 +333,12 @@ void SV_InitClientMessage( client_t *client, msg_t *msg, qbyte *data, size_t siz
 /*
 * SV_SendMessageToClient
 */
-qboolean SV_SendMessageToClient( client_t *client, msg_t *msg )
+bool SV_SendMessageToClient( client_t *client, msg_t *msg )
 {
 	assert( client );
 
 	if( client->edict && ( client->edict->r.svflags & SVF_FAKECLIENT ) )
-		return qtrue;
+		return true;
 
 	// transmit the message data
 	client->lastPacketSentTime = svs.realtime;
@@ -396,17 +396,17 @@ void SV_BuildClientFrameSnap( client_t *client )
 	SNAP_BuildClientFrameSnap( svs.cms, &sv.gi, sv.framenum, svs.gametime,
 		&svs.fatvis, client, ge->GetGameState(), 
 		&svs.client_entities,
-		qfalse, sv_mempool );
+		false, sv_mempool );
 	svs.fatvis.skyorg = NULL;
 }
 
 /*
 * SV_SendClientDatagram
 */
-static qboolean SV_SendClientDatagram( client_t *client )
+static bool SV_SendClientDatagram( client_t *client )
 {
 	if( client->edict && ( client->edict->r.svflags & SVF_FAKECLIENT ) )
-		return qtrue;
+		return true;
 
 	SV_InitClientMessage( client, &tmpMessage, NULL, 0 );
 
@@ -441,7 +441,9 @@ void SV_SendClientMessages( void )
 			continue;
 		}
 
-		SV_UpdateActivity();
+		if( !client->tvclient ) {
+			SV_UpdateActivity();
+		}
 
 		if( client->state == CS_SPAWNED )
 		{

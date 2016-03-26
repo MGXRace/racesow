@@ -9,12 +9,13 @@
 #define __WIDGETS_H__
 
 #include "kernel/ui_main.h"
+#include "kernel/ui_eventlistener.h"
 #include <Rocket/Core/Element.h>
 
 namespace WSWUI
 {
 
-	// "my generic element instancer
+	// "my generic element instancer"
 	template<typename T>
 	struct GenericElementInstancer : Rocket::Core::ElementInstancer
 	{
@@ -58,6 +59,19 @@ namespace WSWUI
 		}
 	};
 
+	// "my generic element instancer" that attaches click/blur events that toggle the soft keyboard
+	template<typename T>
+	struct GenericElementInstancerSoftKeyboard : GenericElementInstancer<T>
+	{
+		Rocket::Core::Element *InstanceElement(Rocket::Core::Element *parent, const String &tag, const Rocket::Core::XMLAttributes &attributes)
+		{
+			Rocket::Core::Element *elem = GenericElementInstancer<T>::InstanceElement( parent, tag, attributes );
+			elem->AddEventListener( "click", UI_GetSoftKeyboardListener() );
+			elem->AddEventListener( "blur", UI_GetSoftKeyboardListener() );
+			return elem;
+		}
+	};
+
 	//=======================================
 
 	Rocket::Core::ElementInstancer *GetKeySelectInstancer( void );
@@ -75,6 +89,8 @@ namespace WSWUI
 	Rocket::Core::ElementInstancer *GetElementFieldInstancer( void );
 	Rocket::Core::ElementInstancer *GetVideoInstancer( void );
 	Rocket::Core::ElementInstancer *GetIrcLogWidgetInstancer( void );
+	Rocket::Core::ElementInstancer *GetIFrameWidgetInstancer( void );
+	Rocket::Core::ElementInstancer *GetElementL10nInstancer( void );
 }
 
 #endif /* __WIDGETS_H__ */

@@ -37,11 +37,13 @@
 #include <limits.h>
 #include <string>
 #include <map>
+#include <unordered_map>
 #include <set>
 #include <vector>
+#include <new>
 
-#include <Rocket/Core/Platform.h>
-#include <Rocket/Core/Debug.h>
+#include "Platform.h"
+#include "Debug.h"
 
 namespace Rocket {
 namespace Core {
@@ -63,9 +65,9 @@ typedef unsigned __int64 uint64_t;
 #include <inttypes.h>
 #endif
 
-#include <Rocket/Core/Colour.h>
-#include <Rocket/Core/Vector2.h>
-#include <Rocket/Core/String.h>
+#include "Colour.h"
+#include "Vector2.h"
+#include "String.h"
 
 namespace Rocket {
 namespace Core {
@@ -85,6 +87,7 @@ typedef uintptr_t FileHandle;
 typedef uintptr_t TextureHandle;
 typedef uintptr_t CompiledGeometryHandle;
 typedef uintptr_t DecoratorDataHandle;
+typedef uintptr_t FontHandle;
 
 // List of elements.
 typedef std::vector< Element* > ElementList;

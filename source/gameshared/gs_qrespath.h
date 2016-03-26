@@ -48,7 +48,7 @@ extern "C" {
 
 // weapon
 #define PATH_GUNBLADE_ICON	    "gfx/hud/icons/weapon/gunblade"
-#define PATH_SHOCKWAVE_ICON	    "gfx/hud/icons/weapon/shockwave"
+#define PATH_GUNBLADE_BLAST_ICON	    "gfx/hud/icons/weapon/gunblade_blast"
 #define PATH_MACHINEGUN_ICON	"gfx/hud/icons/weapon/machinegun"
 #define PATH_RIOTGUN_ICON	    "gfx/hud/icons/weapon/riot"
 #define PATH_GRENADELAUNCHER_ICON   "gfx/hud/icons/weapon/grenade"
@@ -60,7 +60,6 @@ extern "C" {
 
 // ammo
 #define PATH_GUNBLADE_AMMO_ICON		"gfx/hud/icons/ammo/gunbladeammo"
-#define PATH_SHOCKWAVE_AMMO_ICON	"gfx/hud/icons/ammo/shockwaveammo"
 #define PATH_MACHINEGUN_AMMO_ICON	"gfx/hud/icons/ammo/bulletsammo"
 #define PATH_RIOTGUN_AMMO_ICON		"gfx/hud/icons/ammo/riotammo"
 #define PATH_GRENADELAUNCHER_AMMO_ICON	"gfx/hud/icons/ammo/grenadeammo"
@@ -74,7 +73,6 @@ extern "C" {
 
 // nogun weap
 #define PATH_NG_GUNBLADE_ICON		"gfx/hud/icons/weapon/nogun_gunblade"
-#define PATH_NG_SHOCKWAVE_ICON		"gfx/hud/icons/weapon/nogun_shockwave"
 #define PATH_NG_MACHINEGUN_ICON		"gfx/hud/icons/weapon/nogun_machinegun"
 #define PATH_NG_RIOTGUN_ICON		"gfx/hud/icons/weapon/nogun_riot"
 #define PATH_NG_GRENADELAUNCHER_ICON	"gfx/hud/icons/weapon/nogun_grenade"
@@ -114,7 +112,6 @@ extern "C" {
 
 // simpleitems
 
-#define PATH_SHOCKWAVE_SIMPLEITEM		"gfx/simpleitems/weapon/shockwave"
 #define PATH_MACHINEGUN_SIMPLEITEM		"gfx/simpleitems/weapon/machinegun"
 #define PATH_RIOTGUN_SIMPLEITEM			"gfx/simpleitems/weapon/riot"
 #define PATH_GRENADELAUNCHER_SIMPLEITEM		"gfx/simpleitems/weapon/grenade"
@@ -137,22 +134,14 @@ extern "C" {
 #define PATH_SHELL_SIMPLEITEM			"gfx/simpleitems/powerup/warshell"
 #define PATH_REGEN_SIMPLEITEM			"gfx/simpleitems/powerup/regen"
 
-#define PATH_KEYICON_FORWARD_ON			"gfx/hud/keys/key_forward_on"
-#define PATH_KEYICON_BACKWARD_ON		"gfx/hud/keys/key_back_on"
-#define PATH_KEYICON_LEFT_ON			"gfx/hud/keys/key_left_on"
-#define PATH_KEYICON_RIGHT_ON			"gfx/hud/keys/key_right_on"
-#define PATH_KEYICON_FIRE_ON			"gfx/hud/keys/act_fire_on"
-#define PATH_KEYICON_JUMP_ON			"gfx/hud/keys/act_jump_on"
-#define PATH_KEYICON_CROUCH_ON			"gfx/hud/keys/act_crouch_on"
-#define PATH_KEYICON_SPECIAL_ON			"gfx/hud/keys/act_special_on"
-#define PATH_KEYICON_FORWARD_OFF		"gfx/hud/keys/key_forward_off"
-#define PATH_KEYICON_BACKWARD_OFF		"gfx/hud/keys/key_back_off"
-#define PATH_KEYICON_LEFT_OFF			"gfx/hud/keys/key_left_off"
-#define PATH_KEYICON_RIGHT_OFF			"gfx/hud/keys/key_right_off"
-#define PATH_KEYICON_FIRE_OFF			"gfx/hud/keys/act_fire_off"
-#define PATH_KEYICON_JUMP_OFF			"gfx/hud/keys/act_jump_off"
-#define PATH_KEYICON_CROUCH_OFF			"gfx/hud/keys/act_crouch_off"
-#define PATH_KEYICON_SPECIAL_OFF		"gfx/hud/keys/act_special_off"
+#define PATH_KEYICON_FORWARD			"gfx/hud/keys/key_forward"
+#define PATH_KEYICON_BACKWARD			"gfx/hud/keys/key_back"
+#define PATH_KEYICON_LEFT				"gfx/hud/keys/key_left"
+#define PATH_KEYICON_RIGHT				"gfx/hud/keys/key_right"
+#define PATH_KEYICON_FIRE				"gfx/hud/keys/act_fire"
+#define PATH_KEYICON_JUMP				"gfx/hud/keys/act_jump"
+#define PATH_KEYICON_CROUCH				"gfx/hud/keys/act_crouch"
+#define PATH_KEYICON_SPECIAL			"gfx/hud/keys/act_special"
 
 // weapon firing
 #define PATH_SMOKE_PUFF		    "smokePuff"
@@ -173,7 +162,6 @@ extern "C" {
 
 // weapons
 #define PATH_GUNBLADE_MODEL		"models/weapons/gunblade/gunblade.md3"
-#define PATH_SHOCKWAVE_MODEL		"models/weapons/shockwave/shockwave.md3"
 #define PATH_MACHINEGUN_MODEL		"models/weapons/machinegun/machinegun.md3"
 #define PATH_RIOTGUN_MODEL		"models/weapons/riotgun/riotgun.md3"
 #define PATH_GRENADELAUNCHER_MODEL	"models/weapons/glauncher/glauncher.md3"
@@ -218,9 +206,9 @@ extern "C" {
 #define PATH_GUNBLADEBLAST_STRONG_MODEL	    "models/objects/projectile/gunblade/proj_gunbladeblast.md3"
 #define PATH_PLASMA_WEAK_MODEL		    "models/objects/projectile/plasmagun/proj_plasmagun.md3"
 #define PATH_PLASMA_STRONG_MODEL	    "models/objects/projectile/plasmagun/proj_plasmagun.md3"
-#define PATH_GRENADE_WEAK_MODEL		    "models/objects/projectile/glauncher/grenadeweak.md3"
+#define PATH_GRENADE_WEAK_MODEL		    "models/objects/projectile/glauncher/grenadestrong.md3"
 #define PATH_GRENADE_STRONG_MODEL	    "models/objects/projectile/glauncher/grenadestrong.md3"
-#define PATH_ROCKET_WEAK_MODEL		    "models/objects/projectile/rlauncher/rocket_weak.md3"
+#define PATH_ROCKET_WEAK_MODEL		    "models/objects/projectile/rlauncher/rocket_strong.md3"
 #define PATH_ROCKET_STRONG_MODEL	    "models/objects/projectile/rlauncher/rocket_strong.md3"
 #define PATH_ELECTROBOLT_WEAK_MODEL	    "models/objects/projectile/electrobolt/proj_electrobolt.md3"
 
@@ -232,6 +220,7 @@ extern "C" {
 #define PATH_GUNBLADEBLAST_EXPLOSION_MODEL  "models/weapon_hits/gunblade/hit_blastexp.md3"
 #define PATH_ELECTROBLAST_IMPACT_MODEL	    "models/weapon_hits/electrobolt/hit_electrobolt.md3"
 #define PATH_INSTABLAST_IMPACT_MODEL	    "models/weapon_hits/instagun/hit_instagun.md3"
+#define PATH_LASERGUN_IMPACT_MODEL      "models/weapon_hits/lasergun/hit_blastexp.md3"
 
 #define GRENADE_EXPLOSION_MODEL_RADIUS		30.0
 #define PLASMA_EXPLOSION_MODEL_RADIUS		10.0
@@ -252,7 +241,7 @@ extern "C" {
 #define S_PICKUP_HEALTH_SMALL	"sounds/items/health_5"          // pickup health +5
 #define S_PICKUP_HEALTH_MEDIUM	"sounds/items/health_25"         // pickup health +25
 #define S_PICKUP_HEALTH_LARGE	"sounds/items/health_50"         // pickup health +50
-#define S_PICKUP_HEALTH_MEGA	"sounds/items/megahealth"        // pickup megahealth
+#define S_PICKUP_HEALTH_MEGA	"sounds/items/health_25"        // pickup megahealth // changed from "sounds/items/megahealth" for racesow
 
 #define S_PICKUP_ARMOR_GA	"sounds/items/armor_green"       // pickup green armor
 #define S_PICKUP_ARMOR_YA	"sounds/items/armor_yellow"      // pickup yellow armor
@@ -272,11 +261,13 @@ extern "C" {
 #define S_CHAT			"sounds/misc/chat"
 #define S_TIMER_BIP_BIP		"sounds/misc/timer_bip_bip"
 #define S_TIMER_PLOINK		"sounds/misc/timer_ploink"
+#define S_GIBS_EXPLOSION	"sounds/misc/gibs_explosion"
 
 //wsw: pb disable unreferenced sounds
 //#define S_LAND					"sounds/misc/land"
 #define S_HIT_WATER		"sounds/misc/hit_water"
 
+#define S_PLAYER_RESPAWN "sounds/world/player_respawn"
 #define S_TELEPORT		"sounds/world/tele_in"
 #define S_JUMPPAD		"sounds/world/jumppad"
 #define S_LAUNCHPAD		"sounds/world/launchpad"
@@ -337,7 +328,7 @@ extern "C" {
 
 
 //#define S_PLAYER_FALL_0_to_3		"*fall_%i"					// player fall (height)
-#define S_PLAYER_FALLDEATH	    "*falldeath"             // player falling to his death
+#define S_PLAYER_FALLDEATH	    "*death"             	// player falling to his death //changed from "*falldeath" for racesow
 #define S_PLAYER_PAINS		    "*pain%i"                    // player pain (percent)
 #define S_PLAYER_DEATH		    "*death"
 
@@ -363,30 +354,35 @@ extern "C" {
 #define S_WEAPON_GUNBLADE_S_HIT_1_to_2		"sounds/weapons/bladegun_strong_hit_%i"
 
 
-#define S_WEAPON_RIOTGUN_W_HIT			"sounds/weapons/riotgun_weak_hit"
+#define S_WEAPON_RIOTGUN_W_HIT			"sounds/weapons/riotgun_strong_hit"
 #define S_WEAPON_RIOTGUN_S_HIT			"sounds/weapons/riotgun_strong_hit"
 
-#define S_WEAPON_GRENADE_W_BOUNCE_1_to_2	"sounds/weapons/gren_weak_bounce%i"
+#define S_WEAPON_GRENADE_W_BOUNCE_1_to_2	"sounds/weapons/gren_strong_bounce%i"
 #define S_WEAPON_GRENADE_S_BOUNCE_1_to_2	"sounds/weapons/gren_strong_bounce%i"
-#define S_WEAPON_GRENADE_W_HIT			"sounds/weapons/gren_weak_explosion"
+#define S_WEAPON_GRENADE_W_HIT			"sounds/weapons/gren_strong_explosion"
 #define S_WEAPON_GRENADE_S_HIT			"sounds/weapons/gren_strong_explosion1"
 
-#define S_WEAPON_ROCKET_W_FLY			"sounds/weapons/rocket_fly_weak"
+#define S_WEAPON_ROCKET_W_FLY			"sounds/weapons/rocket_fly_strong"
 #define S_WEAPON_ROCKET_S_FLY			"sounds/weapons/rocket_fly_strong"
-#define S_WEAPON_ROCKET_W_HIT			"sounds/weapons/rocket_weak_explosion"
+#define S_WEAPON_ROCKET_W_HIT			"sounds/weapons/rocket_strong_explosion"
 #define S_WEAPON_ROCKET_S_HIT			"sounds/weapons/rocket_strong_explosion"
 
 #define S_WEAPON_PLASMAGUN_W_FLY		"sounds/weapons/plasmagun_strong_fly"
-#define S_WEAPON_PLASMAGUN_S_FLY		"sounds/weapons/plasmagun_weak_fly"
-#define S_WEAPON_PLASMAGUN_W_HIT		"sounds/weapons/plasmagun_weak_explosion"
+#define S_WEAPON_PLASMAGUN_S_FLY		"sounds/weapons/plasmagun_strong_fly"
+#define S_WEAPON_PLASMAGUN_W_HIT		"sounds/weapons/plasmagun_strong_explosion"
 #define S_WEAPON_PLASMAGUN_S_HIT		"sounds/weapons/plasmagun_strong_explosion"
 
 #define S_WEAPON_LASERGUN_S_HUM			"sounds/weapons/laser_strong_hum"
-#define S_WEAPON_LASERGUN_W_HUM			"sounds/weapons/laser_weak_hum"
+#define S_WEAPON_LASERGUN_W_HUM			"sounds/weapons/laser_strong_hum"
 #define S_WEAPON_LASERGUN_S_QUAD_HUM		"sounds/weapons/laser_strong_quad_hum"
-#define S_WEAPON_LASERGUN_W_QUAD_HUM		"sounds/weapons/laser_weak_quad_hum"
+#define S_WEAPON_LASERGUN_W_QUAD_HUM		"sounds/weapons/laser_strong_quad_hum"
 #define S_WEAPON_LASERGUN_S_STOP		"sounds/weapons/laser_strong_stop"
-#define S_WEAPON_LASERGUN_W_STOP		"sounds/weapons/laser_weak_stop"
+#define S_WEAPON_LASERGUN_W_STOP		"sounds/weapons/laser_strong_stop"
+#define S_WEAPON_LASERGUN_HIT_0			"sounds/weapons/laser_hit0"
+#define S_WEAPON_LASERGUN_HIT_1			"sounds/weapons/laser_hit1"
+#define S_WEAPON_LASERGUN_HIT_2			"sounds/weapons/laser_hit2"
+
+#define S_WEAPON_ELECTROBOLT_HIT		"sounds/weapons/electrobolt_hit"
 
 // announcer sounds
 // readyup
@@ -457,9 +453,8 @@ extern "C" {
 #define UI_SHADER_BIGLOGO			"gfx/ui/logo512"
 #define UI_SHADER_CURSOR			"gfx/ui/cursor"
 
-#define UI_SHADER_PROGRESSBAR		"gfx/ui/progressbar"
-#define UI_SHADER_BACKGROUND		"gfx/ui/loadingscreen"
-#define UI_SHADER_BACKGROUND_LOADING "gfx/ui/loadingscreen%02i"
+#define UI_SHADER_LOADINGLOGO		"gfx/ui/loadinglogo"
+#define UI_SHADER_LOADINGBAR		"gfx/ui/loadingbar"
 
 // vsay icons
 #define PATH_VSAY_GENERIC_ICON	    "gfx/hud/icons/vsay/generic"
@@ -488,11 +483,14 @@ extern "C" {
 #define PATH_VSAY_ROGER_ICON	    "gfx/hud/icons/vsay/roger"
 #define PATH_VSAY_ARMORFREE_ICON    "gfx/hud/icons/vsay/armorfree"
 #define PATH_VSAY_AREASECURED_ICON  "gfx/hud/icons/vsay/areasecured"
-#define PATH_VSAY_SHUTUP_ICON	    "gfx/hud/icons/vsay/shutup"
 #define PATH_VSAY_BOOMSTICK_ICON    "gfx/hud/icons/vsay/boomstick"
 #define PATH_VSAY_GOTOPOWERUP_ICON  "gfx/hud/icons/vsay/gotopowerup"
 #define PATH_VSAY_GOTOQUAD_ICON	    "gfx/hud/icons/vsay/gotoquad"
 #define PATH_VSAY_OK_ICON	    "gfx/hud/icons/vsay/ok"
+#define PATH_VSAY_DEFEND_A_ICON	    "gfx/hud/icons/vsay/defend"
+#define PATH_VSAY_ATTACK_A_ICON	    "gfx/hud/icons/vsay/attack"
+#define PATH_VSAY_DEFEND_B_ICON	    "gfx/hud/icons/vsay/defend"
+#define PATH_VSAY_ATTACK_B_ICON	    "gfx/hud/icons/vsay/attack"
 
 // vsay sounds
 #define S_VSAY_NEEDHEALTH			"sounds/vsay/needhealth"
@@ -520,11 +518,14 @@ extern "C" {
 #define S_VSAY_ROGER				"sounds/vsay/roger"
 #define S_VSAY_ARMORFREE			"sounds/vsay/armorfree"
 #define S_VSAY_AREASECURED			"sounds/vsay/areasecured"
-#define S_VSAY_SHUTUP				"sounds/vsay/shutup"
 #define S_VSAY_BOOMSTICK			"sounds/vsay/boomstick"
 #define S_VSAY_GOTOPOWERUP			"sounds/vsay/gotopowerup"
 #define S_VSAY_GOTOQUAD				"sounds/vsay/gotoquad"
 #define S_VSAY_OK				"sounds/vsay/ok"
+#define S_VSAY_DEFEND_A				"sounds/vsay/defend_a"
+#define S_VSAY_ATTACK_A				"sounds/vsay/attack_a"
+#define S_VSAY_DEFEND_B				"sounds/vsay/defend_b"
+#define S_VSAY_ATTACK_B				"sounds/vsay/attack_b"
 
 #ifdef __cplusplus
 };

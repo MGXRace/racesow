@@ -30,6 +30,7 @@ cvar_t *g_callvote_electpercentage;
 cvar_t *g_callvote_electtime;          // in seconds
 cvar_t *g_callvote_enabled;
 cvar_t *g_callvote_maxchanges;
+cvar_t *g_callvote_cooldowntime;
 
 enum
 {
@@ -63,6 +64,7 @@ typedef struct callvotetype_s
 	char *argument_format;
 	char *help;
 	char *argument_type;
+	bool need_auth;
 	struct callvotetype_s *next;
 } callvotetype_t;
 
@@ -144,6 +146,22 @@ static http_response_code_t G_PlayerlistWebRequest( http_query_method_t method, 
 	*content = msg;
 	*content_length = msg_len;
 	return HTTP_RESP_OK;
+}
+
+/*
+* shuffle/rebalance
+*/
+typedef struct 
+{
+	int ent;
+	int weight;
+} weighted_player_t;
+
+static int G_VoteCompareWeightedPlayers( const void *a, const void *b )
+{
+	const weighted_player_t *pa = ( const weighted_player_t * )a;
+	const weighted_player_t *pb = ( const weighted_player_t * )b;
+	return pb->weight - pa->weight;
 }
 
 /*
@@ -601,7 +619,7 @@ static void G_VoteGametypePassed( callvotedata_t *vote )
 	if( GS_MatchState() == MATCH_STATE_COUNTDOWN ||
 		GS_MatchState() == MATCH_STATE_PLAYTIME || !G_RespawnLevel() )
 	{
-		// go thought scoreboard if in game
+		// go to scoreboard if in game
 		Q_strncpyz( level.forcemap, level.mapname, sizeof( level.forcemap ) );
 		G_EndMatch();
 	}
@@ -1277,6 +1295,7 @@ static void G_VoteMutePassed( callvotedata_t *vote )
 		return;
 
 	ent->r.client->muted |= 1;
+	ent->r.client->level.stats.muted_count++;
 }
 
 // vsay mute
@@ -1291,6 +1310,7 @@ static void G_VoteVMutePassed( callvotedata_t *vote )
 		return;
 
 	ent->r.client->muted |= 2;
+	ent->r.client->level.stats.muted_count++;
 }
 
 /*
@@ -1735,6 +1755,146 @@ static const char *G_VoteAllowUnevenCurrent( void )
 		return "0";
 }
 
+/*
+* Shuffle
+*/
+static void G_VoteShufflePassed( callvotedata_t *vote )
+{
+	int i;
+	int p1, p2, inc;
+	int team;
+	int numplayers;
+	weighted_player_t players[MAX_CLIENTS];
+
+	numplayers = 0;
+	for( team = TEAM_ALPHA; team < GS_MAX_TEAMS; team++ )
+	{
+		if( !teamlist[team].numplayers )
+			continue;
+		for( i = 0; i < teamlist[team].numplayers; i++ )
+		{
+			players[numplayers].ent = teamlist[team].playerIndices[i];
+			players[numplayers].weight = rand();
+			numplayers++;
+		}
+	}
+
+	if( !numplayers )
+		return;
+
+	qsort( players, numplayers, sizeof( weighted_player_t ), ( int ( * )( const void *, const void * ) )G_VoteCompareWeightedPlayers );
+
+	if( rand() & 1 )
+	{
+		p1 = 0;
+		p2 = numplayers - 1;
+		inc = 1;
+	}
+	else
+	{
+		p1 = numplayers - 1;
+		p2 = 0;
+		inc = -1;
+	}
+
+	// put players into teams
+	team = rand() % numplayers;
+	for( i = p1; ; i += inc )
+	{
+		edict_t *e = game.edicts + players[i].ent;
+		int newteam = TEAM_ALPHA + team++ % (GS_MAX_TEAMS - TEAM_ALPHA);
+
+		if( e->s.team != newteam )
+			G_Teams_SetTeam( e, newteam );
+
+		if( i == p2 )
+			break;
+	}
+
+	G_Gametype_ScoreEvent( NULL, "shuffle", "" );
+}
+
+static bool G_VoteShuffleValidate( callvotedata_t *vote, bool first )
+{
+	if( !GS_TeamBasedGametype() || level.gametype.maxPlayersPerTeam == 1 )
+	{
+		if( first ) G_PrintMsg( vote->caller, S_COLOR_RED "Shuffle only works in team-based game modes\n" );
+		return false;
+	}
+
+	return true;
+}
+
+/*
+* Rebalance
+*/
+static void G_VoteRebalancePassed( callvotedata_t *vote )
+{
+	int i;
+	int team;
+	int lowest_team, lowest_score;
+	int numplayers;
+	weighted_player_t players[MAX_CLIENTS];
+
+	numplayers = 0;
+	lowest_team = GS_MAX_TEAMS;
+	lowest_score = 999999;
+	for( team = TEAM_ALPHA; team < GS_MAX_TEAMS; team++ )
+	{
+		if( !teamlist[team].numplayers )
+			continue;
+
+		if( teamlist[team].stats.score < lowest_score )
+		{
+			lowest_team = team;
+			lowest_score = teamlist[team].stats.score;
+		}
+
+		for( i = 0; i < teamlist[team].numplayers; i++ )
+		{
+			int ent = teamlist[team].playerIndices[i];
+			players[numplayers].ent = ent;
+			players[numplayers].weight = game.edicts[ent].r.client->level.stats.score;
+			numplayers++;
+		}
+	}
+
+	if( !numplayers || lowest_team == GS_MAX_TEAMS )
+		return;
+
+	qsort( players, numplayers, sizeof( weighted_player_t ), ( int ( * )( const void *, const void * ) )G_VoteCompareWeightedPlayers );
+
+	// put players into teams
+	// start with the lowest scoring team
+	team = lowest_team - TEAM_ALPHA;
+	for( i = 0; i < numplayers; i++ )
+	{
+		edict_t *e = game.edicts + players[i].ent;
+		int newteam = TEAM_ALPHA + team % (GS_MAX_TEAMS - TEAM_ALPHA);
+
+		if( e->s.team != newteam )
+			G_Teams_SetTeam( e, newteam );
+		else
+			memset( &e->r.client->level.stats, 0, sizeof( e->r.client->level.stats ) ); // clear scores
+
+		if( i % 2 == 0 )
+			team++;
+	}
+
+	G_Gametype_ScoreEvent( NULL, "rebalance", "" );
+}
+
+static bool G_VoteRebalanceValidate( callvotedata_t *vote, bool first )
+{
+	if( !GS_TeamBasedGametype() || level.gametype.maxPlayersPerTeam == 1 )
+	{
+		if( first ) G_PrintMsg( vote->caller, S_COLOR_RED "Rebalance only works in team-based game modes\n" );
+		return false;
+	}
+
+	return true;
+}
+
 //================================================
 //
 //================================================
@@ -1803,6 +1963,9 @@ void G_CallVotes_ResetClient( int n )
 void G_CallVotes_Reset( void )
 {
 	int i;
+
+	if( callvoteState.vote.caller && callvoteState.vote.caller->r.client )
+		callvoteState.vote.caller->r.client->level.callvote_when = game.realtime;
 
 	callvoteState.vote.callvote = NULL;
 	for( i = 0; i < gs.maxclients; i++ )
@@ -1905,10 +2068,13 @@ static const char *G_CallVotes_Arguments( const callvotedata_t *vote )
 static const char *G_CallVotes_String( const callvotedata_t *vote )
 {
 	const char *arguments;
+	static char string[MAX_CONFIGSTRING_CHARS];
 
 	arguments = G_CallVotes_Arguments( vote );
-	if( arguments[0] )
-		return va( "%s %s", vote->callvote->name, arguments );
+	if( arguments[0] ) {
+		Q_snprintfz( string, sizeof( string ), "%s %s", vote->callvote->name, arguments );
+		return string;
+	}
 	return vote->callvote->name;
 }
 
@@ -1941,17 +2107,25 @@ static void G_CallVotes_CheckState( void )
 	//analize votation state
 	for( ent = game.edicts + 1; PLAYERNUM( ent ) < gs.maxclients; ent++ )
 	{
+		gclient_t *client = ent->r.client;
+
 		if( !ent->r.inuse || trap_GetClientState( PLAYERNUM( ent ) ) < CS_SPAWNED )
 			continue;
 
-		if( ( ent->r.svflags & SVF_FAKECLIENT ) || ent->r.client->isTV )
+		if ( (ent->r.svflags & SVF_FAKECLIENT) || client->isTV )
 			continue;
 
 		// ignore inactive players unless they have voted
-		if( ent->r.client->level.last_activity && 
-			ent->r.client->level.last_activity + ( g_inactivity_maxtime->value * 1000 ) < level.time &&
+		if( client->level.last_activity &&
+			client->level.last_activity + (g_inactivity_maxtime->value * 1000) < level.time &&
 			clientVoted[PLAYERNUM( ent )] == VOTED_NOTHING )
 			continue;
+
+		if( callvoteState.vote.callvote->need_auth && sv_mm_enable->integer ) {
+			if( client->mm_session <= 0 ) {
+				continue;
+			}
+		}
 
 		voters++;
 		if( clientVoted[PLAYERNUM( ent )] == VOTED_YES )
@@ -2014,6 +2188,11 @@ void G_CallVotes_CmdVote( edict_t *ent )
 	if( !callvoteState.vote.callvote )
 	{
 		G_PrintMsg( ent, "%sThere's no vote in progress\n", S_COLOR_RED );
+		return;
+	}
+
+	if( callvoteState.vote.callvote->need_auth && sv_mm_enable->integer && ent->r.client->mm_session <= 0 ) {
+		G_PrintMsg( ent, "%sThe ongoing vote requires authentication\n", S_COLOR_RED );
 		return;
 	}
 
@@ -2115,7 +2294,7 @@ static bool G_CallVotes_CheckPermission( void )
 	int i;
 
 	if( !vote || !vote->callvote || !vote->caller )
-		return qfalse;
+		return false;
 
 	Q_snprintfz( argsString, MAX_STRING_CHARS, "\"%s\"", vote->callvote->name );
 	for( i = 0; i < vote->argc; i++ )
@@ -2227,6 +2406,17 @@ static void G_CallVote( edict_t *ent, bool isopcall )
 		return;
 	}
 
+	if( !isopcall && callvote->need_auth && sv_mm_enable->integer && ent->r.client->mm_session <= 0 ) {
+		G_PrintMsg( ent, "%sCallvote %s requires authentication\n", S_COLOR_RED, callvote->name );
+		return;
+	}
+
+	if( !isopcall && ent->r.client->level.callvote_when && 
+		(ent->r.client->level.callvote_when + g_callvote_cooldowntime->integer * 1000 > game.realtime) ) {
+		G_PrintMsg( ent, "%sYou can not call a vote right now\n", S_COLOR_RED, callvote->name );
+		return;
+	}
+
 	//we got a valid type. Get the parameters if any
 	if( callvote->expectedargs != trap_Cmd_Argc()-2 )
 	{
@@ -2272,15 +2462,18 @@ static void G_CallVote( edict_t *ent, bool isopcall )
 	clientVoted[PLAYERNUM( ent )] = VOTED_YES;
 	clientVoteChanges[PLAYERNUM( ent )]--;
 
+	ent->r.client->level.callvote_when = callvoteState.timeout;
+
 	trap_ConfigString( CS_ACTIVE_CALLVOTE, G_CallVotes_String( &callvoteState.vote ) );
 
 	G_AnnouncerSound( NULL, trap_SoundIndex( va( S_ANNOUNCER_CALLVOTE_CALLED_1_to_2, ( rand()&1 )+1 ) ), GS_MAX_TEAMS, true, NULL );
 
-	G_PrintMsg( NULL, "%s%s requested to vote %s%s%s\n", ent->r.client->netname, S_COLOR_WHITE, S_COLOR_YELLOW,
-		G_CallVotes_String( &callvoteState.vote ), S_COLOR_WHITE );
+	G_PrintMsg( NULL, "%s" S_COLOR_WHITE " requested to vote " S_COLOR_YELLOW "%s\n",
+		ent->r.client->netname, G_CallVotes_String( &callvoteState.vote ) );
 
-	G_PrintMsg( NULL, "%sPress %sF1 (\\vote yes)%s or %sF2 (\\vote no)%s\n", S_COLOR_WHITE, S_COLOR_YELLOW,
-		S_COLOR_WHITE, S_COLOR_YELLOW, S_COLOR_WHITE );
+	G_PrintMsg( NULL, "Press " S_COLOR_YELLOW "F1" S_COLOR_WHITE " to " S_COLOR_YELLOW "vote yes"
+		S_COLOR_WHITE " or " S_COLOR_YELLOW "F2" S_COLOR_WHITE " to " S_COLOR_YELLOW "vote no"
+		S_COLOR_WHITE ", or cast your vote using the " S_COLOR_YELLOW "in-game menu\n" );
 
 	G_CallVotes_Think(); // make the first think
 }
@@ -2504,6 +2697,7 @@ void G_CallVotes_Init( void )
 	g_callvote_electtime =		trap_Cvar_Get( "g_vote_electtime", "40", CVAR_ARCHIVE );
 	g_callvote_enabled =		trap_Cvar_Get( "g_vote_allowed", "1", CVAR_ARCHIVE );
 	g_callvote_maxchanges =		trap_Cvar_Get( "g_vote_maxchanges", "3", CVAR_ARCHIVE );
+	g_callvote_cooldowntime =	trap_Cvar_Get( "g_vote_cooldowntime", "5", CVAR_ARCHIVE );
 
 	// register all callvotes
 
@@ -2638,6 +2832,7 @@ void G_CallVotes_Init( void )
 	callvote->argument_format = G_LevelCopyString( "<player>" );
 	callvote->argument_type = G_LevelCopyString( "option" );
 	callvote->webRequest = G_PlayerlistWebRequest;
+	callvote->need_auth = true;
 	callvote->help = G_LevelCopyString( "Forces player back to spectator mode" );
 
 	callvote = G_RegisterCallvote( "kick" );
@@ -2649,6 +2844,7 @@ void G_CallVotes_Init( void )
 	callvote->argument_format = G_LevelCopyString( "<player>" );
 	callvote->argument_type = G_LevelCopyString( "option" );
 	callvote->webRequest = G_PlayerlistWebRequest;
+	callvote->need_auth = true;
 	callvote->help = G_LevelCopyString( "Removes player from the server" );
 
 	callvote = G_RegisterCallvote( "kickban" );
@@ -2660,6 +2856,7 @@ void G_CallVotes_Init( void )
 	callvote->argument_format = G_LevelCopyString( "<player>" );
 	callvote->argument_type = G_LevelCopyString( "option" );
 	callvote->webRequest = G_PlayerlistWebRequest;
+	callvote->need_auth = true;
 	callvote->help = G_LevelCopyString( "Removes player from the server and bans his IP-address for 15 minutes" );
 
 	callvote = G_RegisterCallvote( "mute" );
@@ -2671,6 +2868,7 @@ void G_CallVotes_Init( void )
 	callvote->argument_format = G_LevelCopyString( "<player>" );
 	callvote->argument_type = G_LevelCopyString( "option" );
 	callvote->webRequest = G_PlayerlistWebRequest;
+	callvote->need_auth = true;
 	callvote->help = G_LevelCopyString( "Disallows chat messages from the muted player" );
 
 	callvote = G_RegisterCallvote( "vmute" );
@@ -2682,6 +2880,7 @@ void G_CallVotes_Init( void )
 	callvote->argument_format = G_LevelCopyString( "<player>" );
 	callvote->argument_type = G_LevelCopyString( "option" );
 	callvote->webRequest = G_PlayerlistWebRequest;
+	callvote->need_auth = true;
 	callvote->help = G_LevelCopyString( "Disallows voice chat messages from the muted player" );
 
 	callvote = G_RegisterCallvote( "unmute" );
@@ -2693,6 +2892,7 @@ void G_CallVotes_Init( void )
 	callvote->argument_format = G_LevelCopyString( "<player>" );
 	callvote->argument_type = G_LevelCopyString( "option" );
 	callvote->webRequest = G_PlayerlistWebRequest;
+	callvote->need_auth = true;
 	callvote->help = G_LevelCopyString( "Reallows chat messages from the unmuted player" );
 
 	callvote = G_RegisterCallvote( "vunmute" );
@@ -2704,6 +2904,7 @@ void G_CallVotes_Init( void )
 	callvote->argument_format = G_LevelCopyString( "<player>" );
 	callvote->argument_type = G_LevelCopyString( "option" );
 	callvote->webRequest = G_PlayerlistWebRequest;
+	callvote->need_auth = true;
 	callvote->help = G_LevelCopyString( "Reallows voice chat messages from the unmuted player" );
 
 	callvote = G_RegisterCallvote( "numbots" );
@@ -2714,6 +2915,7 @@ void G_CallVotes_Init( void )
 	callvote->extraHelp = NULL;
 	callvote->argument_format = G_LevelCopyString( "<number>" );
 	callvote->argument_type = G_LevelCopyString( "integer" );
+	callvote->need_auth = true;
 	callvote->help = G_LevelCopyString( "Sets the number of bots to play on the server" );
 
 	callvote = G_RegisterCallvote( "allow_teamdamage" );
@@ -2724,6 +2926,7 @@ void G_CallVotes_Init( void )
 	callvote->extraHelp = NULL;
 	callvote->argument_format = G_LevelCopyString( "<1 or 0>" );
 	callvote->argument_type = G_LevelCopyString( "bool" );
+	callvote->need_auth = true;
 	callvote->help = G_LevelCopyString( "Toggles whether shooting teammates will do damage to them" );
 
 	callvote = G_RegisterCallvote( "instajump" );
@@ -2794,7 +2997,27 @@ void G_CallVotes_Init( void )
 	callvote->extraHelp = NULL;
 	callvote->argument_format = G_LevelCopyString( "<1 or 0>" );
 	callvote->argument_type = G_LevelCopyString( "bool" );
-	callvote->help = G_LevelCopyString( "Toggles whether uneven teams is allowed" );
+	callvote->need_auth = true;
+
+	callvote = G_RegisterCallvote( "shuffle" );
+	callvote->expectedargs = 0;
+	callvote->validate = G_VoteShuffleValidate;
+	callvote->execute = G_VoteShufflePassed;
+	callvote->current = NULL;
+	callvote->extraHelp = NULL;
+	callvote->argument_format = NULL;
+	callvote->argument_type = NULL;
+	callvote->help = G_LevelCopyString( "Shuffles teams" );
+
+	callvote = G_RegisterCallvote( "rebalance" );
+	callvote->expectedargs = 0;
+	callvote->validate = G_VoteRebalanceValidate;
+	callvote->execute = G_VoteRebalancePassed;
+	callvote->current = NULL;
+	callvote->extraHelp = NULL;
+	callvote->argument_format = NULL;
+	callvote->argument_type = NULL;
+	callvote->help = G_LevelCopyString( "Rebalances teams" );
 
 	// racesow
 	callvote = G_RegisterCallvote( "randmap" );

@@ -14,7 +14,7 @@
  *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -27,9 +27,9 @@
 
 #include "precompiled.h"
 #include "TextureResource.h"
-#include "FontFaceHandle.h"
+#include <Rocket/Core/FontFaceHandle.h>
 #include "TextureDatabase.h"
-#include <Rocket/Core.h>
+#include "../../Include/Rocket/Core.h"
 
 namespace Rocket {
 namespace Core {
@@ -123,33 +123,17 @@ bool TextureResource::Load(RenderInterface* render_interface) const
 
 		bool delete_data = false;
 		const byte* data = NULL;
+		int samples = 4;
 
 		// Find the generation protocol and generate the data accordingly.
-		String protocol = source.Substring(1, source.Find("::") - 1);
-		if (protocol == "font")
-		{
-			// The requested texture is a font layer.
-			delete_data = true;
-			
-			FontFaceHandle* handle;
-			FontEffect* layer_id;
-			int texture_id;
-			
-			if (sscanf(source.CString(), "?font::%p/%p/%d", &handle, &layer_id, &texture_id) == 3)
-			{
-				handle->GenerateLayerTexture(data,
-											 dimensions,
-											 layer_id,
-											 texture_id);
-			}
-		}
+		//String protocol = source.Substring(1, source.Find("::") - 1);
 
 		// If texture data was generated, great! Otherwise, fallback to the LoadTexture() code and
 		// hope the client knows what the hell to do with the question mark in their file name.
 		if (data != NULL)
 		{
 			TextureHandle handle;
-			bool success = render_interface->GenerateTexture(handle, data, dimensions);
+			bool success = render_interface->GenerateTexture(handle, data, dimensions, samples);
 
 			if (delete_data)
 				delete[] data;

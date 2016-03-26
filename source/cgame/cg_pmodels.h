@@ -98,7 +98,6 @@ typedef struct pmodelinfo_s
 {
 	char *name;
 	int sex;
-	struct shader_s	*icon;
 
 	struct	model_s	*model;
 	struct cg_sexedSfx_s *sexedSfx;
@@ -169,29 +168,10 @@ struct weaponinfo_s *CG_CreateWeaponZeroModel( char *cgs_name );
 struct weaponinfo_s *CG_RegisterWeaponModel( char *cgs_name, int weaponTag );
 void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weapon, int effects, orientation_t *projectionSource, unsigned int flash_time, unsigned int barrel_time );
 struct weaponinfo_s *CG_GetWeaponInfo( int currentweapon );
-void CG_ViewWeapon_StartFallKickEff( int parms );
 
 //=================================================
 //				VIEW WEAPON
 //=================================================
-
-enum
-{
-	CAM_INEYES,
-	CAM_THIRDPERSON,
-
-	CAM_MODES
-};
-
-typedef struct
-{
-
-	int mode;
-	unsigned int cmd_mode_delay;
-
-} cg_chasecam_t;
-
-extern cg_chasecam_t chaseCam;
 
 typedef struct
 {
@@ -208,7 +188,5 @@ typedef struct
 
 	// other effects
 	orientation_t projectionSource;
-	unsigned int fallEff_Time;
-	int fallEff_rebTime;
 } cg_viewweapon_t;
 

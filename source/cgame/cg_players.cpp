@@ -203,13 +203,6 @@ void CG_LoadClientInfo( cg_clientInfo_t *ci, const char *info, int client )
 	s = Info_ValueForKey( info, "hand" );
 	ci->hand = s && s[0] ? atoi( s ) : 2;
 
-	s = Info_ValueForKey( info, "fov" );
-	if( !(s && s[0]) || sscanf( s, "%3i %3i", &ci->fov, &ci->zoomfov ) != 2 )
-	{
-		ci->fov = DEFAULT_FOV;
-		ci->zoomfov = DEFAULT_ZOOMFOV;
-	}
-
 	// color
 	s = Info_ValueForKey( info, "color" );
 	rgbcolor = s && s[0] ? COM_ReadColorRGBString( s ) : -1;
@@ -217,7 +210,4 @@ void CG_LoadClientInfo( cg_clientInfo_t *ci, const char *info, int client )
 		Vector4Set( ci->color, COLOR_R( rgbcolor ), COLOR_G( rgbcolor ), COLOR_B( rgbcolor ), 255 );
 	else
 		Vector4Set( ci->color, 255, 255, 255, 255 );
-
-	// wsw : jal : dunno why are we still keeping the icon
-	ci->icon = cgs.basePModelInfo[0].icon;
 }

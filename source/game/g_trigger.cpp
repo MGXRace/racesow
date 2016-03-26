@@ -246,7 +246,7 @@ static void trigger_counter_use( edict_t *self, edict_t *other, edict_t *activat
 	if( self->count )
 	{
 		if( !( self->spawnflags & 1 ) )
-			G_CenterPrintMsg( activator, "%i more to go...", self->count );
+			G_CenterPrintFormatMsg( activator, "%s more to go...", va( "%i", self->count ), NULL );
 		if( !( self->spawnflags & 2 ) )
 			G_Sound( activator, CHAN_AUTO, self->moveinfo.sound_start, ATTN_NORM );
 
@@ -327,6 +327,7 @@ void SP_trigger_always( edict_t *ent )
 static void G_JumpPadSound( edict_t *ent )
 {
 	vec3_t org;
+	edict_t *sound;
 
 	if( !ent->s.modelindex )
 		return;
@@ -338,7 +339,12 @@ static void G_JumpPadSound( edict_t *ent )
 	org[1] = ent->s.origin[1] + 0.5 * ( ent->r.mins[1] + ent->r.maxs[1] );
 	org[2] = ent->s.origin[2] + 0.5 * ( ent->r.mins[2] + ent->r.maxs[2] );
 
-	G_PositionedSound( org, CHAN_AUTO, ent->moveinfo.sound_start, ATTN_NORM );
+	sound = G_PositionedSound( org, CHAN_AUTO, ent->moveinfo.sound_start, ATTN_NORM );
+	if( sound && sound->r.areanum < 0 ) {
+		// HACK: jumppad sounds may get trapped inside solid or go outside level bounds and get culled
+		// so forcefully place them into legal space
+		sound->r.areanum = ent->r.areanum < 0 ? ent->r.areanum2 : ent->r.areanum;
+	}
 }
 
 #define PUSH_ONCE	1
@@ -355,9 +361,6 @@ static void trigger_push_touch( edict_t *self, edict_t *other, cplane_t *plane, 
 	// add an event
 	if( other->r.client )
 	{
-		if( other->r.client->ps.pmove.pm_type != PM_NORMAL )
-			return;
-
 		GS_TouchPushTrigger( &other->r.client->ps, &self->s );
 	}
 	else
@@ -366,9 +369,12 @@ static void trigger_push_touch( edict_t *self, edict_t *other, cplane_t *plane, 
 		if( other->movetype != MOVETYPE_BOUNCEGRENADE )
 			return;
 
+#if 0
 		// grenades have more air friction than players (weird, isn't it?), so we need some extra velocity
-		//VectorCopy( self->s.origin2, other->velocity );
-		VectorScale( self->s.origin2, 1.25, other->velocity );
+		//VectorScale( self->s.origin2, 1.25, other->velocity );
+#else
+		VectorCopy( self->s.origin2, other->velocity );
+#endif
 	}
 
 	// game timers for fall damage
@@ -761,23 +767,13 @@ void SP_trigger_gravity( edict_t *self )
 static void old_teleporter_touch( edict_t *self, edict_t *other, cplane_t *plane, int surfFlags )
 {
 	edict_t	*dest;
-	int i;
-	vec3_t velocity, angles;
-	mat3_t axis;
-	float speed;
-	vec3_t org;
 
-	if( !other->r.client )
+	if( !G_PlayerCanTeleport( other ) )
 		return;
-	if( self->s.team && self->s.team != other->s.team )
-		return;
-	if( other->r.client->ps.pmove.pm_type > PM_SPECTATOR )
+
+	if( ( self->s.team != TEAM_SPECTATOR ) && ( self->s.team != other->s.team ) )
 		return;
 	if( self->spawnflags & 1 && other->r.client->ps.pmove.pm_type != PM_SPECTATOR )
-		return;
-
-	// match countdown
-	if( GS_MatchState() == MATCH_STATE_COUNTDOWN )
 		return;
 
 	// wait delay
@@ -794,78 +790,24 @@ static void old_teleporter_touch( edict_t *self, edict_t *other, cplane_t *plane
 		return;
 	}
 
-	if( self->s.modelindex )
-	{
-		org[0] = self->s.origin[0] + 0.5 * ( self->r.mins[0] + self->r.maxs[0] );
-		org[1] = self->s.origin[1] + 0.5 * ( self->r.mins[1] + self->r.maxs[1] );
-		org[2] = self->s.origin[2] + 0.5 * ( self->r.mins[2] + self->r.maxs[2] );
-	}
-	else
-		VectorCopy( self->s.origin, org );
-
 	// play custom sound if any (played from the teleporter entrance)
 	if( self->noise_index )
-		G_PositionedSound( org, CHAN_AUTO, self->noise_index, ATTN_NORM );
-
-	// draw the teleport entering effect
-	G_TeleportEffect( other, false );
-
-	//
-	// teleport the player
-	//
-
-	VectorCopy( other->r.client->old_pmove.velocity, velocity ); // racesow - use old pmove velocity
-
-	velocity[2] = 0; // ignore vertical velocity
-	speed = VectorLengthFast( velocity );
-
-	// if someone enters a portal backwards, inverse the destination YAW angle
-#if 0
-	VectorCopy( other->s.angles, angles );
-	angles[PITCH] = 0;
-	AngleVectors( angles, axis[0], NULL, NULL );
-	VectorSubtract( org, other->s.origin, org );
-
-	VectorCopy( dest->s.angles, angles );
-	if( DotProduct( org, axis[0] ) < 0 )
-		angles[YAW] = anglemod( angles[YAW] - 180 );
-#else
-	VectorCopy( dest->s.angles, angles );
-#endif
-
-	AnglesToAxis( dest->s.angles, axis );
-	VectorScale( &axis[AXIS_FORWARD], speed, other->r.client->ps.pmove.velocity );
-
-	VectorCopy( angles, other->r.client->ps.viewangles );
-	VectorCopy( dest->s.origin, other->r.client->ps.pmove.origin );
-
-	// set the delta angle
-	for( i = 0; i < 3; i++ )
-		other->r.client->ps.pmove.delta_angles[i] = ANGLE2SHORT( other->r.client->ps.viewangles[i] ) - other->r.client->ucmd.angles[i];
-
-	other->r.client->ps.pmove.pm_flags |= PMF_TIME_TELEPORT;
-	other->s.teleported = qtrue;
-	other->r.client->ps.pmove.pm_time = 1; // force the minimum no control delay
-
-	// update the entity from the pmove
-	VectorCopy( other->r.client->ps.viewangles, other->s.angles );
-	VectorCopy( other->r.client->ps.pmove.origin, other->s.origin );
-	VectorCopy( other->r.client->ps.pmove.origin, other->s.old_origin );
-	VectorCopy( other->r.client->ps.pmove.origin, other->olds.origin );
-	VectorCopy( other->r.client->ps.pmove.velocity, other->velocity );
-
-	// unlink to make sure it can't possibly interfere with KillBox
-	GClip_UnlinkEntity( other );
-
-	// kill anything at the destination
-	if( !KillBox( other ) )
 	{
+		vec3_t org;
+
+		if( self->s.modelindex )
+		{
+			org[0] = self->s.origin[0] + 0.5 * ( self->r.mins[0] + self->r.maxs[0] );
+			org[1] = self->s.origin[1] + 0.5 * ( self->r.mins[1] + self->r.maxs[1] );
+			org[2] = self->s.origin[2] + 0.5 * ( self->r.mins[2] + self->r.maxs[2] );
+		}
+		else
+			VectorCopy( self->s.origin, org );
+
+		G_PositionedSound( org, CHAN_AUTO, self->noise_index, ATTN_NORM );
 	}
 
-	GClip_LinkEntity( other );
-
-	// add the teleport effect at the destination
-	G_TeleportEffect( other, true );
+	G_TeleportPlayer( other, dest );
 }
 
 void SP_trigger_teleport( edict_t *ent )

@@ -30,8 +30,10 @@ STANDARD PROJECTIVE SHADOW MAPS (SSM)
 
 #define SHADOWMAP_ORTHO_NUDGE			8
 #define SHADOWMAP_MIN_VIEWPORT_SIZE		16
+#define SHADOWMAP_MAX_LOD				15
+#define SHADOWMAP_LODBIAS				1
 
-//static qboolean r_shadowGroups_sorted;
+//static bool r_shadowGroups_sorted;
 
 #define SHADOWGROUPS_HASH_SIZE	8
 static shadowGroup_t *r_shadowGroups_hash[SHADOWGROUPS_HASH_SIZE];
@@ -50,7 +52,7 @@ void R_ClearShadowGroups( void )
 /*
 * R_AddLightOccluder
 */
-qboolean R_AddLightOccluder( const entity_t *ent )
+bool R_AddLightOccluder( const entity_t *ent )
 {
 	int i;
 	float maxSide;
@@ -59,12 +61,12 @@ qboolean R_AddLightOccluder( const entity_t *ent )
 	shadowGroup_t *group;
 	mleaf_t *leaf;
 	vec3_t mins, maxs, bbox[8];
-	qboolean bmodelRotated = qfalse;
+	bool bmodelRotated = false;
 
 	if( rn.refdef.rdflags & RDF_NOWORLDMODEL )
-		return qfalse;
+		return false;
 	if( !ent->model || ent->model->type == mod_brush )
-		return qfalse;
+		return false;
 
 	VectorCopy( ent->lightingOrigin, origin );
 	if( ent->model->type == mod_brush )
@@ -75,7 +77,7 @@ qboolean R_AddLightOccluder( const entity_t *ent )
 	}
 
 	if( VectorCompare( origin, vec3_origin ) )
-		return qfalse;
+		return false;
 
 	// find lighting group containing entities with same lightingOrigin as ours
 	hash_key = (unsigned int)( origin[0] * 7 + origin[1] * 5 + origin[2] * 3 );
@@ -88,7 +90,7 @@ qboolean R_AddLightOccluder( const entity_t *ent )
 	}
 
 	if( rsc.numShadowGroups == MAX_SHADOWGROUPS )
-		return qfalse; // no free groups
+		return false; // no free groups
 
 	leaf = Mod_PointInLeaf( origin, rsh.worldModel );
 
@@ -98,7 +100,7 @@ qboolean R_AddLightOccluder( const entity_t *ent )
 	group->id = group - rsc.shadowGroups + 1;
 	group->bit = ( 1<<rsc.numShadowGroups );
 	group->vis = Mod_ClusterPVS( leaf->cluster, rsh.worldModel );
-	group->useOrtho = qtrue;
+	group->useOrtho = true;
 	group->alpha = r_shadows_alpha->value;
 
 	// clear group bounds
@@ -125,18 +127,18 @@ add:
 	maxSide = 0;
 	for( i = 0; i < 3; i++ ) {
 		if( mins[i] >= maxs[i] )
-			return qfalse;
+			return false;
 		maxSide = max( maxSide, maxs[i] - mins[i] );
 	}
 
 	// ignore tiny objects
 	if( maxSide < 10 ) {
-		return qfalse;
+		return false;
 	}
 
 	rsc.entShadowGroups[R_ENT2NUM(ent)] = group->id;
 	if( ent->flags & RF_WEAPONMODEL )
-		return qtrue;
+		return true;
 
 	if( ent->model->type == mod_brush )
 	{
@@ -156,9 +158,9 @@ add:
 	VectorSubtract( group->mins, origin, mins );
 	VectorSubtract( group->maxs, origin, maxs );
 	group->radius = RadiusFromBounds( mins, maxs );
-	group->projDist = max( group->projDist, group->radius + min( r_shadows_projection_distance->value, 256 ) );
+	group->projDist = max( group->projDist, group->radius + min( r_shadows_projection_distance->value, 64.0f ) );
 
-	return qtrue;
+	return true;
 }
 
 /*
@@ -175,14 +177,20 @@ static void R_ComputeShadowmapBounds( void )
 	for( i = 0; i < rsc.numShadowGroups; i++ ) {
 		group = rsc.shadowGroups + i;
 
+		if( group->projDist <= 1.0f ) {
+			group->bit = 0;
+			continue;
+		}
+
 		// get projection dir from lightgrid
-		R_LightForOrigin( group->origin, lightDir, group->lightAmbient, lightDiffuse, group->projDist * 0.5 );
+		R_LightForOrigin( group->origin, lightDir, group->lightAmbient, lightDiffuse, group->projDist, false );
 
 		// prevent light dir from going upwards
 		VectorSet( lightDir, -lightDir[0], -lightDir[1], -fabs( lightDir[2] ) );
 		VectorNormalize2( lightDir, group->lightDir );
 
 		VectorScale( group->lightDir, group->projDist, lightDir );
+		VectorScale( group->lightDir, group->projDist * 2.0f, lightDir );
 		VectorAdd( group->mins, lightDir, mins );
 		VectorAdd( group->maxs, lightDir, maxs );
 
@@ -190,6 +198,12 @@ static void R_ComputeShadowmapBounds( void )
 		AddPointToBounds( group->maxs, group->visMins, group->visMaxs );
 		AddPointToBounds( mins, group->visMins, group->visMaxs );
 		AddPointToBounds( maxs, group->visMins, group->visMaxs );
+
+		VectorAdd( group->visMins, group->visMaxs, group->visOrigin );
+		VectorScale( group->visOrigin, 0.5, group->visOrigin );
+		VectorSubtract( group->visMins, group->visOrigin, mins );
+		VectorSubtract( group->visMaxs, group->visOrigin, maxs );
+		group->visRadius = RadiusFromBounds( mins, maxs );
 	}
 }
 
@@ -214,7 +228,7 @@ static float R_FitOccluder( const shadowGroup_t *group, refdef_t *refdef )
 	int sizex = refdef->width, sizey = refdef->height;
 	int diffx, diffy;
 	mat4_t cameraMatrix, projectionMatrix, cameraProjectionMatrix;
-	qboolean useOrtho = refdef->rdflags & RDF_USEORTHO ? qtrue : qfalse;
+	bool useOrtho = refdef->rdflags & RDF_USEORTHO ? true : false;
 
 	Matrix4_Modelview( refdef->vieworg, refdef->viewaxis, cameraMatrix );
 
@@ -290,14 +304,15 @@ static float R_SetupShadowmapView( shadowGroup_t *group, refdef_t *refdef, int l
 	int width, height;
 	float farClip;
 	image_t *shadowmap;
+
+	// clamp LOD to a sane value
+	clamp( lod, 0, SHADOWMAP_MAX_LOD );
 	
 	shadowmap = group->shadowmap;
-	width = shadowmap->upload_width / (1<<lod);
-	height = shadowmap->upload_height / (1<<lod);
-
-	if( width < 1 || height < 1 ) {
-		return 1;
-	}
+	width = shadowmap->upload_width >> lod;
+	height = shadowmap->upload_height >> lod;
+	if( !width || !height )
+		return 0.0f;
 
 	refdef->x = 0;
 	refdef->y = 0;
@@ -346,6 +361,7 @@ void R_DrawShadowmaps( void )
 	refdef_t refdef;
 	int lod;
 	float farClip;
+	float dist;
 
 	if( !rsc.numShadowGroups )
 		return;
@@ -383,10 +399,10 @@ void R_DrawShadowmaps( void )
 		if( rsc.renderedShadowBits & group->bit ) {
 			continue;
 		}
-		rsc.renderedShadowBits |= group->bit;
 
 		// calculate LOD for shadowmap
-		lod = (int)((DistanceFast( group->origin, lodOrigin ) * lodScale) / group->projDist);
+		dist = DistanceFast( group->origin, lodOrigin );
+		lod = (int)(dist * lodScale) / group->projDist - SHADOWMAP_LODBIAS;
 		if( lod < 0 ) {
 			lod = 0;
 		}
@@ -405,6 +421,9 @@ void R_DrawShadowmaps( void )
 		}
 
 		farClip = R_SetupShadowmapView( group, &refdef, lod );
+		if( farClip <= 0.0f ) {
+			continue;
+		}
 
 		// ignore shadowmaps of very low detail level
 		if( refdef.width < SHADOWMAP_MIN_VIEWPORT_SIZE || refdef.height < SHADOWMAP_MIN_VIEWPORT_SIZE ) {
@@ -423,6 +442,7 @@ void R_DrawShadowmaps( void )
 		rn.renderFlags = RF_SHADOWMAPVIEW|RF_FLIPFRONTFACE;
 		rn.clipFlags |= 16; // clip by far plane too
 		rn.meshlist = &r_shadowlist;
+		rn.portalmasklist = NULL;
 		rn.shadowGroup = group;
 		rn.lod_dist_scale_for_fov = lodScale;
 		VectorCopy( viewerOrigin, rn.pvsOrigin );
@@ -436,7 +456,9 @@ void R_DrawShadowmaps( void )
 		R_RenderView( &refdef );
 
 		Matrix4_Copy( rn.cameraProjectionMatrix, group->cameraProjectionMatrix );
+
+		rsc.renderedShadowBits |= group->bit;
 	}
 
-	R_PopRefInst( 0 );
+	R_PopRefInst();
 }

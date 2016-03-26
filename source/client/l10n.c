@@ -45,6 +45,7 @@ typedef struct podomain_s
 static mempool_t *pomempool;
 
 static cvar_t *cl_lang;
+static char posyslang[MAX_STRING_CHARS];
 
 static podomain_t *podomains_head;
 
@@ -61,14 +62,14 @@ static podomain_t *podomain_common;
 /*
 * L10n_ParsePOString
 */
-static size_t L10n_ParsePOString( char *instr, char *outstr, qboolean *err )
+static size_t L10n_ParsePOString( char *instr, char *outstr, bool *err )
 {
 	int i;
 	char *q1, *q2;
 	char *outstart = outstr;
 	char *inend = instr + strlen( instr );
 
-	*err = qfalse;
+	*err = false;
 	while( *instr == ' ' || *instr == '\t' ) instr++;
 
 	// accept properly double quoted strings
@@ -79,13 +80,13 @@ static size_t L10n_ParsePOString( char *instr, char *outstr, qboolean *err )
 	if( *instr != '"' && q1 ) {
 		// do not accept string that do not start with a double
 		// quote but nonetheless contain a double quote
-		*err = qtrue;
+		*err = true;
 		return 0;
 	}
 
 	if( q1 && q2 ) {
 		if( q2 <= q1 ) {
-			*err = qtrue;
+			*err = true;
 			return 0;
 		}
 		q1++;
@@ -93,7 +94,7 @@ static size_t L10n_ParsePOString( char *instr, char *outstr, qboolean *err )
 	}
 	else {
 		if( ( q1 && !q2 ) || ( !q1 && q2 ) ) {
-			*err = qtrue;
+			*err = true;
 			return 0;
 		}
 		// no quotes
@@ -193,7 +194,7 @@ static trie_t *L10n_ParsePOFile( const char *filepath, char *buffer, int length 
 	int linenum = 0;
 	char *start = buffer, *end = buffer + length;
 	char *cur, *eol;
-	qboolean have_msgid, have_msgstr, error;
+	bool have_msgid, have_msgstr, error;
 	char *msgid, *msgstr, *instr, *outstr;
 	size_t str_length;
 	trie_t *dict;
@@ -204,7 +205,7 @@ static trie_t *L10n_ParsePOFile( const char *filepath, char *buffer, int length 
 		return NULL;
 	}
 
-	have_msgid = have_msgstr = qfalse;
+	have_msgid = have_msgstr = false;
 	instr = outstr = buffer;
 	msgid = msgstr = buffer;
 	eol = end;
@@ -245,16 +246,16 @@ parse_cmd:
 		if( !strncmp( cur, "msgid ", 6 ) ) {
 			if( have_msgstr ) {
 				Trie_Insert( dict, msgid, ( void * )msgstr );
-				have_msgid = have_msgstr = qfalse;
+				have_msgid = have_msgstr = false;
 			}
-			have_msgid = qtrue;
+			have_msgid = true;
 			instr = cur + 6;
 			outstr = cur + 5;
 			msgid = outstr;
 			*msgid = '\0';
 		}
 		else if( have_msgid && !strncmp( cur, "msgstr ", 7 ) ) {
-			have_msgstr = qtrue;
+			have_msgstr = true;
 			instr = cur + 7;
 			outstr = cur + 6;
 			msgstr = outstr;
@@ -268,7 +269,7 @@ parse_cmd:
 						Trie_Insert( dict, msgid, ( void * )msgstr );
 					}
 					// no
-					have_msgid = have_msgstr = qfalse;
+					have_msgid = have_msgstr = false;
 					goto parse_cmd;
 				}
 				// yes
@@ -281,7 +282,7 @@ parse_cmd:
 		// parse single line of C-style string
 		str_length = L10n_ParsePOString( instr, outstr, &error );
 		if( !str_length ) {
-			have_msgid = have_msgstr = qfalse;
+			have_msgid = have_msgstr = false;
 			if( error ) {
 				Com_Printf( S_COLOR_YELLOW "Error parsing line %i of %s: syntax error near '%s'\n", 
 					linenum, filepath, instr );
@@ -316,9 +317,10 @@ static podict_t *L10n_LoadPODict( const char *filepath )
 	}
 
 	podict = ( podict_t * )L10n_Malloc( sizeof( *podict ) + length + 1 );
-	podict->buffer = ( char * )( ( qbyte * )podict + sizeof( *podict ) );
+	podict->buffer = ( char * )( ( uint8_t * )podict + sizeof( *podict ) );
 	FS_Read( podict->buffer, length, file );
 	podict->buffer[length] = '\0'; // safeguard
+	FS_FCloseFile( file );
 
 	podict->trie = L10n_ParsePOFile( filepath, podict->buffer, length );
 	return podict;
@@ -346,7 +348,7 @@ static pofile_t *L10n_CreatePOFile( const char *filepath )
 	size_t filepath_size = strlen( filepath ) + 1;
 	pofile_t *pofile;
 	pofile = ( pofile_t * )L10n_Malloc( sizeof( *pofile ) + filepath_size );
-	pofile->path = ( char * )( ( qbyte * )pofile + sizeof( *pofile ) );
+	pofile->path = ( char * )( ( uint8_t * )pofile + sizeof( *pofile ) );
 	pofile->next = NULL;
 	pofile->dict = NULL;
 	memcpy( pofile->path, filepath, filepath_size );
@@ -410,7 +412,7 @@ static podomain_t *L10n_CreatePODomain( const char *name )
 	size_t name_size = strlen( name ) + 1;
 	podomain_t *podomain;
 	podomain = ( podomain_t * )L10n_Malloc( sizeof( *podomain ) + name_size );
-	podomain->name = ( char * )( ( qbyte * )podomain + sizeof( *podomain ) );
+	podomain->name = ( char * )( ( uint8_t * )podomain + sizeof( *podomain ) );
 	podomain->next = NULL;
 	podomain->pofiles_head = NULL;
 	memcpy( podomain->name, name, name_size );
@@ -446,24 +448,9 @@ static void L10n_DestroyPODomain( podomain_t *podomain )
 */
 const char *L10n_GetUserLanguage( void )
 {
-	return cl_lang->string;
-}
-
-/*
-* L10n_CheckUserLanguage
-*/
-void L10n_CheckUserLanguage( void )
-{
-	if( !cl_lang->string[0] ) {
-		const char *lang;
-
-		lang = Sys_GetPreferredLanguage();
-		if( !lang || !lang[0] ) {
-			lang = APP_DEFAULT_LANGUAGE;
-		}
-		Cvar_ForceSet( cl_lang->name, lang );
-		cl_lang->modified = qfalse;
-	}
+	if( cl_lang->string[0] )
+		return cl_lang->string;
+	return posyslang;
 }
 
 /*
@@ -471,17 +458,75 @@ void L10n_CheckUserLanguage( void )
 */
 void L10n_Init( void )
 {
+	const char *syslang;
+
 	podomains_head = NULL;
 
 	pomempool = Mem_AllocPool( NULL, "L10n" );
 
-	cl_lang = Cvar_Get( "lang", "", CVAR_USERINFO|CVAR_ARCHIVE
+	cl_lang = Cvar_Get( "lang", "", CVAR_ARCHIVE
 #ifdef PUBLIC_BUILD
 		| CVAR_LATCH_VIDEO
 #endif
 		);
 
-	L10n_CheckUserLanguage();
+	syslang = Sys_GetPreferredLanguage();
+	if( !syslang || !syslang[0] ) {
+		syslang = APP_DEFAULT_LANGUAGE;
+	}
+	Q_strncpyz( posyslang, syslang, sizeof( posyslang ) );
+}
+
+/*
+* L10n_LoadLangPOFile_
+*/
+static bool L10n_LoadLangPOFile_( podomain_t *podomain, const char *filepath, const char *lang )
+{
+	pofile_t *pofile;
+	podict_t *pofile_dict;
+	char *tempfilename;
+	const char *sep;
+	size_t tempfilename_size;
+
+	if( !filepath || !*filepath ) {
+		return false;
+	}
+
+	tempfilename_size = strlen( filepath ) + 1 + strlen( lang ) + ( sizeof( ".po" ) - 1 ) + 1;
+	tempfilename = ( char * )L10n_Malloc( tempfilename_size );
+
+	sep = ( filepath[strlen( filepath ) - 1] == '/' ? "" : "/" );
+	Q_snprintfz( tempfilename, tempfilename_size, "%s%s%s.po", filepath, sep, lang );
+
+	pofile = L10n_FindPOFile( podomain, tempfilename );
+	if( pofile ) {
+		// already loaded
+		return true;
+	}
+
+	pofile_dict = L10n_LoadPODict( tempfilename );
+	if( !pofile_dict ) {
+		// try to load country-independent file
+		char *underscore = strchr( lang, '_' );
+		if( underscore ) {
+			char *tempfilename2 = L10n_Malloc( tempfilename_size );
+			*underscore = '\0';
+			Q_snprintfz( tempfilename2, tempfilename_size, "%s%s%s.po", filepath, sep, lang );
+			pofile_dict = L10n_LoadPODict( tempfilename2 );
+			L10n_Free( tempfilename2 );
+		}
+	}
+
+	if( pofile_dict ) {
+		pofile = L10n_CreatePOFile( tempfilename );
+		pofile->dict = pofile_dict;
+		pofile->next = podomain->pofiles_head;
+		podomain->pofiles_head = pofile;
+	}
+
+	L10n_Free( tempfilename );
+
+	return pofile_dict != NULL;
 }
 
 /*
@@ -490,16 +535,17 @@ void L10n_Init( void )
 void L10n_LoadLangPOFile( const char *domainname, const char *filepath )
 {
 	podomain_t *podomain;
-	pofile_t *pofile;
-	podict_t *pofile_dict;
-	char *tempfilename;
-	const char *sep;
-	size_t tempfilename_size;
+	char lang[MAX_STRING_CHARS];
 
 	if( !domainname || !*domainname ) {
 		return;
 	}
 	if( !filepath || !*filepath ) {
+		return;
+	}
+
+	if( !COM_ValidateFilename( filepath ) ) {
+		Com_Printf( S_COLOR_YELLOW "LoadLangPOFile failed: invalid filename '%s'\n", filepath );
 		return;
 	}
 
@@ -515,32 +561,14 @@ void L10n_LoadLangPOFile( const char *domainname, const char *filepath )
 		}
 	}
 
-	tempfilename_size = strlen( filepath ) + strlen( "/" ) + strlen( cl_lang->string ) + strlen( ".po" ) + 1;
-	tempfilename = ( char * )L10n_Malloc( tempfilename_size );
+	Q_strncpyz( lang, L10n_GetUserLanguage(), sizeof( lang ) );
 
-	sep = ( filepath[strlen( filepath ) - 1] == '/' ? "" : "/" );
-	Q_snprintfz( tempfilename, tempfilename_size, "%s%s%s.po", filepath, sep, cl_lang->string );
-
-	if( !COM_ValidateFilename( tempfilename ) ) {
-		Com_Printf( S_COLOR_YELLOW "LoadLangPOFile failed: invalid filename '%s'\n", filepath );
-		return;
+	if( !L10n_LoadLangPOFile_( podomain, filepath, lang ) ) {
+		// load default lang .po file
+		if( strcmp( lang, APP_DEFAULT_LANGUAGE ) ) {
+			L10n_LoadLangPOFile_( podomain, filepath, APP_DEFAULT_LANGUAGE );
+		}
 	}
-
-	pofile = L10n_FindPOFile( podomain, tempfilename );
-	if( pofile ) {
-		// already loaded
-		return;
-	}
-
-	pofile_dict = L10n_LoadPODict( tempfilename );
-	if( pofile_dict ) {
-		pofile = L10n_CreatePOFile( tempfilename );
-		pofile->dict = pofile_dict;
-		pofile->next = podomain->pofiles_head;
-		podomain->pofiles_head = pofile;
-	}
-
-	L10n_Free( tempfilename );
 }
 
 /*

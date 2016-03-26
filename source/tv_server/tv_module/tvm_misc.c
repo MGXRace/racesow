@@ -22,15 +22,15 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "tvm_misc.h"
 
-//=============
-//TVM_FindLocal
-//
-//Searches all active entities for the next one that holds
-//the matching string at fieldofs (use the FOFS() macro) in the structure.
-//
-//Searches beginning at the edict after from, or the beginning if NULL
-//NULL will be returned if the end of the list is reached.
-//=============
+/*
+* TVM_FindLocal
+* 
+* Searches all active entities for the next one that holds
+* the matching string at fieldofs (use the FOFS() macro) in the structure.
+* 
+* Searches beginning at the edict after from, or the beginning if NULL
+* NULL will be returned if the end of the list is reached.
+*/
 edict_t *TVM_FindLocal( tvm_relay_t *relay, const edict_t *start, size_t fieldofs, const char *match )
 {
 	char *s;
@@ -45,7 +45,7 @@ edict_t *TVM_FindLocal( tvm_relay_t *relay, const edict_t *start, size_t fieldof
 	{
 		if( !from->r.inuse )
 			continue;
-		s = *(char **) ( (qbyte *)from + fieldofs );
+		s = *(char **) ( (uint8_t *)from + fieldofs );
 		if( !s )
 			continue;
 		if( !Q_stricmp( s, match ) )
@@ -55,26 +55,26 @@ edict_t *TVM_FindLocal( tvm_relay_t *relay, const edict_t *start, size_t fieldof
 	return NULL;
 }
 
-//=================
-//TVM_AllowDownload
-//=================
-qboolean TVM_AllowDownload( tvm_relay_t *relay, edict_t *ent, const char *requestname, const char *uploadname )
+/*
+* TVM_AllowDownload
+*/
+bool TVM_AllowDownload( tvm_relay_t *relay, edict_t *ent, const char *requestname, const char *uploadname )
 {
-	return qfalse;
+	return false;
 }
 
-//=================
-//TVM_UpdateServerSettings
-//=================
+/*
+* TVM_UpdateServerSettings
+*/
 static void TVM_UpdateServerSettings( tvm_relay_t *relay )
 {
-	relay->configStringsOverwritten[CS_TVSERVER] = qtrue;
+	relay->configStringsOverwritten[CS_TVSERVER] = true;
 	trap_ConfigString( relay, CS_TVSERVER, "1" );
 }
 
-//=================
-//TVM_UpdateStatNums
-//=================
+/*
+* TVM_UpdateStatNums
+*/
 static void TVM_UpdateStatNums( tvm_relay_t *relay )
 {
 	const char *stats;
@@ -90,9 +90,9 @@ static void TVM_UpdateStatNums( tvm_relay_t *relay )
 }
 
 
-//=================
-//TVM_UpdatePowerupFXNums
-//=================
+/*
+* TVM_UpdatePowerupFXNums
+*/
 static void TVM_UpdatePowerupFXNums( tvm_relay_t *relay )
 {
 	const char *effects;
@@ -104,11 +104,11 @@ static void TVM_UpdatePowerupFXNums( tvm_relay_t *relay )
 	relay->effects.regen = atoi( COM_Parse( &effects ) );
 }
 
-//============
-//TVM_PrintMsg_Template
-//
-//NULL sends to all the message to all clients
-//============
+/*
+* TVM_PrintMsg_Template
+* 
+* NULL sends to all the message to all clients
+*/
 static void TVM_PrintMsg_Template( tvm_relay_t *relay, edict_t *ent, const char *tmplt, char *msg )
 {
 	char *p;
@@ -123,11 +123,11 @@ static void TVM_PrintMsg_Template( tvm_relay_t *relay, edict_t *ent, const char 
 	trap_GameCmd( relay, ent ? PLAYERNUM( ent ) : -1, va( tmplt, msg ) );
 }
 
-//============
-//TVM_PrintMsg
-//
-//NULL sends to all the message to all clients
-//============
+/*
+* TVM_PrintMsg
+* 
+* NULL sends to all the message to all clients
+*/
 void TVM_PrintMsg( tvm_relay_t *relay, edict_t *ent, const char *format, ... )
 {
 	char msg[1024];
@@ -143,11 +143,11 @@ void TVM_PrintMsg( tvm_relay_t *relay, edict_t *ent, const char *format, ... )
 	TVM_PrintMsg_Template( relay, ent, "pr \"%s\"", msg );
 }
 
-//============
-//TVM_CenterPrintMsg
-//
-//NULL sends to all the message to all clients
-//============
+/*
+* TVM_CenterPrintMsg
+* 
+* NULL sends to all the message to all clients
+*/
 // MOVEME
 void TVM_CenterPrintMsg( tvm_relay_t *relay, edict_t *ent, const char *format, ... )
 {
@@ -164,10 +164,10 @@ void TVM_CenterPrintMsg( tvm_relay_t *relay, edict_t *ent, const char *format, .
 	TVM_PrintMsg_Template( relay, ent, "cp \"%s\"", msg );
 }
 
-//=================
-//TVM_ConfigString
-//=================
-qboolean TVM_ConfigString( tvm_relay_t *relay, int number, const char *value )
+/*
+* TVM_ConfigString
+*/
+bool TVM_ConfigString( tvm_relay_t *relay, int number, const char *value )
 {
 	assert( number >= 0 && number < MAX_CONFIGSTRINGS );
 	assert( value && strlen( value ) < MAX_CONFIGSTRING_CHARS );
@@ -195,16 +195,16 @@ qboolean TVM_ConfigString( tvm_relay_t *relay, int number, const char *value )
 	return ( !relay->configStringsOverwritten[number] );
 }
 
-//=================
-//TVM_SetAudoTrack
-//=================
+/*
+* TVM_SetAudoTrack
+*/
 void TVM_SetAudoTrack( tvm_relay_t *relay, const char *track )
 {
 	if( !track ) {
-		relay->configStringsOverwritten[CS_AUDIOTRACK] = qfalse;
+		relay->configStringsOverwritten[CS_AUDIOTRACK] = false;
 		track = relay->configStrings[CS_AUDIOTRACK];
 	} else {
-		relay->configStringsOverwritten[CS_AUDIOTRACK] = qtrue;
+		relay->configStringsOverwritten[CS_AUDIOTRACK] = true;
 	}
 
 	trap_ConfigString( relay, CS_AUDIOTRACK, track ? track : "" );

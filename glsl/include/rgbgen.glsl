@@ -4,7 +4,7 @@ uniform myhalf4 u_RGBGenFuncArgs, u_AlphaGenFuncArgs;
 myhalf4 VertexRGBGen(in vec4 Position, in vec3 Normal, in myhalf4 VertexColor)
 {
 #if defined(APPLY_RGB_DISTANCERAMP) || defined(APPLY_ALPHA_DISTANCERAMP)
-#define DISTANCERAMP(x1,x2,y1,y2) ((y2 - y1) / (x2 - x1) * (clamp(myhalf(dot(u_EntityDist - Position.xyz, Normal)),0.0,x2) - x1) + y1)
+#define DISTANCERAMP(x1,x2,y1,y2) mix(y1, y2, smoothstep(x1, x2, myhalf(dot(u_EntityDist - Position.xyz, Normal))))
 #endif
 
 #if defined(APPLY_RGB_CONST) && defined(APPLY_ALPHA_CONST)
@@ -41,7 +41,7 @@ myhalf4 VertexRGBGen(in vec4 Position, in vec3 Normal, in myhalf4 VertexColor)
 #endif
 
 	return Color;
-#if defined(APPLY_RGB_DISTANCERAMP) || defined(APPLY_ALPHA_DISTANCERAMP)
+#if defined(DISTANCERAMP)
 #undef DISTANCERAMP
 #endif
 }

@@ -40,7 +40,7 @@ namespace WSWUI {
 	public:
 		// Attributes
 		std::string		address;
-		quint64			iaddress;
+		uint64_t			iaddress;
 
 		std::string		hostname;
 		std::string		cleanname;
@@ -72,7 +72,7 @@ namespace WSWUI {
 		void fromOther( const ServerInfo &other );
 
 		// TODO: move this up as utility func
-		void htmlEncode( std::string &s );
+		void fixString( std::string &s );
 		void fixStrings();
 
 		bool isChanged() const { return has_changed; }
@@ -93,6 +93,18 @@ namespace WSWUI {
 		template<typename T, T ServerInfo::*comp_member>
 		static bool LessPtrBinary( const ServerInfo *lhs, const ServerInfo *rhs ) {
 			return lhs->*comp_member < rhs->*comp_member;
+		}
+
+		// general templated comparison function (greater)
+		template<typename T, T ServerInfo::*comp_member>
+		static bool GreaterBinary( const ServerInfo &lhs, const ServerInfo &rhs ) {
+			return lhs.*comp_member > rhs.*comp_member;
+		}
+
+		// general templated comparison function (less) for pointers
+		template<typename T, T ServerInfo::*comp_member>
+		static bool GreaterPtrBinary( const ServerInfo *lhs, const ServerInfo *rhs ) {
+			return lhs->*comp_member > rhs->*comp_member;
 		}
 
 		// General invertors for above functions
@@ -160,25 +172,6 @@ namespace WSWUI {
 
 		ServerBrowserFilter() {}
 
-		/*
-		// GET/SET inlined
-		inline void showFull(VisibilityState _full) { full = _full; }
-		inline void showEmpty(VisibilityState _empty) { empty = _empty; }
-		inline void showInstagib(VisibilityState _instagib) { instagib = _instagib; }
-		inline void showPassword(VisibilityState _password) { password = _password; }
-		inline void showRanked(VisibilityState _ranked) { ranked = _ranked; }
-		inline void showRegistered(VisibilityState _registered) { registered = _registered; }
-		inline void showGametype(const String &_gametype) { gametype = _gametype; }
-
-		inline VisibilityState getFull() { return full; }
-		inline VisibilityState getEmpty() { return empty; }
-		inline VisibilityState getInstagib() { return instagib; }
-		inline VisibilityState getPassword() { return password; }
-		inline VisibilityState getRanked() { return ranked; }
-		inline VisibilityState getRegistered() { return registered; }
-		inline const String &getGametype() { return gametype; }
-		*/
-
 		// called by ServerBrowserDataSource to filter servers as per settings
 		// TODO: proper implementation
 		bool filterServer(const ServerInfo &info) { return true; }
@@ -209,13 +202,10 @@ namespace WSWUI {
 		typedef std::list<ActiveQuery> ActiveList;
 
 		ActiveList activeQueries;
-		// owner
-		ServerBrowserDataSource *serverBrowser;
 
 	public:
-		ServerInfoFetcher(ServerBrowserDataSource *_serverBrowser)
-			: serverBrowser( _serverBrowser ), 
-			lastQueryTime( 0 ), numIssuedQueries( 0 )
+		ServerInfoFetcher()
+			: lastQueryTime( 0 ), numIssuedQueries( 0 )
 		{}
 		~ServerInfoFetcher() {}
 
@@ -255,10 +245,10 @@ namespace WSWUI {
 	{
 		// typedefs
 		// use set for serverinfo list to keep unique elements
-		typedef std::set<ServerInfo, ServerInfo::_LessBinary<quint64, &ServerInfo::iaddress> > ServerInfoList;
+		typedef std::set<ServerInfo, ServerInfo::_LessBinary<uint64_t, &ServerInfo::iaddress> > ServerInfoList;
 		typedef std::list<ServerInfo*> ReferenceList;
 		typedef std::map<String, ReferenceList> ReferenceListMap;
-		typedef std::set<quint64> FavoritesList;
+		typedef std::set<uint64_t> FavoritesList;
 
 		// shortcut for the set insert
 		typedef std::pair<ServerInfoList::iterator, bool> ServerInfoListPair;
@@ -294,6 +284,8 @@ namespace WSWUI {
 
 		// need to separate full update and refresh?
 		bool active;
+		unsigned updateId;
+		unsigned lastActiveTime;
 
 		// DEBUG
 		int numNotifies;
@@ -379,7 +371,7 @@ namespace WSWUI {
 		void stopUpdate( void );
 
 		// called to re-sort the data (on visibleServers) -> export to AS
-		void sortByColumn( const char *column );
+		void sortByField( const char *field );
 
 		// called to reform visibleServers and hiddenServers -> export to AS?
 		void filtersUpdated( void );
@@ -390,7 +382,12 @@ namespace WSWUI {
 		// we don't like that server anymore -> export to AS
 		bool removeFavorite( const char *fav );
 
+		//
+		void compileSuggestionsList( void );
+
 		bool isUpdating( void ) { return active; }
+		unsigned getUpdateId( void ) { return updateId; }
+		unsigned getLastActiveTime( void ) { return lastActiveTime; }
 
 		// DEBUG
 		int getActivity( void ) { return numNotifies; }
@@ -399,9 +396,9 @@ namespace WSWUI {
 		unsigned int lastUpdateTime;
 
 		void tableNameForServerInfo( const ServerInfo &, String &table ) const;
-		void addServerToTable( ServerInfo &info, String tableName );
-		void removeServerFromTable( ServerInfo &info, String tableName );
-		void notifyOfFavoriteChange( quint64 iaddr, bool add );
+		void addServerToTable( ServerInfo &info, const String &tableName );
+		void removeServerFromTable( ServerInfo &info, const String &tableName );
+		void notifyOfFavoriteChange( uint64_t iaddr, bool add );
 	};
 
 }

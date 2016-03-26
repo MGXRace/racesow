@@ -279,7 +279,7 @@ static edict_t *W_Fire_LinearProjectile( edict_t *self, vec3_t start, vec3_t ang
 	GS_SnapVelocity( projectile->velocity );
 
 	projectile->movetype = MOVETYPE_LINEARPROJECTILE;
-	projectile->s.linearProjectile = qtrue;
+	projectile->s.linearMovement = true;
 
 	projectile->r.solid = SOLID_YES;
 	projectile->r.clipmask = ( !GS_RaceGametype() && !level.gametype.playerInteraction ) ? MASK_SHOT : MASK_SOLID; // racesow
@@ -299,7 +299,7 @@ static edict_t *W_Fire_LinearProjectile( edict_t *self, vec3_t start, vec3_t ang
 	projectile->style = 0;
 	projectile->s.sound = 0;
 	projectile->timeStamp = level.time;
-	projectile->s.linearProjectileTimeStamp = game.serverTime;
+	projectile->s.linearMovementTimeStamp = game.serverTime;
 	projectile->timeDelta = timeDelta;
 
 	projectile->projectileInfo.minDamage = min( minDamage, damage );
@@ -312,7 +312,7 @@ static edict_t *W_Fire_LinearProjectile( edict_t *self, vec3_t start, vec3_t ang
 	GClip_LinkEntity( projectile );
 
 	// update some data required for the transmission
-	VectorCopy( projectile->velocity, projectile->s.linearProjectileVelocity );
+	VectorCopy( projectile->velocity, projectile->s.linearMovementVelocity );
 	projectile->s.team = self->s.team;
 	projectile->s.modelindex2 = ( abs( timeDelta ) > 255 ) ? 255 : (unsigned int)abs( timeDelta );
 	return projectile;
@@ -520,8 +520,7 @@ void W_Fire_Bullet( edict_t *self, vec3_t start, vec3_t angles, int seed, int ra
 	event->r.svflags = SVF_TRANSMITORIGIN2;
 	VectorScale( dir, 4096, event->s.origin2 ); // DirToByte is too inaccurate
 	event->s.weapon = WEAP_MACHINEGUN;
-	if( mod == MOD_MACHINEGUN_S )
-		event->s.weapon |= EV_INVERSE;
+	event->s.firemode = ( mod == MOD_MACHINEGUN_S ) ? FIRE_MODE_STRONG : FIRE_MODE_WEAK;
 
 	// circle shape
 	alpha = M_PI * Q_crandom( &seed ); // [-PI ..+PI]
@@ -545,18 +544,21 @@ void W_Fire_Bullet( edict_t *self, vec3_t start, vec3_t angles, int seed, int ra
 	}
 }
 
-#if 0
-static void G_Fire_SpiralPattern( edict_t *self, vec3_t start, vec3_t dir, int *seed, int count, int spread, int range, float damage, int kick, int stun, int dflags, int mod, int timeDelta )
+//Sunflower spiral with Fibonacci numbers 
+static void G_Fire_SunflowerPattern( edict_t *self, vec3_t start, vec3_t dir, int *seed, int count, 
+	int hspread, int vspread, int range, float damage, int kick, int stun, int dflags, int mod, int timeDelta )
 {
 	int i;
 	float r;
 	float u;
+	float fi;
 	trace_t trace;
 
 	for( i = 0; i < count; i++ )
 	{
-		r = cos( (float)*seed + i ) * spread * i;
-		u = sin( (float)*seed + i ) * spread * i;
+		fi = i * 2.4; //magic value creating Fibonacci numbers
+		r = cos( (float)*seed + fi ) * hspread * sqrt(fi);
+		u = sin( (float)*seed + fi ) * vspread * sqrt(fi); 
 
 		GS_TraceBullet( &trace, start, dir, r, u, range, ENTNUM( self ), timeDelta );
 		if( trace.ent != -1 )
@@ -574,8 +576,8 @@ static void G_Fire_SpiralPattern( edict_t *self, vec3_t start, vec3_t dir, int *
 		}
 	}
 }
-#endif
 
+#if 0
 static void G_Fire_RandomPattern( edict_t *self, vec3_t start, vec3_t dir, int *seed, int count, 
 	int hspread, int vspread, int range, float damage, int kick, int stun, int dflags, int mod, int timeDelta )
 {
@@ -605,6 +607,7 @@ static void G_Fire_RandomPattern( edict_t *self, vec3_t start, vec3_t dir, int *
 		}
 	}
 }
+#endif
 
 void W_Fire_Riotgun( edict_t *self, vec3_t start, vec3_t angles, int seed, int range, int hspread, int vspread,
 					int count, float damage, int knockback, int stun, int mod, int timeDelta )
@@ -624,10 +627,9 @@ void W_Fire_Riotgun( edict_t *self, vec3_t start, vec3_t angles, int seed, int r
 	event->r.svflags = SVF_TRANSMITORIGIN2;
 	VectorScale( dir, 4096, event->s.origin2 ); // DirToByte is too inaccurate
 	event->s.weapon = WEAP_RIOTGUN;
-	if( mod == MOD_RIOTGUN_S )
-		event->s.weapon |= EV_INVERSE;
+	event->s.firemode = ( mod == MOD_RIOTGUN_S ) ? FIRE_MODE_STRONG : FIRE_MODE_WEAK;
 
-	G_Fire_RandomPattern( self, start, dir, &seed, count, hspread, vspread,
+	G_Fire_SunflowerPattern( self, start, dir, &seed, count, hspread, vspread,
 		range, damage, knockback, stun, dmgflags, mod, timeDelta );
 }
 
@@ -749,18 +751,14 @@ edict_t *W_Fire_Grenade( edict_t *self, vec3_t start, vec3_t angles, int speed, 
 						int timeout, int mod, int timeDelta, bool aim_up )
 {
 	edict_t	*grenade;
-	static cvar_t *g_grenade_gravity = NULL;
 
 	if( GS_Instagib() )
 		damage = 9999;
 
-	if( !g_grenade_gravity )
-		g_grenade_gravity = trap_Cvar_Get( "g_grenade_gravity", "1.3", CVAR_DEVELOPER );
-
 	if( aim_up )
 	{
 		if( !GS_RaceGametype() ) // racesow
-			angles[PITCH] -= 10; // aim some degrees upwards from view dir
+			angles[PITCH] -= 5; // aim some degrees upwards from view dir
 
 		// clamp to front side of the player
 		angles[PITCH] += -90; // rotate to make easier the check
@@ -1138,8 +1136,9 @@ static void W_Touch_Bolt( edict_t *self, edict_t *other, cplane_t *plane, int su
 void W_Fire_Electrobolt_Combined( edict_t *self, vec3_t start, vec3_t angles, float maxdamage, float mindamage, float maxknockback, float minknockback, int stun, int range, int mod, int timeDelta )
 {
 	vec3_t from, end, dir;
-	trace_t	tr;
-	edict_t	*ignore, *event, *hit, *damaged;
+	trace_t tr;
+	edict_t *ignore, *event, *hit, *damaged;
+	int hit_movetype;
 	int mask;
 	bool missed = true;
 	int dmgflags = 0;
@@ -1181,6 +1180,7 @@ void W_Fire_Electrobolt_Combined( edict_t *self, vec3_t start, vec3_t angles, fl
 
 		// some entity was touched
 		hit = &game.edicts[tr.ent];
+		hit_movetype = hit->movetype; // backup the original movetype as the entity may "die"
 		if( hit == world )  // stop dead if hit the world
 			break;
 		// racesow - hit check later to activate shootable buttons
@@ -1214,6 +1214,12 @@ void W_Fire_Electrobolt_Combined( edict_t *self, vec3_t start, vec3_t angles, fl
 
 			damaged = hit;
 		}
+
+		if( hit_movetype == MOVETYPE_NONE || hit_movetype == MOVETYPE_PUSH )
+		{
+			damaged = NULL;
+			break;
+		}
 	}
 
 	if( missed && self->r.client )
@@ -1239,8 +1245,9 @@ void W_Fire_Electrobolt_Combined( edict_t *self, vec3_t start, vec3_t angles, fl
 void W_Fire_Electrobolt_FullInstant( edict_t *self, vec3_t start, vec3_t angles, float maxdamage, float mindamage, int maxknockback, int minknockback, int stun, int range, int minDamageRange, int mod, int timeDelta )
 {
 	vec3_t from, end, dir;
-	trace_t	tr;
-	edict_t	*ignore, *event, *hit, *damaged;
+	trace_t tr;
+	edict_t *ignore, *event, *hit;
+	int hit_movetype;
 	int mask;
 	bool missed = true;
 	int dmgflags = 0;
@@ -1255,7 +1262,7 @@ void W_Fire_Electrobolt_FullInstant( edict_t *self, vec3_t start, vec3_t angles,
 	VectorCopy( start, from );
 
 	ignore = self;
-	hit = damaged = NULL;
+	hit = NULL;
 
 	mask = MASK_SHOT;
 	if( GS_RaceGametype() && !level.gametype.playerInteraction ) // racesow
@@ -1284,6 +1291,7 @@ void W_Fire_Electrobolt_FullInstant( edict_t *self, vec3_t start, vec3_t angles,
 
 		// some entity was touched
 		hit = &game.edicts[tr.ent];
+		hit_movetype = hit->movetype; // backup the original movetype as the entity may "die"
 		if( hit == world )  // stop dead if hit the world
 			break;
 		// racesow - do hit check later to activate shootable buttons
@@ -1308,8 +1316,6 @@ void W_Fire_Electrobolt_FullInstant( edict_t *self, vec3_t start, vec3_t angles,
 			damage = maxdamage - ( ( maxdamage - mindamage ) * frac );
 			knockback = maxknockback - ( ( maxknockback - minknockback ) * frac );
 
-			//G_Printf( "mindamagerange %i frac %.1f damage %i\n", minDamageRange, 1.0f - frac, (int)damage );
-
 			G_Damage( hit, self, self, dir, dir, tr.endpos, damage, knockback, stun, dmgflags, mod );
 			// racesow
 			if( hit->movetype == MOVETYPE_NONE || hit->movetype == MOVETYPE_PUSH )
@@ -1321,9 +1327,10 @@ void W_Fire_Electrobolt_FullInstant( edict_t *self, vec3_t start, vec3_t angles,
 			event->s.firemode = FIRE_MODE_STRONG;
 			if( hit->r.client )
 				missed = false;
-
-			damaged = hit;
 		}
+
+		if( hit_movetype == MOVETYPE_NONE || hit_movetype == MOVETYPE_PUSH )
+			break;
 	}
 
 	if( missed && self->r.client )
@@ -1393,6 +1400,21 @@ void W_Fire_Instagun( edict_t *self, vec3_t start, vec3_t angles, float damage, 
 		if( tr.ent == -1 )
 			break;
 
+		// allow trail to go through SOLID_BBOX entities (players, gibs, etc)
+		if( !ISBRUSHMODEL( game.edicts[tr.ent].s.modelindex ) )
+			ignore = &game.edicts[tr.ent];
+
+		if( ( &game.edicts[tr.ent] != self ) && ( game.edicts[tr.ent].takedamage ) )
+		{
+			G_Damage( &game.edicts[tr.ent], self, self, dir, dir, tr.endpos, damage, knockback, stun, dmgflags, mod );
+			// spawn a impact event on each damaged ent
+			event = G_SpawnEvent( EV_INSTA_EXPLOSION, DirToByte( tr.plane.normal ), tr.endpos );
+			event->s.ownerNum = ENTNUM( self );
+			event->s.firemode = FIRE_MODE_STRONG;
+			if( game.edicts[tr.ent].r.client )
+				missed = false;
+		}
+
 		// some entity was touched
 		if( tr.ent == world->s.number 
 			|| game.edicts[tr.ent].movetype == MOVETYPE_NONE 
@@ -1421,20 +1443,6 @@ void W_Fire_Instagun( edict_t *self, vec3_t start, vec3_t angles, float damage, 
 			}
 			break;
 		}
-
-		// allow trail to go through SOLID_BBOX entities (players, gibs, etc)
-		if( !ISBRUSHMODEL( game.edicts[tr.ent].s.modelindex ) )
-			ignore = &game.edicts[tr.ent];
-
-		if( ( &game.edicts[tr.ent] != self ) && ( game.edicts[tr.ent].takedamage ) )
-		{
-			G_Damage( &game.edicts[tr.ent], self, self, dir, dir, tr.endpos, damage, knockback, stun, dmgflags, mod );
-			// spawn a impact event on each damaged ent
-			event = G_SpawnEvent( EV_INSTA_EXPLOSION, DirToByte( tr.plane.normal ), tr.endpos );
-			event->s.firemode = FIRE_MODE_STRONG;
-			if( game.edicts[tr.ent].r.client )
-				missed = false;
-		}
 	}
 
 	if( missed && self->r.client )
@@ -1451,18 +1459,9 @@ void W_Fire_Instagun( edict_t *self, vec3_t start, vec3_t angles, float damage, 
 */
 void G_HideLaser( edict_t *ent )
 {
-	int soundindex;
-
 	ent->s.modelindex = 0;
 	ent->s.sound = 0;
 	ent->r.svflags = SVF_NOCLIENT;
-
-	if( ent->s.type == ET_CURVELASERBEAM )
-		soundindex = trap_SoundIndex( S_WEAPON_LASERGUN_W_STOP );
-	else
-		soundindex = trap_SoundIndex( S_WEAPON_LASERGUN_S_STOP );
-
-	G_Sound( game.edicts + ent->s.ownerNum, CHAN_AUTO, soundindex, ATTN_NORM );
 
 	// give it 100 msecs before freeing itself, so we can relink it if we start firing again
 	ent->think = G_FreeEdict;

@@ -19,8 +19,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 #include "cg_local.h"
 
-#define MAX_DECALS		256
-#define MAX_DECAL_VERTS		128
+#define MAX_DECALS			512
+#define MAX_DECAL_VERTS		64
 #define MAX_DECAL_FRAGMENTS	64
 
 typedef struct cdecal_s
@@ -122,7 +122,7 @@ static void CG_FreeDecal( cdecal_t *dl )
 /*
 * CG_SpawnDecal
 */
-int CG_SpawnDecal( vec3_t origin, vec3_t dir, float orient, float radius,
+int CG_SpawnDecal( const vec3_t origin, const vec3_t dir, float orient, float radius,
 				   float r, float g, float b, float a, float die, float fadetime, bool fadealpha, struct shader_s *shader )
 {
 	int i, j;
@@ -166,10 +166,10 @@ int CG_SpawnDecal( vec3_t origin, vec3_t dir, float orient, float radius,
 	if( b < 0 ) b = 0;else if( b > 1 ) b = 255;else b *= 255;
 	if( a < 0 ) a = 0;else if( a > 1 ) a = 255;else a *= 255;
 
-	color[0] = ( qbyte )( r );
-	color[1] = ( qbyte )( g );
-	color[2] = ( qbyte )( b );
-	color[3] = ( qbyte )( a );
+	color[0] = ( uint8_t )( r );
+	color[1] = ( uint8_t )( g );
+	color[2] = ( uint8_t )( b );
+	color[3] = ( uint8_t )( a );
 
 	radius = 0.5f / radius;
 	VectorScale( axis[1], radius, axis[1] );
@@ -250,17 +250,17 @@ void CG_AddDecals( void )
 
 			if( dl->fadealpha )
 			{
-				color[0] = ( qbyte )( dl->color[0] );
-				color[1] = ( qbyte )( dl->color[1] );
-				color[2] = ( qbyte )( dl->color[2] );
-				color[3] = ( qbyte )( dl->color[3] * fade );
+				color[0] = ( uint8_t )( dl->color[0] );
+				color[1] = ( uint8_t )( dl->color[1] );
+				color[2] = ( uint8_t )( dl->color[2] );
+				color[3] = ( uint8_t )( dl->color[3] * fade );
 			}
 			else
 			{
-				color[0] = ( qbyte )( dl->color[0] * fade );
-				color[1] = ( qbyte )( dl->color[1] * fade );
-				color[2] = ( qbyte )( dl->color[2] * fade );
-				color[3] = ( qbyte )( dl->color[3] );
+				color[0] = ( uint8_t )( dl->color[0] * fade );
+				color[1] = ( uint8_t )( dl->color[1] * fade );
+				color[2] = ( uint8_t )( dl->color[2] * fade );
+				color[3] = ( uint8_t )( dl->color[3] );
 			}
 
 			for( i = 0; i < poly->numverts; i++ )

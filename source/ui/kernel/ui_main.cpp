@@ -22,7 +22,6 @@
 #include "datasources/ui_gametypes_datasource.h"
 #include "datasources/ui_maps_datasource.h"
 #include "datasources/ui_mods_datasource.h"
-#include "datasources/ui_crosshair_datasource.h"
 #include "datasources/ui_models_datasource.h"
 #include "datasources/ui_profiles_datasource.h"
 #include "datasources/ui_serverbrowser_datasource.h"
@@ -30,13 +29,13 @@
 #include "datasources/ui_ircchannels_datasource.h"
 #include "datasources/ui_gameajax_datasource.h"
 
-#include "formatters/ui_crosshair_formatter.h"
 #include "formatters/ui_levelshot_formatter.h"
 #include "formatters/ui_datetime_formatter.h"
 #include "formatters/ui_duration_formatter.h"
 #include "formatters/ui_filetype_formatter.h"
 #include "formatters/ui_colorcode_formatter.h"
 #include "formatters/ui_empty_formatter.h"
+#include "formatters/ui_serverflags_formatter.h"
 
 namespace WSWUI
 {
@@ -45,34 +44,43 @@ UI_Main *UI_Main::self = 0;
 const std::string UI_Main::ui_index( "index.rml" );
 const std::string UI_Main::ui_connectscreen( "connectscreen.rml" );
 
-UI_Main::UI_Main( int vidWidth, int vidHeight, int protocol, const char *demoExtension )
+UI_Main::UI_Main( int vidWidth, int vidHeight, float pixelRatio,
+	int protocol, const char *demoExtension, const char *basePath )
 	// pointers to zero
-	: asmodule(0), rocketModule(0),
+	: asmodule(nullptr), rocketModule(nullptr),
 	levelshot_fmt(0), datetime_fmt(0), duration_fmt(0), filetype_fmt(0), colorcode_fmt(0), 
-	crosshair_fmt(0), empty_fmt(0),
+	empty_fmt(0), serverflags_fmt(0),
 	serverBrowser(0), gameTypes(0), maps(0), vidProfiles(0), huds(0), videoModes(0), 
 	demos(0), mods(0), 
-	playerModels(0), crosshairs(0), tvchannels(0), ircchannels(0), gameajax(0),
-	navigator(0), /* backwards development compatibility: */ currentLoader(0),
+	playerModels(0), tvchannels(0), ircchannels(0), gameajax(0),
 
 	// other members
+	quickMenuURL(""),
 	mousex(0), mousey(0), gameProtocol(protocol),
 	menuVisible(false), forceMenu(false), showNavigationStack(false),
 	serverName(""), rejectMessage(""), demoExtension(demoExtension),
-	connectCount(0), invalidateAjaxCache(false)
+	connectCount(0), invalidateAjaxCache(false),
+	ui_basepath(nullptr), ui_cursor(nullptr), ui_developer(nullptr), ui_preload(nullptr)
 {
 	// instance
 	self = this;
 
 	Vector4Set( colorWhite, 1, 1, 1, 1 );
-	ui_basepath = trap::Cvar_Get( "ui_basepath", "/ui/baseui", CVAR_ARCHIVE );
+	ui_basepath = trap::Cvar_Get( "ui_basepath", basePath, CVAR_ARCHIVE );
 	ui_cursor = trap::Cvar_Get( "ui_cursor", "cursors/default.rml", CVAR_DEVELOPER );
 	ui_developer = trap::Cvar_Get( "developer", "0", 0 );
+	ui_preload = trap::Cvar_Get( "ui_preload", "1", CVAR_ARCHIVE );
+
+	// make sure the UI isn't too small
+	int minHeight = 600.0f * pixelRatio;
+	if( vidHeight < minHeight )
+		pixelRatio *= ( float )vidHeight / ( float )minHeight;
 
 	// temp fix for missing background on start.. populate refreshState with some nice values
 	refreshState.clientState = CA_UNINITIALIZED;
 	refreshState.width = vidWidth;
 	refreshState.height = vidHeight;
+	refreshState.pixelRatio = pixelRatio;
 	refreshState.drawBackground = true;
 
 	demoInfo.setPlaying( false );
@@ -84,8 +92,9 @@ UI_Main::UI_Main( int vidWidth, int vidHeight, int protocol, const char *demoExt
 
 	createDataSources();
 	createFormatters();
+	createStack( UI_CONTEXT_MAIN );
+	createStack( UI_CONTEXT_QUICK );
 
-	navigator = __new__( NavigationStack )();
 	streamCache = __new__( StreamCache )();
 
 	streamCache->Init();
@@ -109,7 +118,9 @@ UI_Main::UI_Main( int vidWidth, int vidHeight, int protocol, const char *demoExt
 
 	trap::Cmd_AddCommand( "menu_force", M_Menu_Force_f );
 	trap::Cmd_AddCommand( "menu_open", M_Menu_Open_f );
+	trap::Cmd_AddCommand( "menu_modal", M_Menu_Modal_f );
 	trap::Cmd_AddCommand( "menu_close", M_Menu_Close_f );
+	trap::Cmd_AddCommand( "menu_quick", M_Menu_Quick_f );
 
 	trap::Cmd_AddCommand( "menu_tvchannel_add", &M_Menu_AddTVChannel_f );
 	trap::Cmd_AddCommand( "menu_tvchannel_remove", &M_Menu_RemoveTVChannel_f );
@@ -127,6 +138,7 @@ UI_Main::~UI_Main()
 
 	trap::Cmd_RemoveCommand( "menu_force" );
 	trap::Cmd_RemoveCommand( "menu_open" );
+	trap::Cmd_RemoveCommand( "menu_modal" );
 	trap::Cmd_RemoveCommand( "menu_close" );
 
 	unregisterRocketCustoms();
@@ -163,17 +175,31 @@ void UI_Main::shutdownAS( void )
 	asmodule = NULL;
 }
 
-Rocket::Core::Context *UI_Main::getRocketContext( void )
-{
-	return rocketModule->getContext();
-}
 
 void UI_Main::preloadUI( void )
 {
-	navigator->popAllDocuments();
+	int i;
+	NavigationStack *navigator;
 
-	// initialize with default document
-	navigator->setDefaultPath( ui_basepath->string );
+	for( i = 0; i < UI_NUM_CONTEXTS; i++ ) {
+		UI_Navigation &navigation = navigations[i];
+		navigator = navigation.front();
+
+		while( !navigation.empty() ) {
+			NavigationStack *stack = navigation.front();
+			navigation.pop_front();
+
+			// clear the navigation stack
+			stack->popAllDocuments();
+			if( stack != navigator ) {
+				__delete__( stack );
+			}
+		}
+
+		navigation.push_front( navigator );
+
+		navigator->setDefaultPath( ui_basepath->string );
+	}
 
 	// load translation strings
 
@@ -183,6 +209,11 @@ void UI_Main::preloadUI( void )
 	trap::L10n_LoadLangPOFile( "l10n/ui" );
 	
 	// load strings provided by the theme: e.g. ui/l10n/porkui
+
+	// initialize with default document
+
+	navigator = navigations[UI_CONTEXT_MAIN].front();
+
 	String l10nLocalPath( navigator->getDefaultPath().c_str() );
 	l10nLocalPath += "l10n";
 	l10nLocalPath.Erase( 0, 1 );
@@ -191,18 +222,44 @@ void UI_Main::preloadUI( void )
 	// postpone displaying the document until the first valid refresh state
 	navigator->pushDocument( ui_index, false, false );
 	showNavigationStack = navigator->hasDocuments();
+
+	// initial cursor setup
+	if( trap::IN_SupportedDevices() & IN_DEVICE_TOUCHSCREEN ) {
+		mouseMove( UI_CONTEXT_MAIN, 0, 0, true, false );
+	} else {
+		mouseMove( UI_CONTEXT_MAIN, refreshState.width >> 1, refreshState.height >> 1, true, true );
+	}
+
+	if( !quickMenuURL.Empty() ) {
+		navigator = navigations[UI_CONTEXT_QUICK].front();
+		navigator->pushDocument( quickMenuURL.CString(), false );
+	}
+
+	rocketModule->update();
 }
 
 void UI_Main::reloadUI( void )
 {
-	// clear the navigation stack
-	navigator->popAllDocuments();
+	int i;
 
-	// clear the navigation stack from previous installment
-	navigator->getCache()->clearCaches();
+	for( i = 0; i < UI_NUM_CONTEXTS; i++ ) {
+		UI_Navigation &navigation = navigations[i];
+		NavigationStack *navigator = navigation.front();
 
-	// forget about all previously registed shaders
-	rocketModule->clearShaderCache();
+		while( !navigation.empty() ) {
+			NavigationStack *stack = navigation.front();
+			navigation.pop_front();
+
+			// clear the navigation stack
+			stack->popAllDocuments();
+			stack->getCache()->clearCaches();
+			if( stack != navigator ) {
+				__delete__( stack );
+			}
+		}
+
+		navigation.push_front( navigator );
+	}
 
 	if( serverBrowser ) {
 		serverBrowser->stopUpdate();
@@ -230,13 +287,14 @@ void UI_Main::loadCursor( void )
 	basecursor += "/";
 	basecursor += ui_cursor->string;
 
-	rocketModule->loadCursor( basecursor.c_str() );
+	rocketModule->loadCursor( UI_CONTEXT_MAIN, basecursor.c_str() );
+	//rocketModule->loadCursor( UI_CONTEXT_QUICK, basecursor.c_str() );
 }
 
 bool UI_Main::initRocket( void )
 {
 	// this may throw runtime_error.. ok pass it back up
-	rocketModule = __new__( RocketModule )( refreshState.width, refreshState.height );
+	rocketModule = __new__(RocketModule)( refreshState.width, refreshState.height, refreshState.pixelRatio );
 	return true;
 }
 
@@ -252,17 +310,31 @@ void UI_Main::unregisterRocketCustoms( void )
 
 void UI_Main::shutdownRocket( void )
 {
-	// clear the navigation stack
-	navigator->popAllDocuments();
-	// clear the navigation stack from previous installment
-	navigator->getCache()->clearCaches();
+	int i;
+
+	for( i = 0; i < UI_NUM_CONTEXTS; i++ ) {
+		UI_Navigation &navigation = navigations[i];
+		for( UI_Navigation::iterator it = navigation.begin(); it != navigation.end(); ++it ) {
+			// clear the navigation stack
+			(*it)->popAllDocuments();
+			(*it)->getCache()->clearCaches();
+		}
+	}
+
 	// forget about all previously registed shaders
 	rocketModule->clearShaderCache();
 
 	destroyDataSources();
 	destroyFormatters();
 
-	__SAFE_DELETE_NULLIFY( navigator );
+	for( i = 0; i < UI_NUM_CONTEXTS; i++ ) {
+		UI_Navigation &navigation = navigations[i];
+		while( !navigation.empty() ) {
+			NavigationStack *stack = navigation.front();
+			__SAFE_DELETE_NULLIFY( stack );
+			navigation.pop_front();
+		}
+	}
 
 	__SAFE_DELETE_NULLIFY( rocketModule );
 }
@@ -277,15 +349,36 @@ void UI_Main::clearShaderCache( void )
 
 void UI_Main::touchAllCachedShaders( void )
 {
+	int i;
 	if( rocketModule != NULL ) {
 		rocketModule->touchAllCachedShaders();
 	}
-	navigator->invalidateAssets();
+
+	for( i = 0; i < UI_NUM_CONTEXTS; i++ ) {
+		UI_Navigation &navigation = navigations[i];
+		for( UI_Navigation::iterator it = navigation.begin(); it != navigation.end(); ++it ) {
+			(*it)->invalidateAssets();
+		}
+	}
 }
 
 void UI_Main::flushAjaxCache( void )
 {
 	this->invalidateAjaxCache = true;
+}
+
+NavigationStack *UI_Main::createStack( int contextId )
+{
+	NavigationStack *stack = __new__( NavigationStack )( contextId );
+	if( !stack ) {
+		return NULL;
+	}
+	if( contextId < 0 || contextId >= UI_NUM_CONTEXTS ) {
+		return NULL;
+	}
+	stack->setDefaultPath( ui_basepath->string );
+	navigations[contextId].push_back( stack );
+	return stack;
 }
 
 void UI_Main::createDataSources( void )
@@ -297,7 +390,6 @@ void UI_Main::createDataSources( void )
 	videoModes = __new__( VideoDataSource )();
 	demos = __new__( DemosDataSource )( demoExtension );
 	mods = __new__( ModsDataSource )();
-	crosshairs = __new__( CrosshairDataSource )();
 	tvchannels = __new__( TVChannelsDataSource )();
 	ircchannels = __new__( IrcChannelsDataSource )();
 	gameajax = __new__( GameAjaxDataSource )();
@@ -314,7 +406,6 @@ void UI_Main::destroyDataSources( void )
 	__SAFE_DELETE_NULLIFY( videoModes );
 	__SAFE_DELETE_NULLIFY( demos );
 	__SAFE_DELETE_NULLIFY( mods );
-	__SAFE_DELETE_NULLIFY( crosshairs );
 	__SAFE_DELETE_NULLIFY( tvchannels );
 	__SAFE_DELETE_NULLIFY( ircchannels );
 	__SAFE_DELETE_NULLIFY( gameajax );
@@ -324,24 +415,24 @@ void UI_Main::destroyDataSources( void )
 
 void UI_Main::createFormatters( void )
 {
-	crosshair_fmt = __new__( CrosshairFormatter )();
 	levelshot_fmt = __new__(LevelShotFormatter)();
 	datetime_fmt = __new__( DatetimeFormatter )();
 	duration_fmt = __new__( DurationFormatter )();
 	filetype_fmt = __new__( FiletypeFormatter )();
 	colorcode_fmt = __new__( ColorCodeFormatter )();
 	empty_fmt = __new__( EmptyFormatter )();
+	serverflags_fmt = __new__( ServerFlagsFormatter )();
 }
 
 void UI_Main::destroyFormatters( void )
 {
-	__SAFE_DELETE_NULLIFY( crosshair_fmt );
 	__SAFE_DELETE_NULLIFY( levelshot_fmt );
 	__SAFE_DELETE_NULLIFY( datetime_fmt );
 	__SAFE_DELETE_NULLIFY( duration_fmt );
 	__SAFE_DELETE_NULLIFY( filetype_fmt );
 	__SAFE_DELETE_NULLIFY( colorcode_fmt );
 	__SAFE_DELETE_NULLIFY( empty_fmt );
+	__SAFE_DELETE_NULLIFY( serverflags_fmt );
 }
 
 //==============================================
@@ -360,8 +451,32 @@ void UI_Main::showUI( bool show )
 	menuVisible = show;
 	trap::CL_SetKeyDest( show ? key_menu : key_game );
 
-	if( !show )
+	if( !show ) {
+		cancelTouches( UI_CONTEXT_MAIN );
+
+		UI_Navigation &navigation = navigations[UI_CONTEXT_MAIN];
+		NavigationStack *navigator = navigation.front();
 		navigator->popAllDocuments();
+
+		rocketModule->hideCursor( UI_CONTEXT_MAIN, RocketModule::HIDECURSOR_REFRESH, 0 );
+	}
+}
+
+void UI_Main::showQuickMenu( bool show )
+{
+	quickMenuVisible = show;
+
+	if( !show ) {
+		cancelTouches( UI_CONTEXT_QUICK );
+	}
+}
+
+bool UI_Main::haveQuickMenu( void )
+{
+	NavigationStack *nav = self->navigations[UI_CONTEXT_QUICK].front();
+	if( !nav )
+		return false;
+	return nav->hasDocuments();
 }
 
 void UI_Main::drawConnectScreen( const char *serverName, const char *rejectMessage, 
@@ -377,15 +492,17 @@ void UI_Main::drawConnectScreen( const char *serverName, const char *rejectMessa
 	this->rejectMessage = rejectMessage ? rejectMessage : "";
 	this->downloadInfo = dlinfo;
 
+	UI_Navigation &navigation = navigations[UI_CONTEXT_MAIN];
+	NavigationStack *navigator = navigation.front();
 	navigator->pushDocument( ui_connectscreen, false, true );
 
 	forceUI( true );
 	showUI( true );
 }
 
-int UI_Main::getGameProtocol( void ) const 
+int UI_Main::getGameProtocol( void ) 
 {
-	return gameProtocol;
+	return self != nullptr ? self->gameProtocol : 0;
 }
 
 void UI_Main::customRender( void )
@@ -393,15 +510,123 @@ void UI_Main::customRender( void )
 	// NO-OP for now
 }
 
+bool UI_Main::preloadEnabled( void )
+{
+#if defined(NDEBUG) && !defined( __ANDROID__ )
+	return ( self != nullptr && self->ui_preload && self->ui_preload->integer != 0 );
+#else
+	return false;
+#endif
+}
+
+void UI_Main::gamepadStickCursorMove( float frameTime )
+{
+	const float threshold = 7849.0f / 32767.0f; // Xbox controller left stick dead zone.
+
+	vec4_t sticks;
+	trap::IN_GetThumbsticks( sticks );
+
+	float sx = sticks[0] * ( ( float )( fabsf( sticks[0] ) > threshold ) );
+	sx += sticks[2] * ( ( float )( fabsf( sticks[2] ) > threshold ) );
+	clamp( sx, -1.0f, 1.0f );
+	float sy = sticks[1] * ( ( float )( fabsf( sticks[1] ) > threshold ) );
+	sy += sticks[3] * ( ( float )( fabsf( sticks[3] ) > threshold ) );
+	clamp( sy, -1.0f, 1.0f );
+
+	static float x, y;
+	if( !sx && !sy ) {
+		x = 0.0f;
+		y = 0.0f;
+		return;
+	}
+
+	float speed = ( 600.0f * 1.5f ) * refreshState.pixelRatio * frameTime;
+	x += sx * sx * sx * speed;
+	y += sy * sy * sy * speed;
+
+	int mx = ( int )x, my = ( int )y;
+	x -= ( float )mx;
+	y -= ( float )my;
+	mouseMove( UI_CONTEXT_MAIN, mx, my, false, true );
+}
+
+void UI_Main::gamepadDpadCursorMove( float frameTime )
+{
+	static float holdTime;
+	static float x, y;
+
+	int dx = trap::Key_IsDown( K_DPAD_RIGHT ) - trap::Key_IsDown( K_DPAD_LEFT );
+	int dy = trap::Key_IsDown( K_DPAD_DOWN ) - trap::Key_IsDown( K_DPAD_UP );
+	if( !dx && !dy ) {
+		holdTime = x = y = 0.0f;
+		return;
+	}
+
+	// Goes from half minimum screen height to double minimum screen height.
+	float speed = ( 600.0f * 0.5f ) + bound( 0.0f, holdTime - 0.25f, 1.5f ) * 600.0f;
+	if( dx && dy ) {
+		speed *= 0.707106f;
+	}
+	speed *= refreshState.pixelRatio * frameTime;
+
+	if( dx ) {
+		x += ( ( dx < 0 ) ? -1.0f : 1.0f ) * speed;
+	} else {
+		x = 0.0f;
+	}
+
+	if( dy ) {
+		y += ( ( dy < 0 ) ? -1.0f : 1.0f ) * speed;
+	} else {
+		y = 0.0f;
+	}
+
+	holdTime += frameTime;
+
+	int mx = ( int )x, my = ( int )y;
+	x -= ( float )mx;
+	y -= ( float )my;
+	mouseMove( UI_CONTEXT_MAIN, mx, my, false, true );
+}
+
+void UI_Main::gamepadCursorMove( void )
+{
+	unsigned int time = trap::Milliseconds();
+
+	static unsigned int lastTime;
+	if( !lastTime ) {
+		lastTime = time;
+		return;
+	}
+
+	float frameTime = ( time - lastTime ) * 0.001f;
+	lastTime = time;
+
+	if( !frameTime ) {
+		return;
+	}
+
+	clamp_high( frameTime, 0.1f );
+
+	gamepadStickCursorMove( frameTime );
+	gamepadDpadCursorMove( frameTime );
+}
+
 //===========================================
 
 // CALLBACKS FROM MAIN PROGRAM
 
-void UI_Main::mouseMove( int dx, int dy )
+void UI_Main::mouseMove( int contextId, int x, int y, bool absolute, bool showCursor )
 {
 	// change the delta to window coordinates.
-	mousex += dx;
-	mousey += dy;
+	if( absolute ) {
+		mousex = x;
+		mousey = y;
+	} else {
+		mousex += x;
+		mousey += y;
+	}
+
 	if( mousex < 0 )
 		mousex = 0;
 	else if( mousex > refreshState.width )
@@ -411,19 +636,39 @@ void UI_Main::mouseMove( int dx, int dy )
 	else if( mousey > refreshState.height )
 		mousey = refreshState.height;
 
-	rocketModule->mouseMove( mousex, mousey );
+	rocketModule->mouseMove( contextId, mousex, mousey );
+
+	if( showCursor ) {
+		rocketModule->hideCursor( contextId, 0, RocketModule::HIDECURSOR_INPUT );
+	} else {
+		rocketModule->hideCursor( contextId, RocketModule::HIDECURSOR_INPUT, 0 );
+	}
 }
 
-void UI_Main::textInput( qwchar c )
+void UI_Main::textInput( int contextId, wchar_t c )
 {
-	// context->ProcessTextInput( c );
-	rocketModule->textInput( c );
+	rocketModule->textInput( contextId, c );
 }
 
-void UI_Main::keyEvent( int key, bool pressed )
+void UI_Main::keyEvent( int contextId, int key, bool pressed )
 {
 	// TODO: handle some special keys here?
-	rocketModule->keyEvent( key, pressed );
+	rocketModule->keyEvent( contextId, key, pressed );
+}
+
+bool UI_Main::touchEvent( int contextId, int id, touchevent_t type, int x, int y )
+{
+	return rocketModule->touchEvent( contextId, id, type, x, y );
+}
+
+bool UI_Main::isTouchDown( int contextId, int id )
+{
+	return rocketModule->isTouchDown( contextId, id );
+}
+
+void UI_Main::cancelTouches( int contextId )
+{
+	rocketModule->cancelTouches( contextId );
 }
 
 void UI_Main::addToServerList(const char *adr, const char *info)
@@ -434,7 +679,7 @@ void UI_Main::addToServerList(const char *adr, const char *info)
 	serverBrowser->addToServerList( adr, info );
 }
 
-void UI_Main::forceMenuOff(void)
+void UI_Main::forceMenuOff( void )
 {
 	forceUI( false );
 	showUI( false );
@@ -449,6 +694,9 @@ void UI_Main::refreshScreen( unsigned int time, int clientState, int serverState
 	bool demoPlaying, const char *demoName, bool demoPaused, unsigned int demoTime, 
 	bool backGround, bool showCursor )
 {
+	int i;
+	UI_Navigation::iterator it, it_next;
+
 	refreshState.time = time;
 	refreshState.clientState = clientState;
 	refreshState.serverState = serverState;
@@ -463,6 +711,8 @@ void UI_Main::refreshScreen( unsigned int time, int clientState, int serverState
 
 	// postponed showing of the stacked document, we need to set the refresh state first
 	if( showNavigationStack ) {
+		UI_Navigation &navigation = navigations[UI_CONTEXT_MAIN];
+		NavigationStack *navigator = navigation.front();
 		navigator->showStack( true );
 		showNavigationStack = false;
 	}
@@ -488,29 +738,58 @@ void UI_Main::refreshScreen( unsigned int time, int clientState, int serverState
 	// run incremental garbage collection
 	asmodule->garbageCollectOneStep();
 
-	if( showCursor ) { 
-		rocketModule->showCursor();
-	}
-	else {
-		rocketModule->hideCursor();
+	for( i = 0; i < UI_NUM_CONTEXTS; i++ ) {
+		UI_Navigation &navigation = navigations[i];
+		NavigationStack *navigator = navigation.front();
+
+		// free empty navigation stacks
+		for( it = navigation.begin(); it != navigation.end(); it = it_next ) {
+			it_next = it;
+			it_next++;
+
+			NavigationStack *stack = *it;
+			if( stack != navigator && stack->empty() ) {
+				__delete__( stack );
+				navigation.erase( it );
+			}
+		}
 	}
 
-	if( !menuVisible ) {
-		return;
-	}
-
-	if( !navigator->hasDocuments() ) {
-		// no documents on stack, release the key dest
-		showUI( false );
-		return;
+	// handle main menu context
+	if( menuVisible ) {
+		NavigationStack *navigator = navigations[UI_CONTEXT_MAIN].front();
+		if( !navigator->hasDocuments() ) {
+			// no documents on stack, release the key dest
+			showUI( false );
+		}
+		else {
+			if( showCursor ) { 
+				rocketModule->hideCursor( UI_CONTEXT_MAIN, 0, RocketModule::HIDECURSOR_REFRESH );
+				gamepadCursorMove();
+			}
+			else {
+				rocketModule->hideCursor( UI_CONTEXT_MAIN, RocketModule::HIDECURSOR_REFRESH, 0 );
+			}
+		}
 	}
 
 	// rocket update+render
 	rocketModule->update();
-	rocketModule->render();
+
+	if( quickMenuVisible ) {
+		rocketModule->render( UI_CONTEXT_QUICK );
+	}
+	if( menuVisible ) {
+		rocketModule->render( UI_CONTEXT_MAIN );
+	}
 
 	// mark the top stack document as viwed for history tracking
-	navigator->markTopAsViewed();
+	for( i = 0; i < UI_NUM_CONTEXTS; i++ ) {
+		UI_Navigation &navigation = navigations[i];
+		for( it = navigation.begin(); it != navigation.end(); ++it ) {
+			(*it)->markTopAsViewed();
+		}
+	}
 
 	// stuff we need to render without using rocket
 	customRender();
@@ -518,10 +797,12 @@ void UI_Main::refreshScreen( unsigned int time, int clientState, int serverState
 
 //==================================
 
-UI_Main *UI_Main::Instance( int vidWidth, int vidHeight, int protocol, const char *demoExtension  )
+UI_Main *UI_Main::Instance( int vidWidth, int vidHeight, float pixelRatio,
+	int protocol, const char *demoExtension, const char *basePath )
 {
 	if( !self ) {
-		self = __new__( UI_Main )( vidWidth, vidHeight, protocol, demoExtension );
+		self = __new__( UI_Main )( vidWidth, vidHeight, pixelRatio,
+			protocol, demoExtension, basePath );
 	}
 	return self;
 }
@@ -564,7 +845,7 @@ void UI_Main::M_Menu_Force_f( void )
 
 	//Com_Printf("UI_Main::M_Menu_Force_F..\n");
 
-	NavigationStack *nav = self->getNavigator();
+	NavigationStack *nav = self->navigations[UI_CONTEXT_MAIN].front();
 	if( !nav )
 		return;
 
@@ -582,7 +863,7 @@ void UI_Main::M_Menu_Force_f( void )
 	self->showUI( true );
 }
 
-void UI_Main::M_Menu_Open_f( void )
+void UI_Main::M_Menu_Open_Cmd_f_( bool modal )
 {
 	int i;
 
@@ -603,12 +884,64 @@ void UI_Main::M_Menu_Open_f( void )
 	Rocket::Core::String urlString = url.GetURL();
 	//Com_Printf( "UI_Main::M_Menu_Open_f %s\n", urlString.CString() );
 
-	NavigationStack *nav = self->getNavigator();
+	NavigationStack *nav = self->navigations[UI_CONTEXT_MAIN].front();
 	if( !nav )
 		return;
 
-	nav->pushDocument( urlString.CString() );
+	nav->pushDocument( urlString.CString(), modal );
 	self->showUI( true );
+}
+
+void UI_Main::M_Menu_Open_f( void )
+{
+	M_Menu_Open_Cmd_f_( false );
+}
+
+void UI_Main::M_Menu_Modal_f( void )
+{
+	M_Menu_Open_Cmd_f_( true );
+}
+
+void UI_Main::M_Menu_Quick_f( void )
+{
+	int i;
+
+	if( !self )
+		return;
+
+	if( !( trap::IN_SupportedDevices() & ( IN_DEVICE_KEYBOARD|IN_DEVICE_TOUCHSCREEN ) ) )
+		return;
+
+	NavigationStack *nav = self->navigations[UI_CONTEXT_QUICK].front();
+	if( !nav )
+		return;
+
+	if( trap::Cmd_Argc() <= 2 ) {
+		self->quickMenuURL = "";
+		nav->popAllDocuments();
+		return;
+	}
+
+	Rocket::Core::URL url;
+
+	url.SetFileName( trap::Cmd_Argv( 1 ) );
+	url.SetExtension( "rml" );
+
+	for( i = 2; i < trap::Cmd_Argc() - 1; i += 2 ) {
+		url.SetParameter( trap::Cmd_Argv( i ), trap::Cmd_Argv( i+1 ) );
+	}
+
+	Rocket::Core::String urlString = url.GetURL();
+	if( urlString == self->quickMenuURL )
+		return;
+
+	if( nav->hasDocuments() ) {
+		nav->popAllDocuments();
+	}
+
+	nav->pushDocument( urlString.CString(), false );
+
+	self->quickMenuURL = urlString;
 }
 
 void UI_Main::M_Menu_Close_f( void )
@@ -673,19 +1006,29 @@ void UI_Main::M_Menu_RemoveTVChannel_f( void )
 // DEBUG
 void UI_Main::PrintDocuments_Cmd( void )
 {
+	int i;
+
 	if( !self )
 		return;
 
-	NavigationStack *nav = self->getNavigator();
-	if( !nav )
-		return;
-	Com_Printf("Navigation stack:\n");
-	nav->printStack();
+	for( i = 0; i < UI_NUM_CONTEXTS; i++ ) {
+		UI_Navigation &navigation = self->navigations[i];
 
-	DocumentCache *cache = nav->getCache();
-	if( !cache )
-		return;
-	Com_Printf("Document cache:\n");
-	cache->printCache();
+		Com_Printf("Context %i navigation stack:\n", i);
+		for( UI_Navigation::iterator it = navigation.begin(); it != navigation.end(); ++it ) {
+			NavigationStack *nav = *it;
+
+			nav->printStack();
+
+			DocumentCache *cache = nav->getCache();
+			if( cache ) {
+				Com_Printf("Document cache:\n");
+				cache->printCache();
+			}
+
+			Com_Printf("\n");
+		}
+	}
 }
+
 }

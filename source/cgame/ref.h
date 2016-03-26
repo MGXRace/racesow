@@ -39,6 +39,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define RF_NOPORTALENTS			0x100
 #define RF_ALPHAHACK			0x200	// force alpha blending on opaque passes, read alpha from entity
 #define RF_GREYSCALE			0x400
+#define RF_NODEPTHTEST			0x800
+#define RF_NOCOLORWRITE			0x1000
 
 // refdef flags
 #define	RDF_UNDERWATER			0x1		// warp the screen as apropriate
@@ -46,11 +48,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define RDF_OLDAREABITS			0x4		// forces R_MarkLeaves if not set
 #define RDF_PORTALINVIEW		0x8		// cull entities using vis too because pvs\areabits are merged serverside
 #define RDF_SKYPORTALINVIEW		0x10	// draw skyportal instead of regular sky
-#define RDF_NOFOVADJUSTMENT		0x20	// do not adjust fov for widescreen
+#define RDF_FLIPPED				0x20
 #define RDF_WORLDOUTLINES		0x40	// draw cell outlines for world surfaces
 #define RDF_CROSSINGWATER		0x80	// potentially crossing water surface
 #define RDF_USEORTHO			0x100	// use orthographic projection
-#define RDF_WEAPONALPHA			0x200	// blend translucent gun model into screen as a post-processing step
 
 // skm flags
 #define SKM_ATTACHMENT_BONE		1
@@ -83,6 +84,8 @@ typedef struct poly_s
 	vec4_t *normals;
 	vec2_t *stcoords;
 	byte_vec4_t *colors;
+	int numelems;
+	unsigned short *elems;
 	struct shader_s	*shader;
 	int fognum;
 } poly_t;
@@ -98,7 +101,7 @@ typedef struct
 	float scale;
 	vec3_t vieworg;
 	vec3_t viewanglesOffset;
-	qboolean noEnts;
+	bool noEnts;
 } skyportal_t;
 
 typedef enum
@@ -150,7 +153,7 @@ typedef struct entity_s
 	union
 	{
 		byte_vec4_t color;
-		qbyte shaderRGBA[4];
+		uint8_t shaderRGBA[4];
 	};
 
 	float scale;
@@ -161,14 +164,9 @@ typedef struct entity_s
 	union
 	{
 		byte_vec4_t outlineColor;
-		qbyte outlineRGBA[4];
+		uint8_t outlineRGBA[4];
 	};
 } entity_t;
-
-typedef struct
-{
-	int x, y, width, height;
-} vrect_t;
 
 typedef struct refdef_s
 {
@@ -182,9 +180,10 @@ typedef struct refdef_s
 	unsigned int time;					// time is used for timing offsets
 	int rdflags;						// RDF_UNDERWATER, etc
 	skyportal_t skyportal;
-	qbyte *areabits;					// if not NULL, only areas with set bits will be drawn
+	uint8_t *areabits;					// if not NULL, only areas with set bits will be drawn
 	float weaponAlpha;
 	float minLight;						// minimum value of ambient lighting applied to RF_MINLIGHT entities
+	struct shader_s *colorCorrection;	// post processing color correction lookup table to apply
 } refdef_t;
 
 typedef struct {

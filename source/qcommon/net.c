@@ -32,6 +32,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <arpa/inet.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #endif
 
 #define	MAX_LOOPBACK	4
@@ -51,13 +52,13 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 typedef struct
 {
-	qbyte data[MAX_MSGLEN];
+	uint8_t data[MAX_MSGLEN];
 	int datalen;
 } loopmsg_t;
 
 typedef struct
 {
-	qboolean open;
+	bool open;
 	loopmsg_t msgs[MAX_LOOPBACK];
 	int get, send;
 } loopback_t;
@@ -65,11 +66,11 @@ typedef struct
 static loopback_t loopbacks[2];
 static char *errorstring = NULL;
 static size_t errorstring_size = 0;
-static qboolean	net_initialized = qfalse;
+static bool	net_initialized = false;
 
 #define MAX_IPS 16
 static int numIP;
-static qbyte localIP[MAX_IPS][4];
+static uint8_t localIP[MAX_IPS][4];
 
 /*
 =============================================================================
@@ -101,47 +102,50 @@ static const char *GetLastErrorString( void )
 */
 static void GetLocalAddress( void )
 {
-	struct hostent *hostInfo;
+	struct addrinfo hints, *hostInfo, *i;
 	char hostname[256];
 	char *p;
 	int ip;
-	int n;
 
 	if( gethostname( hostname, 256 ) == SOCKET_ERROR )
 		return;
 
-	hostInfo = gethostbyname( hostname );
-	if( !hostInfo )
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET; // AF_INET6 for IPv6
+	//hints.ai_flags = AI_NUMERICHOST;
+	if( getaddrinfo( hostname, NULL, &hints, &hostInfo ) != 0 ) {
 		return;
-
-	Com_Printf( "Hostname: %s\n", hostInfo->h_name );
-	n = 0;
-	while( ( p = hostInfo->h_aliases[n++] ) != NULL )
-	{
-		Com_Printf( "Alias: %s\n", p );
 	}
-
-	// FIXME: IPv6?
-	if( hostInfo->h_addrtype != AF_INET )
+	if( !hostInfo ) {
 		return;
+	}
+	
+	Com_Printf( "Hostname: %s\n", hostname );
 
 	numIP = 0;
-	while( ( p = hostInfo->h_addr_list[numIP] ) != NULL && numIP < MAX_IPS )
-	{
-		ip = ntohl( *(int *)p );
+	for( i = hostInfo; i; i = i->ai_next) {
+		if( numIP >= MAX_IPS ) {
+			break;
+		}
+
+		ip = ntohl( ((struct sockaddr_in *)i->ai_addr)->sin_addr.s_addr );
+		p = (char *)&ip;
+
 		localIP[numIP][0] = p[0];
 		localIP[numIP][1] = p[1];
 		localIP[numIP][2] = p[2];
 		localIP[numIP][3] = p[3];
-		Com_Printf( "IP: %i.%i.%i.%i\n", ( ip >> 24 ) & 0xff, ( ip >> 16 ) & 0xff, ( ip >> 8 ) & 0xff, ip & 0xff );
+		Com_Printf( "IP: %i.%i.%i.%i\n", (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff );
 		numIP++;
 	}
+
+	freeaddrinfo( hostInfo );
 }
 
 /*
 * AddressToSockaddress
 */
-static qboolean AddressToSockaddress( const netadr_t *address, struct sockaddr_storage *sadr )
+static bool AddressToSockaddress( const netadr_t *address, struct sockaddr_storage *sadr )
 {
 	assert( address );
 	assert( sadr );
@@ -157,7 +161,7 @@ static qboolean AddressToSockaddress( const netadr_t *address, struct sockaddr_s
 			sadr_in->sin_family = AF_INET;
 			sadr_in->sin_port = na4->port;
 			sadr_in->sin_addr.s_addr = *(int *)&na4->ip;
-			return qtrue;
+			return true;
 		}
 
 	case NA_IP6:
@@ -170,19 +174,19 @@ static qboolean AddressToSockaddress( const netadr_t *address, struct sockaddr_s
 			sadr_in6->sin6_port = na6->port;
 			sadr_in6->sin6_scope_id = na6->scope_id;
 			memcpy( &sadr_in6->sin6_addr, na6->ip, sizeof( sadr_in6->sin6_addr ) );
-			return qtrue;
+			return true;
 		}
 
 	default:
 		NET_SetErrorString( "Unsupported address type" );
-		return qfalse;
+		return false;
 	}
 }
 
 /*
 * SockaddressToAddress
 */
-static qboolean SockaddressToAddress( const struct sockaddr *s, netadr_t *address )
+static bool SockaddressToAddress( const struct sockaddr *s, netadr_t *address )
 {
 	assert( s );
 	assert( address );
@@ -197,7 +201,7 @@ static qboolean SockaddressToAddress( const struct sockaddr *s, netadr_t *addres
 			address->type = NA_IP;
 			*(int*)na4->ip = sadr_in->sin_addr.s_addr;
 			na4->port = sadr_in->sin_port;
-			return qtrue;
+			return true;
 		}
 
 	case AF_INET6:
@@ -209,34 +213,34 @@ static qboolean SockaddressToAddress( const struct sockaddr *s, netadr_t *addres
 			memcpy( na6->ip, &sadr_in6->sin6_addr, sizeof( na6->ip ) );
 			na6->port = sadr_in6->sin6_port;
 			na6->scope_id = sadr_in6->sin6_scope_id;
-			return qtrue;
+			return true;
 		}
 
 	default:
 		NET_SetErrorString( "Unknown address family" );
-		return qfalse;
+		return false;
 	}
 }
 
 /*
 * BindSocket
 */
-static qboolean BindSocket( socket_handle_t handle, const netadr_t *address )
+static bool BindSocket( socket_handle_t handle, const netadr_t *address )
 {
 	struct sockaddr_storage sockaddress;
 	socklen_t addrlen;
 
 	if( !AddressToSockaddress( address, &sockaddress ) )
-		return qfalse;
+		return false;
 
 	addrlen = ( sockaddress.ss_family == AF_INET6 ? sizeof( struct sockaddr_in6 ) : sizeof( struct sockaddr_in ) );
 	if( bind( handle, (struct sockaddr*)&sockaddress, addrlen ) == SOCKET_ERROR )
 	{
 		NET_SetErrorStringFromLastError( "bind" );
-		return qfalse;
+		return false;
 	}
 
-	return qtrue;
+	return true;
 }
 
 /*
@@ -244,7 +248,7 @@ static qboolean BindSocket( socket_handle_t handle, const netadr_t *address )
 * 
 * returns handle or INVALID_SOCKET for error
 */
-static socket_handle_t OpenSocket( socket_type_t type, qboolean ipv6 )
+static socket_handle_t OpenSocket( socket_type_t type, bool ipv6 )
 {
 	socket_handle_t handle;
 	int protocol = ( ipv6 ? PF_INET6 : PF_INET );
@@ -305,33 +309,33 @@ static socket_handle_t OpenSocket( socket_type_t type, qboolean ipv6 )
 /*
 * NET_SocketMakeBroadcastCapable
 */
-static qboolean NET_SocketMakeBroadcastCapable( socket_handle_t handle )
+static bool NET_SocketMakeBroadcastCapable( socket_handle_t handle )
 {
 	int num = 1;
 
 	if( setsockopt( handle, SOL_SOCKET, SO_BROADCAST, (char *)&num, sizeof( num ) ) == SOCKET_ERROR )
 	{
 		NET_SetErrorStringFromLastError( "setsockopt" );
-		return qfalse;
+		return false;
 	}
 
-	return qtrue;
+	return true;
 }
 
 /*
 * NET_SocketMakeNonBlocking
 */
-static qboolean NET_SocketMakeNonBlocking( socket_handle_t handle )
+static bool NET_SocketMakeNonBlocking( socket_handle_t handle )
 {
 	ioctl_param_t _true = 1;
 
 	if( Sys_NET_SocketIoctl( handle, FIONBIO, &_true ) == SOCKET_ERROR )
 	{
 		NET_SetErrorStringFromLastError( "Sys_NET_SocketIoctl" );
-		return qfalse;
+		return false;
 	}
 
-	return qtrue;
+	return true;
 }
 
 /*
@@ -382,7 +386,7 @@ static int NET_UDP_GetPacket( const socket_t *socket, netadr_t *address, msg_t *
 /*
 * NET_UDP_SendPacket
 */
-static qboolean NET_UDP_SendPacket( const socket_t *socket, const void *data, size_t length, const netadr_t *address )
+static bool NET_UDP_SendPacket( const socket_t *socket, const void *data, size_t length, const netadr_t *address )
 {
 	struct sockaddr_storage addr;
 	socklen_t addrlen;
@@ -393,22 +397,22 @@ static qboolean NET_UDP_SendPacket( const socket_t *socket, const void *data, si
 	assert( length > 0 );
 
 	if( !AddressToSockaddress( address, &addr ) )
-		return qfalse;
+		return false;
 
 	addrlen = ( addr.ss_family == AF_INET6 ? sizeof( struct sockaddr_in6 ) : sizeof( struct sockaddr_in ) );
 	if( sendto( socket->handle, data, length, 0, (struct sockaddr *)&addr, addrlen ) == SOCKET_ERROR )
 	{
 		NET_SetErrorStringFromLastError( "sendto" );
-		return qfalse;
+		return false;
 	}
 
-	return qtrue;
+	return true;
 }
 
 /*
 * NET_IP_OpenSocket
 */
-static qboolean NET_IP_OpenSocket( socket_t *sock, const netadr_t *address, socket_type_t socktype, qboolean server )
+static bool NET_IP_OpenSocket( socket_t *sock, const netadr_t *address, socket_type_t socktype, bool server )
 {
 	int newsocket;
 	const char *proto, *stype;
@@ -423,7 +427,7 @@ static qboolean NET_IP_OpenSocket( socket_t *sock, const netadr_t *address, sock
 	else
 	{
 		NET_SetErrorString( "Invalid address type" );
-		return qfalse;
+		return false;
 	}
 
 	if( socktype == SOCKET_UDP )
@@ -435,7 +439,7 @@ static qboolean NET_IP_OpenSocket( socket_t *sock, const netadr_t *address, sock
 	else
 	{
 		NET_SetErrorString( "Invalid socket type" );
-		return qfalse;
+		return false;
 	}
 
 	if( NET_IsAnyAddress( address ) )
@@ -447,14 +451,14 @@ static qboolean NET_IP_OpenSocket( socket_t *sock, const netadr_t *address, sock
 		Com_Printf( "Opening %s/%s socket: %s\n", stype, proto, NET_AddressToString( address ) );
 	}
 
-	if( ( newsocket = OpenSocket( socktype, ( address->type == NA_IP6 ? qtrue : qfalse ) ) ) == INVALID_SOCKET )
-		return qfalse;
+	if( ( newsocket = OpenSocket( socktype, ( address->type == NA_IP6 ? true : false ) ) ) == INVALID_SOCKET )
+		return false;
 
 	// make it non-blocking
 	if( !NET_SocketMakeNonBlocking( newsocket ) )
 	{
 		Sys_NET_SocketClose( newsocket );
-		return qfalse;
+		return false;
 	}
 
 	if( socktype == SOCKET_UDP )
@@ -463,7 +467,7 @@ static qboolean NET_IP_OpenSocket( socket_t *sock, const netadr_t *address, sock
 		if( !NET_SocketMakeBroadcastCapable( newsocket ) )
 		{
 			Sys_NET_SocketClose( newsocket );
-			return qfalse;
+			return false;
 		}
 	}
 
@@ -476,16 +480,16 @@ static qboolean NET_IP_OpenSocket( socket_t *sock, const netadr_t *address, sock
 	if( !BindSocket( newsocket, address ) )
 	{
 		Sys_NET_SocketClose( newsocket );
-		return qfalse;
+		return false;
 	}
 
-	sock->open = qtrue;
+	sock->open = true;
 	sock->type = socktype;
 	sock->address = *address;
 	sock->server = server;
 	sock->handle = newsocket;
 
-	return qtrue;
+	return true;
 }
 
 /*
@@ -500,7 +504,7 @@ static void NET_UDP_CloseSocket( socket_t *socket )
 
 	Sys_NET_SocketClose( socket->handle );
 	socket->handle = 0;
-	socket->open = qfalse;
+	socket->open = false;
 }
 
 //=============================================================================
@@ -538,7 +542,7 @@ static int NET_TCP_Get( const socket_t *socket, netadr_t *address, void *data, s
 static int NET_TCP_GetPacket( const socket_t *socket, netadr_t *address, msg_t *message )
 {
 	int ret;
-	qbyte buffer[MAX_PACKETLEN + 4];
+	uint8_t buffer[MAX_PACKETLEN + 4];
 	int len;
 
 	assert( socket && socket->open && socket->connected && socket->type == SOCKET_TCP );
@@ -596,7 +600,7 @@ static int NET_TCP_GetPacket( const socket_t *socket, netadr_t *address, msg_t *
 	message->readcount = 0;
 	message->cursize = ret;
 
-	return qtrue;
+	return true;
 }
 
 
@@ -642,17 +646,17 @@ static int NET_TCP_Send( const socket_t *socket, const void *data, size_t length
 /*
 * NET_TCP_Listen
 */
-static qboolean NET_TCP_Listen( const socket_t *socket )
+static bool NET_TCP_Listen( const socket_t *socket )
 {
 	assert( socket && socket->open && socket->type == SOCKET_TCP && socket->handle );
 
 	if( listen( socket->handle, 8 ) == -1 )
 	{
 		NET_SetErrorStringFromLastError( "listen" );
-		return qfalse;
+		return false;
 	}
 
-	return qtrue;
+	return true;
 }
 
 /*
@@ -687,7 +691,7 @@ static connection_status_t NET_TCP_Connect( socket_t *socket, const netadr_t *ad
 		}
 	}
 
-	socket->connected = qtrue;
+	socket->connected = true;
 	socket->remoteAddress = *address;
 
 	return CONNECTION_SUCCEEDED;
@@ -737,7 +741,7 @@ static connection_status_t NET_TCP_CheckConnect( socket_t *socket )
 			return CONNECTION_FAILED;
 		}
 
-		socket->connected = qtrue;
+		socket->connected = true;
 
 		return CONNECTION_SUCCEEDED;
 	}
@@ -764,9 +768,9 @@ static int NET_TCP_Accept( const socket_t *socket, socket_t *newsocket, netadr_t
 	handle = accept( socket->handle, (struct sockaddr *)&sockaddress, &sockaddress_size );
 	if( handle == SOCKET_ERROR )
 	{
-		NET_SetErrorStringFromLastError( "accept" );
 		if( Sys_NET_GetLastError() == NET_ERR_WOULDBLOCK )  // would block
 			return 0;
+		NET_SetErrorStringFromLastError( "accept" );
 		return -1;
 	}
 
@@ -780,7 +784,7 @@ static int NET_TCP_Accept( const socket_t *socket, socket_t *newsocket, netadr_t
 		return -1;
 	}
 
-	newsocket->open = qtrue;
+	newsocket->open = true;
 	newsocket->type = SOCKET_TCP;
 	newsocket->server = socket->server;
 	newsocket->address = socket->address;
@@ -804,8 +808,8 @@ static void NET_TCP_CloseSocket( socket_t *socket )
 
 	Sys_NET_SocketClose( socket->handle );
 	socket->handle = 0;
-	socket->open = qfalse;
-	socket->connected = qfalse;
+	socket->open = false;
+	socket->connected = false;
 }
 
 /*
@@ -861,7 +865,7 @@ static int NET_Loopback_GetPacket( const socket_t *socket, netadr_t *address, ms
 /*
 * NET_SendLoopbackPacket
 */
-static qboolean NET_Loopback_SendPacket( const socket_t *socket, const void *data, size_t length,
+static bool NET_Loopback_SendPacket( const socket_t *socket, const void *data, size_t length,
 										const netadr_t *address )
 {
 	int i;
@@ -875,7 +879,7 @@ static qboolean NET_Loopback_SendPacket( const socket_t *socket, const void *dat
 	if( address->type != NA_LOOPBACK )
 	{
 		NET_SetErrorString( "Invalid address" );
-		return qfalse;
+		return false;
 	}
 
 	loop = &loopbacks[socket->handle^1];
@@ -886,13 +890,13 @@ static qboolean NET_Loopback_SendPacket( const socket_t *socket, const void *dat
 	memcpy( loop->msgs[i].data, data, length );
 	loop->msgs[i].datalen = length;
 
-	return qtrue;
+	return true;
 }
 
 /*
 * NET_Loopback_OpenSocket
 */
-static qboolean NET_Loopback_OpenSocket( socket_t *socket, const netadr_t *address, qboolean server )
+static bool NET_Loopback_OpenSocket( socket_t *socket, const netadr_t *address, bool server )
 {
 	int i;
 
@@ -901,7 +905,7 @@ static qboolean NET_Loopback_OpenSocket( socket_t *socket, const netadr_t *addre
 	if( address->type != NA_LOOPBACK )
 	{
 		NET_SetErrorString( "Invalid address" );
-		return qfalse;
+		return false;
 	}
 
 	for( i = 0; i < 2; i++ )
@@ -912,20 +916,20 @@ static qboolean NET_Loopback_OpenSocket( socket_t *socket, const netadr_t *addre
 	if( i == 2 )
 	{
 		NET_SetErrorString( "Both loopback sockets already open" );
-		return qfalse;
+		return false;
 	}
 
 	memset( &loopbacks[i], 0, sizeof( loopbacks[i] ) );
-	loopbacks[i].open = qtrue;
+	loopbacks[i].open = true;
 
-	socket->open = qtrue;
+	socket->open = true;
 	socket->handle = i;
 
 	socket->type = SOCKET_LOOPBACK;
 	socket->address = *address;
 	socket->server = server;
 
-	return qtrue;
+	return true;
 }
 
 /*
@@ -940,8 +944,8 @@ static void NET_Loopback_CloseSocket( socket_t *socket )
 
 	assert( socket->handle >= 0 && socket->handle < 2 );
 
-	loopbacks[socket->handle].open = qfalse;
-	socket->open = qfalse;
+	loopbacks[socket->handle].open = false;
+	socket->open = false;
 	socket->handle = 0;
 }
 
@@ -949,7 +953,7 @@ static void NET_Loopback_CloseSocket( socket_t *socket )
 /*
 * NET_TCP_SendPacket
 */
-static qboolean NET_TCP_SendPacket( const socket_t *socket, const void *data, size_t length )
+static bool NET_TCP_SendPacket( const socket_t *socket, const void *data, size_t length )
 {
 	int len;
 
@@ -959,12 +963,12 @@ static qboolean NET_TCP_SendPacket( const socket_t *socket, const void *data, si
 	// we send the length of the packet first
 	len = LittleLong( length );
 	if( !NET_TCP_Send( socket, &len, 4 ) )
-		return qfalse;
+		return false;
 
 	if( !NET_TCP_Send( socket, data, length ) )
-		return qfalse;
+		return false;
 
-	return qtrue;
+	return true;
 }
 #endif
 
@@ -1002,7 +1006,7 @@ int NET_GetPacket( const socket_t *socket, netadr_t *address, msg_t *message )
 #endif
 
 	default:
-		assert( qfalse );
+		assert( false );
 		NET_SetErrorString( "Unknown socket type" );
 		return -1;
 	}
@@ -1035,7 +1039,7 @@ int NET_Get( const socket_t *socket, netadr_t *address, void *data, size_t lengt
 #endif
 
 	default:
-		assert( qfalse );
+		assert( false );
 		NET_SetErrorString( "Unknown socket type" );
 		return -1;
 	}
@@ -1044,15 +1048,15 @@ int NET_Get( const socket_t *socket, netadr_t *address, void *data, size_t lengt
 /*
 * NET_SendPacket
 */
-qboolean NET_SendPacket( const socket_t *socket, const void *data, size_t length, const netadr_t *address )
+bool NET_SendPacket( const socket_t *socket, const void *data, size_t length, const netadr_t *address )
 {
 	assert( socket->open );
 
 	if( !socket->open )
-		return qfalse;
+		return false;
 
 	if( address->type == NA_NOTRANSMIT )
-		return qtrue;
+		return true;
 
 	switch( socket->type )
 	{
@@ -1068,9 +1072,9 @@ qboolean NET_SendPacket( const socket_t *socket, const void *data, size_t length
 #endif
 
 	default:
-		assert( qfalse );
+		assert( false );
 		NET_SetErrorString( "Unknown socket type" );
-		return qfalse;
+		return false;
 	}
 }
 
@@ -1082,10 +1086,10 @@ int NET_Send( const socket_t *socket, const void *data, size_t length, const net
 	assert( socket->open );
 
 	if( !socket->open )
-		return qfalse;
+		return -1;
 
 	if( address->type == NA_NOTRANSMIT )
-		return qtrue;
+		return 0;
 
 	switch( socket->type )
 	{
@@ -1100,7 +1104,7 @@ int NET_Send( const socket_t *socket, const void *data, size_t length, const net
 #endif
 
 	default:
-		assert( qfalse );
+		assert( false );
 		NET_SetErrorString( "Unknown socket type" );
 		return -1;
 	}
@@ -1137,7 +1141,7 @@ char *NET_AddressToString( const netadr_t *a )
 			break;
 		}
 	default:
-		assert( qfalse );
+		assert( false );
 		Q_strncpyz( s, "unknown", sizeof( s ) );
 		break;
 	}
@@ -1150,35 +1154,35 @@ char *NET_AddressToString( const netadr_t *a )
 * 
 * Compares without the port
 */
-qboolean NET_CompareBaseAddress( const netadr_t *a, const netadr_t *b )
+bool NET_CompareBaseAddress( const netadr_t *a, const netadr_t *b )
 {
 	if( a->type != b->type )
-		return qfalse;
+		return false;
 
 	switch( a->type )
 	{
 	case NA_LOOPBACK:
-		return qtrue;
+		return true;
 
 	case NA_IP:
 		{
 			const netadr_ipv4_t *addr1 = &a->address.ipv4;
 			const netadr_ipv4_t *addr2 = &b->address.ipv4;
 			if( addr1->ip[0] == addr2->ip[0] && addr1->ip[1] == addr2->ip[1] && addr1->ip[2] == addr2->ip[2] && addr1->ip[3] == addr2->ip[3] )
-				return qtrue;
-			return qfalse;
+				return true;
+			return false;
 		}
 
 	case NA_IP6:
 		{
 			const netadr_ipv6_t *addr1 = &a->address.ipv6;
 			const netadr_ipv6_t *addr2 = &b->address.ipv6;
-			return ( ( memcmp( addr1->ip, addr2->ip, sizeof( addr1->ip ) ) == 0 && addr1->scope_id == addr2->scope_id ) ? qtrue : qfalse );
+			return ( ( memcmp( addr1->ip, addr2->ip, sizeof( addr1->ip ) ) == 0 && addr1->scope_id == addr2->scope_id ) ? true : false );
 		}
 
 	default:
-		assert( qfalse );
-		return qfalse;
+		assert( false );
+		return false;
 	}
 }
 
@@ -1229,15 +1233,15 @@ void NET_SetAddressPort( netadr_t *address, unsigned short port )
 * 
 * Compares with the port
 */
-qboolean NET_CompareAddress( const netadr_t *a, const netadr_t *b )
+bool NET_CompareAddress( const netadr_t *a, const netadr_t *b )
 {
 	if( a->type != b->type )
-		return qfalse;
+		return false;
 
 	switch( a->type )
 	{
 	case NA_LOOPBACK:
-		return qtrue;
+		return true;
 
 	case NA_IP:
 		{
@@ -1247,9 +1251,9 @@ qboolean NET_CompareAddress( const netadr_t *a, const netadr_t *b )
 			if( addr1->ip[0] == addr2->ip[0] && addr1->ip[1] == addr2->ip[1] && addr1->ip[2] == addr2->ip[2] && addr1->ip[3] == addr2->ip[3] &&
 				BigShort( addr1->port ) == BigShort( addr2->port ) )
 			{
-				return qtrue;
+				return true;
 			}
-			return qfalse;
+			return false;
 		}
 
 	case NA_IP6:
@@ -1261,15 +1265,15 @@ qboolean NET_CompareAddress( const netadr_t *a, const netadr_t *b )
 				addr1->scope_id == addr2->scope_id &&
 				BigShort( addr1->port ) == BigShort( addr2->port ) )
 			{
-				return qtrue;
+				return true;
 			}
 
-			return qfalse;
+			return false;
 		}
 
 	default:
-		assert( qfalse );
-		return qfalse;
+		assert( false );
+		return false;
 	}
 }
 
@@ -1296,7 +1300,7 @@ void NET_BroadcastAddress( netadr_t *address, int port )
 /*
 * ParseAddressString
 */
-static qboolean ParseAddressString( const char *str, char* addr_buff, size_t addr_buff_size, char* port_buff, size_t port_buff_size, int *addr_family  )
+static bool ParseAddressString( const char *str, char* addr_buff, size_t addr_buff_size, char* port_buff, size_t port_buff_size, int *addr_family  )
 {
 	const char* addr_start;
 	const char* addr_end = NULL;
@@ -1310,11 +1314,11 @@ static qboolean ParseAddressString( const char *str, char* addr_buff, size_t add
 		const char* end_bracket = strchr( str, ']' );
 
 		if( end_bracket == NULL )
-			return qfalse;
+			return false;
 
 		// If there's something else than a colon after the closing bracket
 		if( end_bracket[1] != ':' && end_bracket[1] != '\0' )
-			return qfalse;
+			return false;
 
 		// If there's a port number after the address
 		if( end_bracket[1] == ':' )
@@ -1355,7 +1359,7 @@ static qboolean ParseAddressString( const char *str, char* addr_buff, size_t add
 
 	// Check the address length
 	if( addr_length >= addr_buff_size )
-		return qfalse;
+		return false;
 
 	memcpy( addr_buff, addr_start, addr_length );
 	addr_buff[ addr_length ] = '\0';
@@ -1364,13 +1368,13 @@ static qboolean ParseAddressString( const char *str, char* addr_buff, size_t add
 
 	*addr_family = family;
 
-	return qtrue;
+	return true;
 }
 
 /*
 * StringToSockaddress
 */
-static qboolean StringToSockaddress( const char *s, struct sockaddr_storage *sadr )
+static bool StringToSockaddress( const char *s, struct sockaddr_storage *sadr )
 {
 	char addr_copy [128];
 	char port_copy [8];
@@ -1383,7 +1387,7 @@ static qboolean StringToSockaddress( const char *s, struct sockaddr_storage *sad
 	if( strlen( s ) >= sizeof( addr_copy ) / sizeof( char ) )
 	{
 		NET_SetErrorString( "String too long" );
-		return qfalse;
+		return false;
 	}
 
 	str = ( s[0] == '\0' ? "0.0.0.0" : s );
@@ -1396,13 +1400,14 @@ static qboolean StringToSockaddress( const char *s, struct sockaddr_storage *sad
 		memset( &hints, 0, sizeof ( hints ) );
 		hints.ai_family = addr_family;
 		hints.ai_socktype = SOCK_DGRAM;
+		//hints.ai_flags = AI_NUMERICHOST;
 
 		err = getaddrinfo( addr_copy, port_copy, &hints, &addrinf );
 		if ( err == 0 && addrinf != NULL )
 		{
 			memcpy( sadr, addrinf->ai_addr, addrinf->ai_addrlen );
 			freeaddrinfo( addrinf );
-			return qtrue;
+			return true;
 		}
 		else
 		{
@@ -1417,13 +1422,13 @@ static qboolean StringToSockaddress( const char *s, struct sockaddr_storage *sad
 		NET_SetErrorString( "Invalid address string" );
 	}
 
-	return qfalse;
+	return false;
 }
 
 /*
 * NET_StringToAddress
 */
-qboolean NET_StringToAddress( const char *s, netadr_t *address )
+bool NET_StringToAddress( const char *s, netadr_t *address )
 {
 	struct sockaddr_storage sadr;
 
@@ -1435,53 +1440,53 @@ qboolean NET_StringToAddress( const char *s, netadr_t *address )
 	if( !StringToSockaddress( s, &sadr ) )
 	{
 		address->type = NA_NOTRANSMIT;
-		return qfalse;
+		return false;
 	}
 
 	SockaddressToAddress( (struct sockaddr*)&sadr, address );
 
-	return qtrue;
+	return true;
 }
 
 /*
 * NET_IsLocalAddress
 */
-qboolean NET_IsLocalAddress( const netadr_t *address )
+bool NET_IsLocalAddress( const netadr_t *address )
 {
 	switch( address->type )
 	{
 	case NA_LOOPBACK:
-		return qtrue;
+		return true;
 
 	case NA_IP:
 		if( address->address.ipv4.ip[0] == 127 && address->address.ipv4.ip[1] == 0 )
-			return qtrue;
+			return true;
 		// TODO: Check for own external IP address?
-		return qfalse;
+		return false;
 
 	case NA_IP6:
-		return ( memcmp( address->address.ipv6.ip, &in6addr_loopback.s6_addr, sizeof( address->address.ipv6.ip ) ) == 0 ) ? qtrue : qfalse;
+		return ( memcmp( address->address.ipv6.ip, &in6addr_loopback.s6_addr, sizeof( address->address.ipv6.ip ) ) == 0 ) ? true : false;
 
 	default:
-		return qfalse;
+		return false;
 	}
 }
 
 /*
 * NET_IsAnyAddress
 */
-qboolean NET_IsAnyAddress( const netadr_t *address )
+bool NET_IsAnyAddress( const netadr_t *address )
 {
 	switch( address->type )
 	{
 	case NA_IP:
-		return ( *(unsigned int*)address->address.ipv4.ip == htonl( INADDR_ANY ) ? qtrue : qfalse );
+		return ( *(unsigned int*)address->address.ipv4.ip == htonl( INADDR_ANY ) ? true : false );
 
 	case NA_IP6:
-		return ( memcmp( address->address.ipv6.ip, &in6addr_any.s6_addr, sizeof( address->address.ipv6.ip ) ) == 0 ) ? qtrue : qfalse;
+		return ( memcmp( address->address.ipv6.ip, &in6addr_any.s6_addr, sizeof( address->address.ipv6.ip ) ) == 0 ) ? true : false;
 
 	default:
-		return qfalse;
+		return false;
 	}
 }
 
@@ -1490,10 +1495,10 @@ qboolean NET_IsAnyAddress( const netadr_t *address )
 *
 * FIXME: This function apparently doesn't support CIDR
 */
-qboolean NET_IsLANAddress( const netadr_t *address )
+bool NET_IsLANAddress( const netadr_t *address )
 {
 	if( NET_IsLocalAddress( address ) )
-		return qtrue;
+		return true;
 
 	switch( address->type )
 	{
@@ -1506,11 +1511,11 @@ qboolean NET_IsLANAddress( const netadr_t *address )
 			// 172.16.0.0      -   172.31.255.255  (172.16/12 prefix)
 			// 192.168.0.0     -   192.168.255.255 (192.168/16 prefix)
 			if( addr4->ip[0] == 10 )
-				return qtrue;
+				return true;
 			if( addr4->ip[0] == 172 && ( addr4->ip[1]&0xf0 ) == 16 )
-				return qtrue;
+				return true;
 			if( addr4->ip[0] == 192 && addr4->ip[1] == 168 )
-				return qtrue;
+				return true;
 		}
 
 	case NA_IP6:
@@ -1519,20 +1524,20 @@ qboolean NET_IsLANAddress( const netadr_t *address )
 
 			// Local addresses are either the loopback adress (tested earlier), or fe80::/10
 			if ( addr6->ip[0] == 0xFE && ( addr6->ip[1] & 0xC0 ) == 0x80 ) {
-				return qtrue;
+				return true;
 			}
 
 			// private address space
 			if ( ( addr6->ip[0] & 0xFE ) == 0xFC ) {
-				return qtrue;
+				return true;
 			}
 		}
 
 	default:
-		return qfalse;
+		return false;
 	}
 
-	return qfalse;
+	return false;
 }
 
 /*
@@ -1628,7 +1633,7 @@ const char *NET_SocketToString( const socket_t *socket )
 /*
 * NET_Listen
 */
-qboolean NET_Listen( const socket_t *socket )
+bool NET_Listen( const socket_t *socket )
 {
 	assert( socket->open );
 
@@ -1640,9 +1645,9 @@ qboolean NET_Listen( const socket_t *socket )
 	case SOCKET_LOOPBACK:
 	case SOCKET_UDP:
 	default:
-		assert( qfalse );
+		assert( false );
 		NET_SetErrorString( "Unsupported socket type" );
-		return qfalse;
+		return false;
 	}
 }
 
@@ -1662,7 +1667,7 @@ connection_status_t NET_Connect( socket_t *socket, const netadr_t *address )
 	case SOCKET_LOOPBACK:
 	case SOCKET_UDP:
 	default:
-		assert( qfalse );
+		assert( false );
 		NET_SetErrorString( "Unsupported socket type" );
 		return CONNECTION_FAILED;
 	}
@@ -1686,7 +1691,7 @@ connection_status_t NET_CheckConnect( socket_t *socket )
 	case SOCKET_LOOPBACK:
 	case SOCKET_UDP:
 	default:
-		assert( qfalse );
+		assert( false );
 		NET_SetErrorString( "Unsupported socket type" );
 		return CONNECTION_FAILED;
 	}
@@ -1709,9 +1714,9 @@ int NET_Accept( const socket_t *socket, socket_t *newsocket, netadr_t *address )
 	case SOCKET_LOOPBACK:
 	case SOCKET_UDP:
 	default:
-		assert( qfalse );
+		assert( false );
 		NET_SetErrorString( "Unsupported socket type" );
-		return qfalse;
+		return false;
 	}
 }
 #endif
@@ -1719,7 +1724,7 @@ int NET_Accept( const socket_t *socket, socket_t *newsocket, netadr_t *address )
 /*
 * NET_OpenSocket
 */
-qboolean NET_OpenSocket( socket_t *socket, socket_type_t type, const netadr_t *address, qboolean server )
+bool NET_OpenSocket( socket_t *socket, socket_type_t type, const netadr_t *address, bool server )
 {
 	assert( !socket->open );
 	assert( address );
@@ -1736,9 +1741,9 @@ qboolean NET_OpenSocket( socket_t *socket, socket_type_t type, const netadr_t *a
 		return NET_IP_OpenSocket( socket, address, type, server );
 
 	default:
-		assert( qfalse );
+		assert( false );
 		NET_SetErrorString( "Unknown socket type" );
-		return qfalse;
+		return false;
 	}
 }
 
@@ -1767,7 +1772,7 @@ void NET_CloseSocket( socket_t *socket )
 #endif
 
 	default:
-		assert( qfalse );
+		assert( false );
 		NET_SetErrorString( "Unknown socket type" );
 		break;
 	}
@@ -1789,7 +1794,7 @@ int NET_SetSocketNoDelay( socket_t *socket, int nodelay )
 		return NET_TCP_SetNoDelay( socket, nodelay );
 #endif
 	default:
-		assert( qfalse );
+		assert( false );
 		NET_SetErrorString( "Unknown socket type" );
 		return -1;
 	}
@@ -1839,16 +1844,17 @@ void NET_Sleep( int msec, socket_t *sockets[] )
 * NET_Monitor
 * Monitors the given sockets with the given timeout in milliseconds
 * It ignores closed and loopback sockets.
-* Calls the callback function read_cb(socket_t *) with the socket as parameter the socket when incoming data was detected on it
+* Calls the callback function read_cb(socket_t *) with the socket as parameter when incoming data was detected on it
+* Calls the callback function write_cb(socket_t *) with the socket as parameter when the socket is ready to accept outgoing data
 * Calls the callback function exception_cb(socket_t *) with the socket as parameter when a socket exception was detected on that socket
 * For both callbacks, NULL can be passed. When NULL is passed for the exception_cb, no exception detection is performed
 * Incoming data is always detected, even if the 'read_cb' callback was NULL.
 */
-int NET_Monitor( int msec, socket_t *sockets[], void (*read_cb)(socket_t *, void*), void (*exception_cb)(socket_t *, void*), void *privatep[] )
+int NET_Monitor( int msec, socket_t *sockets[], void (*read_cb)(socket_t *, void*), void (*write_cb)(socket_t *, void*), void (*exception_cb)(socket_t *, void*), void *privatep[] )
 {
 	struct timeval timeout;
-	fd_set fdsetr, fdsete;
-	fd_set *p_fdsete = NULL;
+	fd_set fdsetr, fdsetw, fdsete;
+	fd_set *p_fdsetw = NULL, *p_fdsete = NULL;
 	int i, ret;
 	int fdmax = 0;
 
@@ -1856,7 +1862,11 @@ int NET_Monitor( int msec, socket_t *sockets[], void (*read_cb)(socket_t *, void
 		return 0;
 
 	FD_ZERO( &fdsetr );
-	if (exception_cb) {
+	if( write_cb ) {
+		FD_ZERO( &fdsetw );
+		p_fdsetw = &fdsetw;
+	}
+	if( exception_cb ) {
 		FD_ZERO( &fdsete );
 		p_fdsete = &fdsete;
 	}
@@ -1874,6 +1884,8 @@ int NET_Monitor( int msec, socket_t *sockets[], void (*read_cb)(socket_t *, void
 			assert( sockets[i]->handle > 0 );
 			fdmax = max( (int)sockets[i]->handle, fdmax );
 			FD_SET( sockets[i]->handle, &fdsetr ); // network socket
+			if( p_fdsetw )
+				FD_SET( sockets[i]->handle, p_fdsetw );
 			if( p_fdsete )
 				FD_SET( sockets[i]->handle, p_fdsete );
 			break;
@@ -1885,8 +1897,8 @@ int NET_Monitor( int msec, socket_t *sockets[], void (*read_cb)(socket_t *, void
 
 	timeout.tv_sec = msec / 1000;
 	timeout.tv_usec = ( msec % 1000 ) * 1000;
-	ret = select( fdmax+1, &fdsetr, NULL, p_fdsete, &timeout );
-	if ( ( ret > 0) && ( (read_cb) || (exception_cb)) ) {
+	ret = select( fdmax+1, &fdsetr, p_fdsetw, p_fdsete, &timeout );
+	if ( ( ret > 0) && ( read_cb || write_cb || exception_cb ) ) {
 		// Launch callbacks
 		for( i = 0; sockets[i]; i++ ) {
 			if (!sockets[i]->open)
@@ -1897,11 +1909,14 @@ int NET_Monitor( int msec, socket_t *sockets[], void (*read_cb)(socket_t *, void
 #ifdef TCP_SUPPORT
 			case SOCKET_TCP:
 #endif
-				if ( (exception_cb) && (p_fdsete) && (FD_ISSET(sockets[i]->handle, p_fdsete )) ) {
+				if ( (exception_cb) && (FD_ISSET(sockets[i]->handle, p_fdsete )) ) {
 					exception_cb(sockets[i], privatep ? privatep[i] : NULL);
 				}
 				if ( (read_cb) && (FD_ISSET(sockets[i]->handle, &fdsetr )) ) {
 					read_cb(sockets[i], privatep ? privatep[i] : NULL);
+				}
+				if ( (write_cb) && (FD_ISSET(sockets[i]->handle, p_fdsetw )) ) {
+					write_cb(sockets[i], privatep ? privatep[i] : NULL);
 				}
 				break;
 			case SOCKET_LOOPBACK:
@@ -1911,6 +1926,43 @@ int NET_Monitor( int msec, socket_t *sockets[], void (*read_cb)(socket_t *, void
 		}
 	}
 	return ret;
+}
+
+/*
+* NET_SendFile
+*/
+int64_t NET_SendFile( const socket_t *socket, int file, size_t offset, size_t count, const netadr_t *address )
+{
+	int ret, err;
+
+	assert( socket->open );
+
+	if( !socket->open )
+		return -1;
+
+	if( address->type == NA_NOTRANSMIT )
+		return -1;
+
+#ifndef TCP_SUPPORT
+	return -1;
+#else
+	if( socket->type != SOCKET_TCP )
+		return -1;
+
+	ret = Sys_NET_SendFile( socket->handle, file, offset, count );
+	if( ret == SOCKET_ERROR )
+	{
+		NET_SetErrorStringFromLastError( "sendfile" );
+
+		err = Sys_NET_GetLastError();
+		if( err == NET_ERR_WOULDBLOCK || err == NET_ERR_CONNRESET )  // would block
+			return 0;
+
+		return -1;
+	}
+
+	return ret;
+#endif
 }
 
 /*
@@ -1924,7 +1976,7 @@ void NET_Init( void )
 
 	GetLocalAddress();
 
-	net_initialized = qtrue;
+	net_initialized = true;
 }
 
 /*
@@ -1944,5 +1996,5 @@ void NET_Shutdown( void )
 
 	Sys_NET_Shutdown();
 
-	net_initialized = qfalse;
+	net_initialized = false;
 }

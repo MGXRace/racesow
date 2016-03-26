@@ -51,6 +51,7 @@ void SCR_StopCinematic( void )
 */
 void SCR_FinishCinematic( void )
 {
+	SCR_PauseCinematic( false );
 	CL_Disconnect( NULL );
 }
 
@@ -60,11 +61,11 @@ void SCR_FinishCinematic( void )
 * SCR_CinematicRawSamples
 */
 static void SCR_CinematicRawSamples( void *unused, unsigned int samples, 
-	unsigned int rate, unsigned short width, unsigned short channels, const qbyte *data )
+	unsigned int rate, unsigned short width, unsigned short channels, const uint8_t *data )
 {
 	(void)unused;
 	
-	CL_SoundModule_RawSamples( samples, rate, width, channels, data, qfalse );
+	CL_SoundModule_RawSamples( samples, rate, width, channels, data, true );
 }
 
 /*
@@ -89,7 +90,7 @@ static void SCR_ReadNextCinematicFrame( void )
 			&cl.cin.redraw );
 
 		// so that various cl.cin.pic == NULL checks still make sense
-		cl.cin.pic = ( qbyte * )cl.cin.cyuv;
+		cl.cin.pic = ( uint8_t * )cl.cin.cyuv;
 	}
 	else {
 		cl.cin.pic = CIN_ReadNextFrame( cl.cin.h, 
@@ -102,7 +103,7 @@ static void SCR_ReadNextCinematicFrame( void )
 /*
 * SCR_AllowCinematicConsole
 */
-qboolean SCR_AllowCinematicConsole( void )
+bool SCR_AllowCinematicConsole( void )
 {
 	return cl.cin.allowConsole;
 }
@@ -131,7 +132,7 @@ void SCR_RunCinematic( void )
 		return;
 	}
 
-	if( cl.cin.paused ) {
+	if( cl.cin.pause_cnt > 0 ) {
 		return;
 	}
 
@@ -140,7 +141,7 @@ void SCR_RunCinematic( void )
 		&SCR_CinematicRawSamples, &SCR_CinematicGetRawSamplesLength );
 
 	if( !CIN_NeedNextFrame( cl.cin.h, SCR_CinematicTime() - cl.cin.startTime ) ) {
-		cl.cin.redraw = qfalse;
+		cl.cin.redraw = false;
 		return;
 	}
 
@@ -158,17 +159,17 @@ void SCR_RunCinematic( void )
 *
 * Returns true if a cinematic is active, meaning the view rendering should be skipped
 */
-qboolean SCR_DrawCinematic( void )
+bool SCR_DrawCinematic( void )
 {
 	int x, y;
 	int w, h;
-	qboolean keepRatio;
+	bool keepRatio;
 
 	if( cls.state != CA_CINEMATIC )
-		return qfalse;
+		return false;
 
 	if( !cl.cin.pic )
-		return qtrue;
+		return true;
 
 	keepRatio = cl.cin.keepRatio && cl.cin.aspect_numerator!=0 && cl.cin.aspect_denominator!=0;
 
@@ -230,8 +231,8 @@ qboolean SCR_DrawCinematic( void )
 			0, 0, 1, 1, cl.cin.redraw ? cl.cin.pic : NULL );
 	}
 
-	cl.cin.redraw = qfalse;
-	return qtrue;
+	cl.cin.redraw = false;
+	return true;
 }
 
 /*
@@ -240,32 +241,54 @@ qboolean SCR_DrawCinematic( void )
 static void SCR_PlayCinematic( const char *arg, int flags )
 {
 	struct cinematics_s *cin;
-	qboolean yuv;
+	bool has_ogg;
+	bool yuv;
 	float framerate;
+	size_t name_size = strlen( "video/" ) + strlen( arg ) + 1;
+	char *name = alloca( name_size );
 
-	CL_SoundModule_Clear();
+	if( strstr( arg, "/" ) == NULL && strstr( arg, "\\" ) == NULL ) {
+		Q_snprintfz( name, name_size, "video/%s", arg );
+	} else {
+		Q_snprintfz( name, name_size, "%s", arg );
+	}
 
-	cin = CIN_Open( arg, 0, qfalse, &yuv, &framerate );
+	cin = CIN_Open( name, 0, 0, &yuv, &framerate );
 	if( !cin )
 	{
-		Com_Printf( "SCR_PlayCinematic: couldn't find %s\n", arg );
+		Com_Printf( "SCR_PlayCinematic: couldn't find %s\n", name );
 		return;
 	}
 
-	CL_Disconnect( NULL );
+	has_ogg = CIN_HasOggAudio( cin );
+
+	CIN_Close( cin );
+
+	SCR_FinishCinematic();
+
+	CL_SoundModule_StopAllSounds( true, true );
+
+	cin = CIN_Open( name, 0, has_ogg ? CIN_NOAUDIO : 0, &yuv, &framerate );
+	if( !cin )
+	{
+		Com_Printf( "SCR_PlayCinematic: (FIXME) couldn't find %s\n", name );
+		return;
+	}
+
+	if( has_ogg ) {
+		CL_SoundModule_StartBackgroundTrack( CIN_FileName( cin ), NULL, 4 );
+	}
 
 	cl.cin.h = cin;
-	cl.cin.keepRatio = (flags & 1) ? qfalse : qtrue;
-	cl.cin.allowConsole = (flags & 2) ? qfalse : qtrue;
-	cl.cin.paused = qfalse;
+	cl.cin.keepRatio = (flags & 1) ? false : true;
+	cl.cin.allowConsole = (flags & 2) ? false : true;
 	cl.cin.startTime = SCR_CinematicTime();
-	cl.cin.paused = qfalse;
+	cl.cin.paused = false;
+	cl.cin.pause_cnt = 0;
 	cl.cin.yuv = yuv;
 	cl.cin.framerate = framerate;
 
 	CL_SetClientState( CA_CINEMATIC );
-
-	CL_SoundModule_StopAllSounds();
 
 	SCR_EndLoadingPlaque();
 
@@ -275,20 +298,25 @@ static void SCR_PlayCinematic( const char *arg, int flags )
 /*
 * SCR_PauseCinematic
 */
-void SCR_PauseCinematic( void )
+void SCR_PauseCinematic( bool pause )
 {
 	if( cls.state != CA_CINEMATIC ) {
 		return;
 	}
 
-	cl.cin.paused = !cl.cin.paused;
-	if( cl.cin.paused ) {
+	cl.cin.pause_cnt += pause ? 1 : -1;
+	if( cl.cin.pause_cnt == 1 && pause ) {
 		cl.cin.pauseTime = SCR_CinematicTime();
+		CL_SoundModule_LockBackgroundTrack( true );
 		CL_SoundModule_Clear();
 	}
-	else {
+	else if( cl.cin.pause_cnt == 0 && !pause ) {
 		cl.cin.startTime += SCR_CinematicTime() - cl.cin.pauseTime;
 		cl.cin.pauseTime = 0;
+		CL_SoundModule_LockBackgroundTrack( false );
+	}
+	if( cl.cin.pause_cnt < 0 ) {
+		cl.cin.pause_cnt = 0;
 	}
 }
 
@@ -299,7 +327,7 @@ void SCR_PauseCinematic( void )
 */
 static char **CL_CinematicsComplete_f( const char *partial )
 {
-	return Cmd_CompleteFileList( partial, "video", NULL, qtrue );
+	return Cmd_CompleteFileList( partial, "video", NULL, true );
 }
 
 /*
@@ -307,7 +335,7 @@ static char **CL_CinematicsComplete_f( const char *partial )
 */
 void CL_PlayCinematic_f( void )
 {
-	if( Cmd_Argc() < 1 )
+	if( Cmd_Argc() < 2 )
 	{
 		Com_Printf( "Usage: %s <name> [flags]\n", Cmd_Argv( 0 ) );
 		return;
@@ -327,7 +355,8 @@ void CL_PauseCinematic_f( void )
 		return;
 	}
 
-	SCR_PauseCinematic();
+	cl.cin.paused = !cl.cin.paused;
+	SCR_PauseCinematic( cl.cin.paused );
 }
 
 /*
@@ -335,7 +364,7 @@ void CL_PauseCinematic_f( void )
 */
 void CL_InitCinematics( void )
 {
-	CIN_LoadLibrary( qtrue );
+	CIN_LoadLibrary( true );
 
 	Cmd_AddCommand( "cinematic", CL_PlayCinematic_f );
 	Cmd_AddCommand( "cinepause", CL_PauseCinematic_f );
@@ -351,5 +380,5 @@ void CL_ShutdownCinematics( void )
 	Cmd_RemoveCommand( "cinematic" );
 	Cmd_RemoveCommand( "cinepause" );
 
-	CIN_UnloadLibrary( qtrue );
+	CIN_UnloadLibrary( true );
 }

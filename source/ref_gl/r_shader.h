@@ -29,17 +29,21 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // shader types (by superlightstyle)
 typedef enum
 {
-	SHADER_TYPE_SKYBOX			= -8,
-	SHADER_TYPE_VERTEX			= -7,
-	SHADER_TYPE_VIDEO			= -6,
-	SHADER_TYPE_OPAQUE_ENV		= -5,
-	SHADER_TYPE_CORONA			= -4,
-	SHADER_TYPE_2D_RAW			= -3,
-	SHADER_TYPE_2D				= -2,
-	SHADER_TYPE_DIFFUSE			= -1,
-	SHADER_TYPE_LIGHTMAP		= 0,
-	SHADER_TYPE_DELUXEMAP		= 1
+	SHADER_TYPE_DELUXEMAP		= 0,
+	SHADER_TYPE_VERTEX			= 1,
+	SHADER_TYPE_BSP_MIN         = SHADER_TYPE_DELUXEMAP,
+	SHADER_TYPE_BSP_MAX         = SHADER_TYPE_VERTEX,
+	SHADER_TYPE_DIFFUSE			= 2,
+	SHADER_TYPE_2D				= 3,
+	SHADER_TYPE_2D_RAW			= 4,
+	SHADER_TYPE_CORONA			= 5,
+	SHADER_TYPE_OPAQUE_ENV		= 6,
+	SHADER_TYPE_VIDEO			= 7,
+	SHADER_TYPE_SKYBOX			= 8,
+	SHADER_TYPE_FOG				= 9,
 } shaderType_e;
+
+#define NUM_SHADER_TYPES_BSP (SHADER_TYPE_BSP_MAX-SHADER_TYPE_BSP_MIN+1)
 
 // shader flags
 enum
@@ -50,16 +54,17 @@ enum
 	SHADER_CULL_BACK				= 1 << 3,
 	SHADER_POLYGONOFFSET			= 1 << 4,
 	SHADER_ENTITY_MERGABLE			= 1 << 5,
-	SHADER_NO_DEPTH_TEST			= 1 << 6,
-	SHADER_AUTOSPRITE				= 1 << 7,
-	SHADER_LIGHTMAP					= 1 << 8,
-	SHADER_PORTAL					= 1 << 9,
-	SHADER_PORTAL_CAPTURE			= 1 << 10,
-	SHADER_PORTAL_CAPTURE2			= 1 << 11,
-	SHADER_NO_TEX_FILTERING			= 1 << 12,
-	SHADER_ALLDETAIL				= 1 << 13,
-	SHADER_NODRAWFLAT				= 1 << 14,
-	SHADER_SOFT_PARTICLE			= 1 << 15
+	SHADER_AUTOSPRITE				= 1 << 6,
+	SHADER_LIGHTMAP					= 1 << 7,
+	SHADER_PORTAL					= 1 << 8,
+	SHADER_PORTAL_CAPTURE			= 1 << 9,
+	SHADER_PORTAL_CAPTURE2			= 1 << 10,
+	SHADER_NO_TEX_FILTERING			= 1 << 11,
+	SHADER_ALLDETAIL				= 1 << 12,
+	SHADER_NODRAWFLAT				= 1 << 13,
+	SHADER_SOFT_PARTICLE			= 1 << 14,
+	SHADER_FORCE_OUTLINE_WORLD		= 1 << 15,
+	SHADER_STENCILTEST				= 1 << 16
 };
 
 // sorting
@@ -67,18 +72,21 @@ enum
 {
 	SHADER_SORT_NONE				= 0,
 	SHADER_SORT_PORTAL				= 1,
-	SHADER_SORT_SKY					= 2,
-	SHADER_SORT_OPAQUE				= 3,
+	SHADER_SORT_OPAQUE				= 2,
+	SHADER_SORT_SKY					= 3,
 	SHADER_SORT_DECAL				= 4,
 	SHADER_SORT_ALPHATEST			= 5,
 	SHADER_SORT_BANNER				= 6,
+	SHADER_SORT_FOG					= 7,
 	SHADER_SORT_UNDERWATER			= 8,
 	SHADER_SORT_ADDITIVE			= 9,
-	SHADER_SORT_NEAREST				= 16
+	SHADER_SORT_NEAREST				= 14,
+	SHADER_SORT_WEAPON				= 15, // optional phase: depth write but no color write
+	SHADER_SORT_WEAPON2				= 16,
 };
 
 // shaderpass flags
-#define SHADERPASS_MARK_BEGIN		0x4000 // same as GLSTATE_MARK_END
+#define SHADERPASS_MARK_BEGIN		0x10000 // same as GLSTATE_MARK_END
 enum
 {
 	SHADERPASS_LIGHTMAP				= SHADERPASS_MARK_BEGIN,
@@ -154,7 +162,8 @@ enum
 	TC_GEN_FOG,
 	TC_GEN_REFLECTION_CELSHADE,
 	TC_GEN_SVECTORS,
-	TC_GEN_PROJECTION
+	TC_GEN_PROJECTION,
+	TC_GEN_SURROUND
 };
 
 // tcmod functions
@@ -243,7 +252,10 @@ typedef struct shader_s
 	unsigned int		flags;
 	vattribmask_t		vattribs;
 	unsigned int		sort;
-	unsigned int		sortkey;
+	int					imagetags;					// usage tags of the images - currently only depend
+													// on type, but if one shader can be requesed with
+													// different tags, functions like R_TouchShader
+													// should merge the existing and the requested tags
 
 	unsigned int		numpasses;
 	shaderpass_t		*passes;
@@ -252,7 +264,7 @@ typedef struct shader_s
 	deformv_t			*deforms;
 	char				*deformsKey;
 
-	qbyte				fog_color[4];
+	uint8_t				fog_color[4];
 	float				fog_dist, fog_clearDist;
 
 	unsigned int		cin;
@@ -269,8 +281,8 @@ typedef struct shader_s
 	struct shader_s		*prev, *next;
 } shader_t;
 
-#define 	Shader_UseTextureFog(s) ( ( (s)->sort <= SHADER_SORT_ALPHATEST && \
-				( (s)->flags & ( SHADER_DEPTHWRITE|SHADER_SKY ) ) ) || (s)->fog_dist )
+#define 	Shader_UseTextureFog(s) ( ( (s)->sort <= SHADER_SORT_FOG && \
+				( (s)->flags & SHADER_DEPTHWRITE ) ) || (s)->fog_dist || (s)->type == SHADER_TYPE_FOG )
 
 #define		Shader_ReadDepth(s) ((s)->flags & SHADER_SOFT_PARTICLE)
 
@@ -279,25 +291,32 @@ void		R_ShutdownShaders( void );
 
 void		R_UploadCinematicShader( const shader_t *shader );
 
-void		R_PrintShaderList( const char *mask, qboolean (*filter)( const char *filter, const char *value) );
+void		R_PrintShaderList( const char *mask, bool (*filter)( const char *filter, const char *value) );
 void		R_PrintShaderCache( const char *name );
 
 shader_t	*R_ShaderById( unsigned int id );
 
-shader_t	*R_LoadShader( const char *name, shaderType_e type, qboolean forceDefault );
+shader_t	*R_LoadShader( const char *name, shaderType_e type, bool forceDefault );
 
 shader_t	*R_RegisterShader( const char *name, shaderType_e type );
 shader_t	*R_RegisterPic( const char *name );
-shader_t	*R_RegisterRawPic( const char *name, int width, int height, qbyte *data );
-shader_t	*R_RegisterLevelshot( const char *name, shader_t *defaultShader, qboolean *matchesDefault );
+shader_t	*R_RegisterRawPic( const char *name, int width, int height, uint8_t *data, int samples );
+shader_t	*R_RegisterRawAlphaMask( const char *name, int width, int height, uint8_t *data );
+shader_t	*R_RegisterLevelshot( const char *name, shader_t *defaultShader, bool *matchesDefault );
 shader_t	*R_RegisterSkin( const char *name );
 shader_t	*R_RegisterVideo( const char *name );
 
+unsigned	R_PackShaderOrder( const shader_t *shader );
+
 void		R_TouchShader( shader_t *s );
+void		R_TouchShadersByName( const char *name );
+void		R_FreeUnusedShadersByType( const shaderType_e *types, unsigned int numTypes );
 void		R_FreeUnusedShaders( void );
 
 void		R_RemapShader( const char *from, const char *to, int timeOffset );
 
 void		R_GetShaderDimensions( const shader_t *shader, int *width, int *height );
+
+void		R_ReplaceRawSubPic( shader_t *shader, int x, int y, int width, int height, uint8_t *data );
 
 #endif // R_SHADER_H

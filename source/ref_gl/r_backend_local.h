@@ -20,19 +20,17 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef R_BACKEND_LOCAL_H
 #define R_BACKEND_LOCAL_H
 
-#define MAX_STREAM_VBO_VERTS		32768
+#define MAX_STREAM_VBO_VERTS		8192
 #define MAX_STREAM_VBO_ELEMENTS		MAX_STREAM_VBO_VERTS*6
 #define MAX_STREAM_VBO_TRIANGLES	MAX_STREAM_VBO_ELEMENTS/3
-#define MAX_STREAM_VBO_INSTANCES	8192
 
-#define MAX_BATCH_VERTS				8192
-#define MAX_BATCH_ELEMENTS			MAX_BATCH_VERTS*6
-#define MAX_BATCH_TRIANGLES			MAX_BATCH_ELEMENTS/3
+#define MAX_DYNAMIC_DRAWS			2048
 
 typedef struct r_backend_stats_s
 {
 	unsigned int numVerts, numElems;
-	unsigned int c_totalVerts, c_totalTris, c_totalStaticVerts, c_totalStaticTris, c_totalDraws;
+	unsigned int c_totalVerts, c_totalTris, c_totalStaticVerts, c_totalStaticTris, c_totalDraws, c_totalBinds;
+	unsigned int c_totalPrograms;
 } rbStats_t;
 
 typedef struct
@@ -41,6 +39,37 @@ typedef struct
 	dualquat_t dualQuats[MAX_GLSL_UNIFORM_BONES];
 	unsigned int maxWeights;
 } rbBonesData_t;
+
+typedef struct
+{
+	unsigned int firstVert;
+	unsigned int numVerts;
+	unsigned int firstElem;
+	unsigned int numElems;
+	unsigned int numInstances;
+} rbDrawElements_t;
+
+typedef struct
+{
+	mesh_vbo_t *vbo;
+	uint8_t *vertexData;
+	rbDrawElements_t drawElements;
+} rbDynamicStream_t;
+
+typedef struct
+{
+	const entity_t *entity;
+	const shader_t *shader;
+	const mfog_t *fog;
+	const portalSurface_t *portalSurface;
+	unsigned int shadowBits;
+	vattribmask_t vattribs; // based on the fields above - cached to avoid rebinding
+	int streamId;
+	int primitive;
+	vec2_t offset;
+	int scissor[4];
+	rbDrawElements_t drawElements;
+} rbDynamicDraw_t;
 
 typedef struct r_backend_s
 {
@@ -54,30 +83,33 @@ typedef struct r_backend_s
 		int 			currentElemArrayVBO;
 
 		int				faceCull;
-		qboolean		frontFace;
+		bool			frontFace;
 
 		int				viewport[4];
 		int				scissor[4];
+		bool			scissorChanged;
 
 		unsigned int	vertexAttribEnabled;
+		vattribmask_t	lastVAttribs, lastHalfFloatVAttribs;
 
 		int				fbWidth, fbHeight;
 
-		float			polygonOffset[2];
+		float			depthmin, depthmax;
 
-		float			depthmin, depthmax, depthoffset;
+		bool		depthoffset;
 	} gl;
 
 	unsigned int time;
 
 	rbStats_t stats;
 
+	mat4_t cameraMatrix;
 	mat4_t objectMatrix;
 	mat4_t modelviewMatrix;
 	mat4_t projectionMatrix;
 	mat4_t modelviewProjectionMatrix;
 	float zNear, zFar;
-	
+
 	int renderFlags;
 
 	vec3_t cameraOrigin;
@@ -88,31 +120,31 @@ typedef struct r_backend_s
 	const mesh_vbo_t *currentMeshVBO;
 	rbBonesData_t bonesData;
 	const portalSurface_t *currentPortalSurface;
+	
+	// glUseProgram cache
 	int	currentProgram;
 	int currentProgramObject;
 
-	mesh_t batchMesh;
-	vboSlice_t batches[RB_VBO_NUM_STREAMS];
-	vboSlice_t streamOffset[RB_VBO_NUM_STREAMS];
-	mesh_vbo_t *streamVBOs[RB_VBO_NUM_STREAMS];
+	// RP_RegisterProgram cache
+	int	currentRegProgram;
+	int currentRegProgramType;
+	r_glslfeat_t currentRegProgramFeatures;
+
+	rbDynamicStream_t dynamicStreams[RB_VBO_NUM_STREAMS];
+	rbDynamicDraw_t dynamicDraws[MAX_DYNAMIC_DRAWS];
+	int numDynamicDraws;
 
 	instancePoint_t *drawInstances;
 	int maxDrawInstances;
 
-	struct {
-		unsigned int firstVert;
-		unsigned int numVerts;
-		unsigned int firstElem;
-		unsigned int numElems;
-		unsigned int numInstances;
-	} drawElements;
+	rbDrawElements_t drawElements;
+	rbDrawElements_t drawShadowElements;
 
 	vattribmask_t currentVAttribs;
 
 	int primitive;
 	int currentVBOId;
 	mesh_vbo_t *currentVBO;
-	vboSlice_t *currentBatch;
 
 	unsigned int currentDlightBits;
 	unsigned int currentShadowBits;
@@ -122,28 +154,32 @@ typedef struct r_backend_s
 
 	// shader state
 	const shader_t *currentShader;
-	float currentShaderTime;
+	double currentShaderTime;
 	int currentShaderState;
 	int shaderStateORmask, shaderStateANDmask;
-	qboolean dirtyUniformState;
-	qboolean doneDepthPass;
+	bool dirtyUniformState;
+	bool doneDepthPass;
 	int donePassesTotal;
 
-	qboolean triangleOutlines;
+	bool triangleOutlines;
 
 	const superLightStyle_t *superLightStyle;
 
-	qbyte entityColor[4];
-	qbyte entityOutlineColor[4];
+	uint8_t entityColor[4];
+	uint8_t entityOutlineColor[4];
 	entity_t nullEnt;
 
 	const mfog_t *fog, *texFog, *colorFog;
 
-	qboolean greyscale;
-	qboolean alphaHack;
+	bool greyscale;
+	bool alphaHack;
+	bool noDepthTest;
+	bool noColorWrite;
+	bool depthEqual;
 	float hackedAlpha;
 
 	float minLight;
+	bool noWorldLight;
 } rbackend_t;
 
 extern rbackend_t rb;
@@ -152,7 +188,7 @@ extern rbackend_t rb;
 #define RB_Alloc(size) R_MallocExt( rb.mempool, size, 16, 1 )
 #define RB_Free(data) R_Free(data)
 
-void RB_DrawElementsReal( void );
+void RB_DrawElementsReal( rbDrawElements_t *de );
 #define RB_IsAlphaBlending(blendsrc,blenddst) \
 	( (blendsrc) == GLSTATE_SRCBLEND_SRC_ALPHA || (blenddst) == GLSTATE_DSTBLEND_SRC_ALPHA ) || \
 	( (blendsrc) == GLSTATE_SRCBLEND_ONE_MINUS_SRC_ALPHA || (blenddst) == GLSTATE_DSTBLEND_ONE_MINUS_SRC_ALPHA )
@@ -161,8 +197,11 @@ void RB_DrawElementsReal( void );
 void RB_InitShading( void );
 void RB_DrawOutlinedElements( void );
 void RB_DrawShadedElements( void );
+int RB_RegisterProgram( int type, const char *name, const char *deformsKey, 
+	const deformv_t *deforms, int numDeforms, r_glslfeat_t features );
 int RB_BindProgram( int program );
+void RB_BindTexture( int tmu, const image_t *tex );
 void RB_SetInstanceData( int numInstances, instancePoint_t *instances );
-qboolean RB_ScissorForBounds( vec3_t bbox[8], int *x, int *y, int *w, int *h );
+bool RB_ScissorForBounds( vec3_t bbox[8], int *x, int *y, int *w, int *h );
 
 #endif // R_BACKEND_LOCAL_H

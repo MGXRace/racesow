@@ -103,32 +103,10 @@ static void CG_ViewWeapon_AddAngleEffects( vec3_t angles )
 				angles[ROLL] += 0.001 * delta;
 			angles[i] += 0.002 * delta;
 		}
-	}
-
-	// gun angles from kicks
-	if( !cg_damage_kick->integer )
+		
+		// gun angles from kicks
 		CG_AddKickAngles( angles );
-}
-
-/*
-* CG_ViewWeapon_StartFallKickEff
-*/
-void CG_ViewWeapon_StartFallKickEff( int parms )
-{
-	int bouncetime;
-
-	if( !cg_gun->integer || !cg_gunbob->integer )
-		return;
-
-	if( cg.weapon.fallEff_Time > cg.time )
-		cg.weapon.fallEff_rebTime = 0;
-
-	bouncetime = ( ( parms + 5 )*10 )+150;
-	cg.weapon.fallEff_Time = cg.time + bouncetime;
-	if( cg.weapon.fallEff_rebTime )
-		cg.weapon.fallEff_rebTime = cg.time - ( ( cg.time - cg.weapon.fallEff_rebTime ) * 0.5 );
-	else
-		cg.weapon.fallEff_rebTime = cg.time;
+	}	
 }
 
 /*
@@ -159,7 +137,10 @@ static int CG_ViewWeapon_baseanimFromWeaponState( int weaponState )
 		/* fall through. Not used */
 	default:
 	case WEAPON_STATE_READY:
+		if( cg_gunbob->integer )
 		anim = WEAPMODEL_STANDBY;
+		else
+		anim = WEAPMODEL_NOANIM;
 		break;
 	}
 
@@ -227,7 +208,7 @@ void CG_ViewWeapon_RefreshAnimation( cg_viewweapon_t *viewweapon )
 
 		framefrac = GS_FrameForTime( &curframe, cg.time, viewweapon->eventAnimStartTime, weaponInfo->frametime[viewweapon->eventAnim],
 			weaponInfo->firstframe[viewweapon->eventAnim], weaponInfo->lastframe[viewweapon->eventAnim],
-			weaponInfo->loopingframes[viewweapon->eventAnim], qfalse );
+			weaponInfo->loopingframes[viewweapon->eventAnim], false );
 
 		if( curframe >= 0 )
 			goto setupframe;
@@ -240,7 +221,7 @@ void CG_ViewWeapon_RefreshAnimation( cg_viewweapon_t *viewweapon )
 	// find new frame for the current animation
 	framefrac = GS_FrameForTime( &curframe, cg.time, viewweapon->baseAnimStartTime, weaponInfo->frametime[viewweapon->baseAnim],
 		weaponInfo->firstframe[viewweapon->baseAnim], weaponInfo->lastframe[viewweapon->baseAnim],
-		weaponInfo->loopingframes[viewweapon->baseAnim], qtrue );
+		weaponInfo->loopingframes[viewweapon->baseAnim], true );
 
 	if( curframe < 0 )
 		CG_Error( "CG_ViewWeapon_UpdateAnimation(2): Base Animation without a defined loop.\n" );
@@ -284,7 +265,7 @@ void CG_CalcViewWeapon( cg_viewweapon_t *viewweapon )
 	weaponinfo_t *weaponInfo;
 	vec3_t gunAngles;
 	vec3_t gunOffset;
-	float fallfrac, fallkick;
+	float handOffset;
 
 	CG_ViewWeapon_RefreshAnimation( viewweapon );
 
@@ -300,6 +281,11 @@ void CG_CalcViewWeapon( cg_viewweapon_t *viewweapon )
 	viewweapon->ent.rtype = RT_MODEL;
 	Vector4Set( viewweapon->ent.shaderRGBA, 255, 255, 255, 255 );
 
+	if( cg_gun_alpha->value < 1.0f ) {
+		viewweapon->ent.renderfx |= RF_ALPHAHACK;
+		viewweapon->ent.shaderRGBA[3] = bound( 0, cg_gun_alpha->value, 1 ) * 255.0f;
+	}
+
 	// calculate the entity position
 #if 1
 	VectorCopy( cg.view.origin, viewweapon->ent.origin );
@@ -312,36 +298,31 @@ void CG_CalcViewWeapon( cg_viewweapon_t *viewweapon )
 	gunOffset[FORWARD] = cg_gunz->value + weaponInfo->handpositionOrigin[FORWARD];
 	gunOffset[RIGHT] = cg_gunx->value + weaponInfo->handpositionOrigin[RIGHT];
 	gunOffset[UP] = cg_guny->value + weaponInfo->handpositionOrigin[UP];
+	
+	// scale forward gun offset depending on fov and aspect ratio
+	gunOffset[FORWARD] = gunOffset[FORWARD] * cgs.vidWidth / ( cgs.vidHeight * cg.view.fracDistFOV ) ;
 
 	// hand cvar offset
+	handOffset = 0.0f;
 	if( cgs.demoPlaying )
 	{
-		if( hand->integer == 0 )
-			gunOffset[RIGHT] += cg_handOffset->value;
-		else if( hand->integer == 1 )
-			gunOffset[RIGHT] -= cg_handOffset->value;
+		if( cg_hand->integer == 0 )
+			handOffset = cg_handOffset->value;
+		else if( cg_hand->integer == 1 )
+			handOffset = -cg_handOffset->value;
 	}
 	else
 	{
 		if( cgs.clientInfo[cg.view.POVent-1].hand == 0 )
-			gunOffset[RIGHT] += cg_handOffset->value;
+			handOffset = cg_handOffset->value;
 		else if( cgs.clientInfo[cg.view.POVent-1].hand == 1 )
-			gunOffset[RIGHT] -= cg_handOffset->value;
+			handOffset = -cg_handOffset->value;
 	}
 
-	// fallkick offset
-	if( cg.weapon.fallEff_Time > cg.time )
-	{
-		fallfrac = (float)( cg.time - cg.weapon.fallEff_rebTime ) / (float)( cg.weapon.fallEff_Time - cg.weapon.fallEff_rebTime );
-		fallkick = sin( DEG2RAD( fallfrac*180 ) ) * ( ( cg.weapon.fallEff_Time - cg.weapon.fallEff_rebTime ) * 0.01f );
+	gunOffset[RIGHT] += handOffset;
+	if( cg_gun->integer && cg_gunbob->integer ) {
+		gunOffset[UP] += CG_ViewSmoothFallKick();
 	}
-	else
-	{
-		cg.weapon.fallEff_Time = cg.weapon.fallEff_rebTime = 0;
-		fallkick = fallfrac = 0;
-	}
-
-	gunOffset[UP] -= fallkick;
 
 	// apply the offsets
 #if 1
@@ -362,8 +343,13 @@ void CG_CalcViewWeapon( cg_viewweapon_t *viewweapon )
 
 	if( cg_gun_fov->integer && !cg.predictedPlayerState.pmove.stats[PM_STAT_ZOOMTIME] )
 	{
-		float gun_fov = bound( 20, cg_gun_fov->value, 160 );
-		float fracWeapFOV = ( 1.0f / cg.view.fracDistFOV ) * tan( gun_fov * ( M_PI/180 ) * 0.5f );
+		float fracWeapFOV;
+		float gun_fov_x = bound( 20, cg_gun_fov->value, 160 );
+		float gun_fov_y = CalcFov( gun_fov_x, cg.view.refdef.width, cg.view.refdef.height );
+
+		AdjustFov( &gun_fov_x, &gun_fov_y, cgs.vidWidth, cgs.vidHeight, false );
+		fracWeapFOV = tan( gun_fov_x * ( M_PI/180 ) * 0.5f ) / cg.view.fracDistFOV;
+
 		VectorScale( &viewweapon->ent.axis[AXIS_FORWARD], fracWeapFOV, &viewweapon->ent.axis[AXIS_FORWARD] );
 	}
 
@@ -389,7 +375,7 @@ void CG_AddViewWeapon( cg_viewweapon_t *viewweapon )
 	VectorCopy( viewweapon->ent.origin, viewweapon->ent.origin2 );
 	VectorCopy( cg_entities[viewweapon->POVnum].ent.lightingOrigin, viewweapon->ent.lightingOrigin );
 
-	CG_AddColoredOutLineEffect( &viewweapon->ent, cg.effects, 0, 0, 0, 255 );
+	CG_AddColoredOutLineEffect( &viewweapon->ent, cg.effects, 0, 0, 0, viewweapon->ent.shaderRGBA[3] );
 	CG_AddEntityToScene( &viewweapon->ent );
 	CG_AddShellEffects( &viewweapon->ent, cg.effects );
 

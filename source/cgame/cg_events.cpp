@@ -73,7 +73,7 @@ static void CG_Event_WeaponBeam( vec3_t origin, vec3_t dir, int ownerNum, int we
 		if( weapondef->weapon_id == WEAP_ELECTROBOLT )
 			CG_BoltExplosionMode( trace.endpos, trace.plane.normal, FIRE_MODE_STRONG, trace.surfFlags );
 		else if( weapondef->weapon_id == WEAP_INSTAGUN )
-			CG_InstaExplosionMode( trace.endpos, trace.plane.normal, FIRE_MODE_STRONG, trace.surfFlags );
+			CG_InstaExplosionMode( trace.endpos, trace.plane.normal, FIRE_MODE_STRONG, trace.surfFlags, ownerNum );
 	}
 
 	// when it's predicted we have to delay the drawing until the view weapon is calculated
@@ -103,19 +103,32 @@ void CG_WeaponBeamEffect( centity_t *cent )
 
 static centity_t *laserOwner = NULL;
 
+static vec_t *_LaserColor( vec4_t color )
+{
+	Vector4Set( color, 1, 1, 1, 1 );
+	if( cg_teamColoredBeams->integer && ( laserOwner != NULL ) && ( laserOwner->current.team == TEAM_ALPHA || laserOwner->current.team == TEAM_BETA ) ) {
+		CG_TeamColor( laserOwner->current.team, color );
+	}
+	return color;
+}
+
 static void _LaserImpact( trace_t *trace, vec3_t dir )
 {
 	if( !trace || trace->ent < 0 )
 		return;
 
-	if( cg_particles->integer && laserOwner )
+	if( laserOwner )
 	{
 #define TRAILTIME ( (int)( 1000.0f / 20.0f ) ) // density as quantity per second
 
 		if( laserOwner->localEffects[LOCALEFFECT_LASERBEAM_SMOKE_TRAIL] + TRAILTIME < cg.time )
 		{
 			laserOwner->localEffects[LOCALEFFECT_LASERBEAM_SMOKE_TRAIL] = cg.time;
-			CG_ImpactSmokePuff( trace->endpos, trace->plane.normal, 3, 1.0f, 8, 12 );
+			
+			CG_HighVelImpactPuffParticles( trace->endpos, trace->plane.normal, 8, 0.5f, 1.0f, 0.8f, 0.2f, 1.0f, NULL);
+
+			trap_S_StartFixedSound( CG_MediaSfx( cgs.media.sfxLasergunHit[rand()%3] ), trace->endpos, CHAN_AUTO,
+				cg_volume_effects->value, ATTN_STATIC );
 		}
 #undef TRAILTIME
 	}
@@ -123,9 +136,11 @@ static void _LaserImpact( trace_t *trace, vec3_t dir )
 	// it's a brush model
 	if( trace->ent == 0 || !( cg_entities[trace->ent].current.effects & EF_TAKEDAMAGE ) )
 	{
-		CG_AddLightToScene( trace->endpos, 100, 0.75f, 0.75f, 0.375f );
+		vec4_t color;
 
-		// TODO: add impact model
+		CG_LaserGunImpact( trace->endpos, trace->plane.normal, 15.0f, dir, _LaserColor( color ) );
+
+		CG_AddLightToScene( trace->endpos, 100, 0.75f, 0.75f, 0.375f );
 		return;
 	}
 
@@ -145,14 +160,25 @@ void CG_LaserBeamEffect( centity_t *cent )
 	int i, j;
 
 	if( cent->localEffects[LOCALEFFECT_LASERBEAM] <= cg.time )
+	{
+		if( cent->localEffects[LOCALEFFECT_LASERBEAM] )
+		{
+			if( !cent->laserCurved )
+				sound = CG_MediaSfx( cgs.media.sfxLasergunStrongStop );
+			else
+				sound = CG_MediaSfx( cgs.media.sfxLasergunWeakStop );
+
+			if( ISVIEWERENTITY( cent->current.number ) )
+				trap_S_StartGlobalSound( sound, CHAN_AUTO, cg_volume_effects->value );
+			else
+				trap_S_StartRelativeSound( sound, cent->current.number, CHAN_AUTO, cg_volume_effects->value, ATTN_NORM );
+		}
+		cent->localEffects[LOCALEFFECT_LASERBEAM] = 0;
 		return;
+	}
 
 	laserOwner = cent;
-
-	if( cg_teamColoredBeams->integer && ( cent->current.team == TEAM_ALPHA || cent->current.team == TEAM_BETA ) )
-		CG_TeamColor( cent->current.team, color );
-	else
-		Vector4Set( color, 1, 1, 1, 1 );
+	_LaserColor( color );
 
 	// interpolate the positions
 
@@ -258,7 +284,7 @@ void CG_LaserBeamEffect( centity_t *cent )
 	if( cg_weaponFlashes->integer )
 		cg_entPModels[cent->current.number].flash_time = cg.time + CG_GetWeaponInfo( WEAP_LASERGUN )->flashTime;
 
-	float fvol = RS_RaceGhostsVolume( ISVIEWERENTITY( cent->current.number ), 1.0f ); // racesow - raceghostsvolume
+	float fvol = RS_RaceGhostsVolume( ISVIEWERENTITY( cent->current.number ), cg_volume_effects->value ); // racesow - raceghostsvolume
 	if( sound )
 	{
 		if( ISVIEWERENTITY( cent->current.number ) )
@@ -307,6 +333,10 @@ void CG_Event_LaserBeam( int entNum, int weapon, int fireMode )
 			VectorMA( cent->laserOrigin, GS_GetWeaponDef( WEAP_LASERGUN )->firedef.timeout, dir, cent->laserPoint );
 		}
 	}
+
+	// it appears that 64ms is that maximum allowed time interval between prediction events on localhost
+	if( timeout < 65 )
+		timeout = 65;
 
 	VectorCopy( cent->laserOrigin, cent->laserOriginOld );
 	VectorCopy( cent->laserPoint, cent->laserPointOld );
@@ -429,7 +459,7 @@ static void CG_FireWeaponEvent( int entNum, int weapon, int fireMode )
 	}
 
 	// add animation to the view weapon model
-	if( ISVIEWERENTITY( entNum ) && !cg.view.thirdperson )
+	if( ISVIEWERENTITY( entNum ) && !cg.view.thirdperson && cg_gunbob->integer )
 		CG_ViewWeapon_StartAnimationEvent( fireMode == FIRE_MODE_STRONG ? WEAPMODEL_ATTACK_STRONG : WEAPMODEL_ATTACK_WEAK );
 }
 
@@ -575,7 +605,7 @@ static void CG_BulletImpact( trace_t *tr )
 		CG_ParticleEffect( tr->endpos, tr->plane.normal, 0.30f, 0.30f, 0.25f, 20 );
 
 	// impact sound
-	trap_S_StartFixedSound( CG_MediaSfx( cgs.media.sfxRic[rand()&2] ), tr->endpos, CHAN_AUTO, cg_volume_effects->value, ATTN_STATIC );
+	trap_S_StartFixedSound( CG_MediaSfx( cgs.media.sfxRic[rand()%2] ), tr->endpos, CHAN_AUTO, cg_volume_effects->value, ATTN_STATIC );
 }
 
 /*
@@ -612,8 +642,8 @@ static void CG_BulletImpact( trace_t *tr )
 	CG_BulletExplosion( tr->endpos, NULL, tr );
 
 	// throw particles on dust
-	if( tr->surfFlags & SURF_DUST )
-		CG_ParticleEffect( tr->endpos, tr->plane.normal, 0.30f, 0.30f, 0.25f, 20 );
+	if( cg_particles->integer && (tr->surfFlags & SURF_DUST) )
+		CG_ParticleEffect( tr->endpos, tr->plane.normal, 0.30f, 0.30f, 0.25f, 1 );
 
 	// spawn decal
 	CG_SpawnDecal( tr->endpos, tr->plane.normal, random()*360, 8, 1, 1, 1, 1, 8, 1, false, CG_MediaShader( cgs.media.shaderBulletMark ) );
@@ -655,8 +685,9 @@ static void CG_Event_FireMachinegun( vec3_t origin, vec3_t dir, int weapon, int 
 			}
 			else
 			{
+				CG_ImpactPuffParticles( trace.endpos, trace.plane.normal, 1, 0.7, 1, 0.7, 0.0, 1.0, NULL );
 				float fvol = RS_RaceGhostsVolume( ISVIEWERENTITY( owner ), cg_volume_effects->value );  // racesow - raceghostsvolume
-				trap_S_StartFixedSound( CG_MediaSfx( cgs.media.sfxRic[ rand()&2 ] ), trace.endpos, CHAN_AUTO, fvol, ATTN_STATIC );
+				trap_S_StartFixedSound( CG_MediaSfx( cgs.media.sfxRic[ rand()%2 ] ), trace.endpos, CHAN_AUTO, fvol, ATTN_STATIC );
 			}
 		}
 	}
@@ -666,21 +697,24 @@ static void CG_Event_FireMachinegun( vec3_t origin, vec3_t dir, int weapon, int 
 }
 
 /*
-* CG_Fire_SpiralPattern
+* CG_Fire_SunflowerPattern
 */
-static void CG_Fire_SpiralPattern( vec3_t start, vec3_t dir, int *seed, int ignore, int count, int spread, int range, void ( *impact )(trace_t *tr) )
+static void CG_Fire_SunflowerPattern( vec3_t start, vec3_t dir, int *seed, int ignore, int count, 
+	int hspread, int vspread, int range, void ( *impact )(trace_t *tr) )
 {
 	int i;
 	float r;
 	float u;
+	float fi;
 	trace_t trace, *water_trace;
 
 	assert( seed );
 
 	for( i = 0; i < count; i++ )
 	{
-		r = cos( (float)*seed + i ) * spread * i;
-		u = sin( (float)*seed + i ) * spread * i;
+		fi = i * 2.4; //magic value creating Fibonacci numbers
+		r = cos( (float)*seed + fi ) * hspread * sqrt(fi);
+		u = sin( (float)*seed + fi ) * vspread * sqrt(fi); 
 
 		water_trace = GS_TraceBullet( &trace, start, dir, r, u, range, ignore, 0 );
 		if( water_trace )
@@ -698,6 +732,7 @@ static void CG_Fire_SpiralPattern( vec3_t start, vec3_t dir, int *seed, int igno
 	}
 }
 
+#if 0
 /*
 * CG_Fire_RandomPattern
 */
@@ -731,6 +766,7 @@ static void CG_Fire_RandomPattern( vec3_t start, vec3_t dir, int *seed, int igno
 			CG_LeadBubbleTrail( &trace, water_trace->endpos );
 	}
 }
+#endif
 
 /*
 * CG_Event_FireRiotgun
@@ -743,7 +779,7 @@ static void CG_Event_FireRiotgun( vec3_t origin, vec3_t dir, int weapon, int fir
 	firedef_t *firedef = ( firemode ) ? &weapondef->firedef : &weapondef->firedef_weak;
 	float fvol = RS_RaceGhostsVolume( ISVIEWERENTITY( owner ), cg_volume_effects->value );  // racesow - raceghostsvolume
 
-	CG_Fire_RandomPattern( origin, dir, &seed, owner, firedef->projectile_count, 
+	CG_Fire_SunflowerPattern( origin, dir, &seed, owner, firedef->projectile_count, 
 		firedef->spread, firedef->v_spread, firedef->timeout, CG_BulletImpact );
 
 	// spawn a single sound at the impact
@@ -853,8 +889,14 @@ static void CG_StartVoiceTokenEffect( int entNum, int type, int vsay )
 
 	if( !cg_voiceChats->integer || cg_volume_voicechats->value <= 0.0f )
 		return;
+	if( vsay < 0 || vsay >= VSAY_TOTAL )
+		return;
 
 	cent = &cg_entities[entNum];
+
+	// ignore repeated/flooded events
+	if( cent->localEffects[LOCALEFFECT_VSAY_HEADICON_TIMEOUT] > cg.time )
+		return;
 
 	// set the icon effect
 	cent->localEffects[LOCALEFFECT_VSAY_HEADICON] = vsay;
@@ -862,6 +904,8 @@ static void CG_StartVoiceTokenEffect( int entNum, int type, int vsay )
 
 	// play the sound
 	sound = cgs.media.sfxVSaySounds[vsay];
+	if( !sound )
+		return;
 
 	// played as it was made by the 1st person player
 	trap_S_StartGlobalSound( CG_MediaSfx( sound ), CHAN_AUTO, cg_volume_voicechats->value );
@@ -886,9 +930,9 @@ void CG_Event_Fall( entity_state_t *state, int parm )
 			return;
 		}
 
-		CG_ViewWeapon_StartFallKickEff( parm );
+		CG_StartFallKickEffect( ( parm + 5 ) * 10 );
 
-		if( parm > 0 )
+		if( parm >= 15 )
 			CG_DamageIndicatorAdd( parm, tv( 0, 0, 1 ) );
 	}
 
@@ -1301,19 +1345,17 @@ void CG_EntityEvent( entity_state_t *ent, int ev, int parm, bool predicted )
 		break;
 
 	case EV_FIRE_RIOTGUN:
-	case EV_FIRE_BULLET:
-		{
-			// check the owner for predicted case
-			if( ISVIEWERENTITY( ent->ownerNum ) && ( ev < PREDICTABLE_EVENTS_MAX ) && ( predicted != cg.view.playerPrediction ) )
-				return;
+		// check the owner for predicted case
+		if( ISVIEWERENTITY( ent->ownerNum ) && ( ev < PREDICTABLE_EVENTS_MAX ) && ( predicted != cg.view.playerPrediction ) )
+			return;
+		CG_Event_FireRiotgun( ent->origin, ent->origin2, ent->weapon, ent->firemode, parm, ent->ownerNum );
+		break;
 
-			if( ev == EV_FIRE_RIOTGUN )
-				CG_Event_FireRiotgun( ent->origin, ent->origin2, ( ent->weapon & ~EV_INVERSE ),
-					( ent->weapon & EV_INVERSE ), parm, ent->ownerNum );
-			else
-				CG_Event_FireMachinegun( ent->origin, ent->origin2, ( ent->weapon & ~EV_INVERSE ), 
-					( ent->weapon & EV_INVERSE ), parm, ent->ownerNum );
-		}
+	case EV_FIRE_BULLET:
+		// check the owner for predicted case
+		if( ISVIEWERENTITY( ent->ownerNum ) && ( ev < PREDICTABLE_EVENTS_MAX ) && ( predicted != cg.view.playerPrediction ) )
+			return;
+		CG_Event_FireMachinegun( ent->origin, ent->origin2, ent->weapon, ent->firemode, parm, ent->ownerNum );
 		break;
 
 	case EV_NOAMMOCLICK:
@@ -1412,7 +1454,7 @@ void CG_EntityEvent( entity_state_t *ent, int ev, int parm, bool predicted )
 		ByteToDir( parm, dir );
 		CG_BulletExplosion( ent->origin, dir, NULL );
 		CG_ParticleEffect( ent->origin, dir, 1.0f, 0.67f, 0.0f, 6 );
-		trap_S_StartFixedSound( CG_MediaSfx( cgs.media.sfxRic[rand()&2] ), ent->origin, CHAN_AUTO,
+		trap_S_StartFixedSound( CG_MediaSfx( cgs.media.sfxRic[rand()%2] ), ent->origin, CHAN_AUTO,
 			fvol, ATTN_STATIC );
 		break;
 
@@ -1434,7 +1476,7 @@ void CG_EntityEvent( entity_state_t *ent, int ev, int parm, bool predicted )
 		break;
 
 	case EV_SPOG:
-		CG_SmallPileOfGibs( ent->origin, parm, ent->origin2 );
+		CG_SmallPileOfGibs( ent->origin, parm, ent->origin2, ent->team );
 		break;
 
 	case EV_ITEM_RESPAWN:
@@ -1450,7 +1492,25 @@ void CG_EntityEvent( entity_state_t *ent, int ev, int parm, bool predicted )
 			CG_ResetColorBlend();
 			CG_ResetDamageIndicator();
 		}
-		// fallthrough
+
+		if( ISVIEWERENTITY( ent->ownerNum ) )
+		{
+			trap_S_StartGlobalSound( CG_MediaSfx( cgs.media.sfxPlayerRespawn ), CHAN_AUTO,
+				cg_volume_effects->value );
+		}
+		else
+		{
+			trap_S_StartFixedSound( CG_MediaSfx( cgs.media.sfxPlayerRespawn ), ent->origin, CHAN_AUTO,
+				cg_volume_effects->value, ATTN_NORM );
+		}
+
+		if( ent->ownerNum && ent->ownerNum < gs.maxclients + 1 )
+		{
+			cg_entities[ent->ownerNum].localEffects[LOCALEFFECT_EV_PLAYER_TELEPORT_IN] = cg.time;
+			VectorCopy( ent->origin, cg_entities[ent->ownerNum].teleportedTo );
+		}
+		break;
+
 	case EV_PLAYER_TELEPORT_IN:
 		if( ISVIEWERENTITY( ent->ownerNum ) )
 		{
@@ -1464,7 +1524,10 @@ void CG_EntityEvent( entity_state_t *ent, int ev, int parm, bool predicted )
 		}
 
 		if( ent->ownerNum && ent->ownerNum < gs.maxclients + 1 )
+		{
 			cg_entities[ent->ownerNum].localEffects[LOCALEFFECT_EV_PLAYER_TELEPORT_IN] = cg.time;
+			VectorCopy( ent->origin, cg_entities[ent->ownerNum].teleportedTo );
+		}
 		break;
 
 	case EV_PLAYER_TELEPORT_OUT:
@@ -1478,6 +1541,7 @@ void CG_EntityEvent( entity_state_t *ent, int ev, int parm, bool predicted )
 			trap_S_StartFixedSound( CG_MediaSfx( cgs.media.sfxTeleportOut ), ent->origin, CHAN_AUTO,
 				fvol, ATTN_NORM );
 		}
+
 		if( ent->ownerNum && ent->ownerNum < gs.maxclients + 1 )
 		{
 			cg_entities[ent->ownerNum].localEffects[LOCALEFFECT_EV_PLAYER_TELEPORT_OUT] = cg.time;
@@ -1507,17 +1571,19 @@ void CG_EntityEvent( entity_state_t *ent, int ev, int parm, bool predicted )
 
 	case EV_INSTA_EXPLOSION:
 		ByteToDir( parm, dir );
-		CG_InstaExplosionMode( ent->origin, dir, ent->firemode, 0 );
+		CG_InstaExplosionMode( ent->origin, dir, ent->firemode, 0, ent->ownerNum );
 		break;
 
 	case EV_GRENADE_EXPLOSION:
 		if( parm )
-		{    // we have a direction
+		{
+			// we have a direction
 			ByteToDir( parm, dir );
 			CG_GrenadeExplosionMode( ent->origin, dir, ent->firemode, (float)ent->weapon*8.0f );
 		}
 		else
-		{ // no direction
+		{
+			// no direction
 			CG_GrenadeExplosionMode( ent->origin, vec3_origin, ent->firemode, (float)ent->weapon*8.0f );
 		}
 

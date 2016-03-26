@@ -34,6 +34,241 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 /*
 =========================================================
 
+LIBS LOADING
+
+=========================================================
+*/
+
+#define qjpeg_create_compress(cinfo) \
+	qjpeg_CreateCompress((cinfo), JPEG_LIB_VERSION, (size_t) sizeof(struct jpeg_compress_struct))
+#define qjpeg_create_decompress(cinfo) \
+	qjpeg_CreateDecompress((cinfo), JPEG_LIB_VERSION, (size_t) sizeof(struct jpeg_decompress_struct))
+
+void *jpegLibrary = NULL;
+
+#ifdef LIBJPEG_RUNTIME
+
+static boolean (*qjpeg_resync_to_restart)(j_decompress_ptr, int);
+static void (*qjpeg_CreateCompress)(j_compress_ptr, int, size_t);
+static void (*qjpeg_CreateDecompress)(j_decompress_ptr, int, size_t);
+static int (*qjpeg_read_header)(j_decompress_ptr, boolean);
+static boolean (*qjpeg_start_decompress)(j_decompress_ptr cinfo);
+static JDIMENSION (*qjpeg_read_scanlines)(j_decompress_ptr, JSAMPARRAY, JDIMENSION);
+static struct jpeg_error_mgr *(*qjpeg_std_error)(struct jpeg_error_mgr * err);
+static boolean (*qjpeg_finish_decompress)(j_decompress_ptr cinfo);
+static void (*qjpeg_destroy_decompress)(j_decompress_ptr cinfo);
+static void (*qjpeg_start_compress)(j_compress_ptr, boolean);
+static void (*qjpeg_set_defaults)(j_compress_ptr cinfo);
+static void (*qjpeg_set_quality)(j_compress_ptr, int, boolean);
+static JDIMENSION (*qjpeg_write_scanlines)(j_compress_ptr, JSAMPARRAY scanlines, JDIMENSION);
+static void (*qjpeg_finish_compress)(j_compress_ptr cinfo);
+static void (*qjpeg_destroy_compress)(j_compress_ptr cinfo);
+
+static dllfunc_t libjpegfuncs[] =
+{
+	{ "jpeg_resync_to_restart", ( void ** )&qjpeg_resync_to_restart },
+	{ "jpeg_CreateCompress", ( void ** )&qjpeg_CreateCompress },
+	{ "jpeg_CreateDecompress", ( void ** )&qjpeg_CreateDecompress },
+	{ "jpeg_read_header", ( void ** )&qjpeg_read_header },
+	{ "jpeg_start_decompress", ( void ** )&qjpeg_start_decompress },
+	{ "jpeg_read_scanlines", ( void ** )&qjpeg_read_scanlines },
+	{ "jpeg_std_error", ( void ** )&qjpeg_std_error },
+	{ "jpeg_finish_decompress", ( void ** )&qjpeg_finish_decompress },
+	{ "jpeg_destroy_decompress", ( void ** )&qjpeg_destroy_decompress },
+	{ "jpeg_start_compress", ( void ** )&qjpeg_start_compress },
+	{ "jpeg_set_defaults", ( void ** )&qjpeg_set_defaults },
+	{ "jpeg_set_quality", ( void ** )&qjpeg_set_quality },
+	{ "jpeg_write_scanlines", ( void ** )&qjpeg_write_scanlines },
+	{ "jpeg_finish_compress", ( void ** )&qjpeg_finish_compress },
+	{ "jpeg_destroy_compress", ( void ** )&qjpeg_destroy_compress },
+	{ NULL, NULL }
+};
+
+#else
+
+#define qjpeg_resync_to_restart jpeg_resync_to_restart
+#define qjpeg_CreateCompress jpeg_CreateCompress
+#define qjpeg_CreateDecompress jpeg_CreateDecompress
+#define qjpeg_read_header jpeg_read_header
+#define qjpeg_start_decompress jpeg_start_decompress
+#define qjpeg_read_scanlines jpeg_read_scanlines
+#define qjpeg_std_error jpeg_std_error
+#define qjpeg_finish_decompress jpeg_finish_decompress
+#define qjpeg_destroy_decompress jpeg_destroy_decompress
+#define qjpeg_start_compress jpeg_start_compress
+#define qjpeg_set_defaults jpeg_set_defaults
+#define qjpeg_set_quality jpeg_set_quality
+#define qjpeg_write_scanlines jpeg_write_scanlines
+#define qjpeg_finish_compress jpeg_finish_compress
+#define qjpeg_destroy_compress jpeg_destroy_compress
+
+#endif
+
+/*
+* R_Imagelib_UnloadLibjpeg
+*/
+static void R_Imagelib_UnloadLibjpeg( void )
+{
+#ifdef LIBJPEG_RUNTIME
+	if( jpegLibrary )
+		ri.Com_UnloadLibrary( &jpegLibrary );
+#endif
+	jpegLibrary = NULL;
+}
+
+/*
+* R_Imagelib_LoadLibjpeg
+*/
+static void R_Imagelib_LoadLibjpeg( void )
+{
+	R_Imagelib_UnloadLibjpeg();
+
+#ifdef LIBJPEG_RUNTIME
+	jpegLibrary = ri.Com_LoadSysLibrary( LIBJPEG_LIBNAME, libjpegfuncs );
+#else
+	jpegLibrary = (void *)1;
+#endif
+}
+
+// ======================================================
+
+void *pngLibrary = NULL;
+
+#ifdef LIBPNG_RUNTIME
+
+#ifndef PNGAPI
+#define PNGAPI
+#endif
+
+static int (PNGAPI *qpng_sig_cmp)(png_bytep, png_size_t, png_size_t);
+static png_uint_32 (PNGAPI *qpng_access_version_number)(void);
+static png_structp (PNGAPI *qpng_create_read_struct)(png_const_charp, png_voidp, png_error_ptr, png_error_ptr);
+static png_infop (PNGAPI *qpng_create_info_struct)(png_structp png_ptr);
+static void (PNGAPI *qpng_set_read_fn)(png_structp, png_voidp, png_rw_ptr);
+static void (PNGAPI *qpng_set_sig_bytes)(png_structp, int);
+static void (PNGAPI *qpng_read_info)(png_structp, png_infop);
+static png_uint_32 (PNGAPI *qpng_get_IHDR)(png_structp, png_infop, png_uint_32 *, png_uint_32 *, int *, int *, int *, int *, int *);
+static png_uint_32 (PNGAPI *qpng_get_valid)(png_structp, png_infop, png_uint_32);
+static void (PNGAPI *qpng_set_palette_to_rgb)(png_structp);
+static void (PNGAPI *qpng_set_gray_to_rgb)(png_structp);
+static void (PNGAPI *qpng_set_tRNS_to_alpha)(png_structp);
+static void (PNGAPI *qpng_set_expand)(png_structp);
+static void (PNGAPI *qpng_read_update_info)(png_structp, png_infop);
+static png_uint_32 (PNGAPI *qpng_get_rowbytes)(png_structp, png_infop);
+static void (PNGAPI *qpng_read_image)(png_structp, png_bytepp);
+static void (PNGAPI *qpng_read_end)(png_structp, png_infop);
+static void (PNGAPI *qpng_destroy_read_struct)(png_structpp, png_infopp, png_infopp);
+static png_voidp (PNGAPI *qpng_get_io_ptr)(png_structp);
+
+// Error handling in libpng pre-1.4 and 1.4+.
+// In older versions, the jmp_buf is in the only public field of the struct, which is the first field.
+// In 1.4 and newer, it is configured using png_set_longjmp_fn.
+typedef void (*qpng_longjmp_ptr)(jmp_buf, int);
+static jmp_buf *(PNGAPI *qpng_set_longjmp_fn)(png_structp, qpng_longjmp_ptr, size_t);
+#define qpng_jmpbuf( png_ptr ) ( qpng_set_longjmp_fn ? \
+	 *qpng_set_longjmp_fn( ( png_ptr ), longjmp, sizeof( jmp_buf ) ) : \
+	 *( ( jmp_buf * )png_ptr ) )
+
+static dllfunc_t libpngfuncs[] =
+{
+	{ "png_sig_cmp", ( void ** )&qpng_sig_cmp },
+	{ "png_access_version_number", ( void ** )&qpng_access_version_number },
+	{ "png_create_read_struct", ( void ** )&qpng_create_read_struct },
+	{ "png_create_info_struct", ( void ** )&qpng_create_info_struct },
+	{ "png_set_read_fn", ( void ** )&qpng_set_read_fn },
+	{ "png_set_sig_bytes", ( void ** )&qpng_set_sig_bytes },
+	{ "png_read_info", ( void ** )&qpng_read_info },
+	{ "png_get_IHDR", ( void ** )&qpng_get_IHDR },
+	{ "png_get_valid", ( void ** )&qpng_get_valid },
+	{ "png_set_palette_to_rgb", ( void ** )&qpng_set_palette_to_rgb },
+	{ "png_set_gray_to_rgb", ( void ** )&qpng_set_gray_to_rgb },
+	{ "png_set_tRNS_to_alpha", ( void ** )&qpng_set_tRNS_to_alpha },
+	{ "png_set_expand", ( void ** )&qpng_set_expand },
+	{ "png_read_update_info", ( void ** )&qpng_read_update_info },
+	{ "png_get_rowbytes", ( void ** )&qpng_get_rowbytes },
+	{ "png_read_image", ( void ** )&qpng_read_image },
+	{ "png_read_end", ( void ** )&qpng_read_end },
+	{ "png_destroy_read_struct", ( void ** )&qpng_destroy_read_struct },
+	{ "png_get_io_ptr", ( void ** )&qpng_get_io_ptr },
+	{ NULL, NULL }
+};
+
+#else
+
+#define qpng_sig_cmp png_sig_cmp
+#define qpng_access_version_number png_access_version_number
+#define qpng_create_read_struct png_create_read_struct
+#define qpng_create_info_struct png_create_info_struct
+#define qpng_jmpbuf png_jmpbuf
+#define qpng_set_read_fn png_set_read_fn
+#define qpng_set_sig_bytes png_set_sig_bytes
+#define qpng_read_info png_read_info
+#define qpng_get_IHDR png_get_IHDR
+#define qpng_get_valid png_get_valid
+#define qpng_set_palette_to_rgb png_set_palette_to_rgb
+#define qpng_set_gray_to_rgb png_set_gray_to_rgb
+#define qpng_set_tRNS_to_alpha png_set_tRNS_to_alpha
+#define qpng_set_expand png_set_expand
+#define qpng_read_update_info png_read_update_info
+#define qpng_get_rowbytes png_get_rowbytes
+#define qpng_read_image png_read_image
+#define qpng_read_end png_read_end
+#define qpng_destroy_read_struct png_destroy_read_struct
+#define qpng_get_io_ptr png_get_io_ptr
+
+#endif
+
+/*
+* R_Imagelib_UnloadLibpng
+*/
+static void R_Imagelib_UnloadLibpng( void )
+{
+#ifdef LIBPNG_RUNTIME
+	if( pngLibrary )
+		ri.Com_UnloadLibrary( &pngLibrary );
+#endif
+	pngLibrary = NULL;
+}
+
+/*
+* R_Imagelib_LoadLibpng
+*/
+static void R_Imagelib_LoadLibpng( void )
+{
+	R_Imagelib_UnloadLibpng();
+
+#ifdef LIBPNG_RUNTIME
+	pngLibrary = ri.Com_LoadSysLibrary( LIBPNG_LIBNAME, libpngfuncs );
+	if( pngLibrary )
+		qpng_set_longjmp_fn = ri.Com_LibraryProcAddress( pngLibrary, "png_set_longjmp_fn" );
+#else
+	pngLibrary =  (void *)1;
+#endif
+}
+
+// ======================================================
+
+/*
+* R_Imagelib_Init
+*/
+void R_Imagelib_Init( void )
+{
+	R_Imagelib_LoadLibjpeg();
+	R_Imagelib_LoadLibpng();
+}
+
+/*
+* R_Imagelib_Shutdown
+*/
+void R_Imagelib_Shutdown( void )
+{
+	R_Imagelib_UnloadLibjpeg();
+	R_Imagelib_UnloadLibpng();
+}
+
+/*
+=========================================================
+
 TARGA LOADING
 
 =========================================================
@@ -105,12 +340,15 @@ typedef struct _TargaHeader
 			}							\
 		}
 
-#define WRITEPIXEL24(a)			\
+#define WRITEPIXEL8(a)				\
+		*a++ = blue;
+
+#define WRITEPIXEL24(a)				\
 		*a++ = blue;				\
 		*a++ = green;				\
 		*a++ = red;
 
-#define WRITEPIXEL32(a)			\
+#define WRITEPIXEL32(a)				\
 		WRITEPIXEL24(a);			\
 		*a++ = alpha;
 
@@ -122,7 +360,7 @@ typedef struct _TargaHeader
 
 #undef WRITEPIXEL
 #define WRITEPIXEL	WRITEPIXEL24
-static void tga_comp_cm24( qbyte *pout, qbyte *pin, qbyte palette[256][4], int size )
+static void tga_comp_cm24( uint8_t *pout, uint8_t *pin, uint8_t palette[256][4], int size )
 {
 	int header, pixelcount;
 	int blue, green, red;
@@ -131,7 +369,7 @@ static void tga_comp_cm24( qbyte *pout, qbyte *pin, qbyte palette[256][4], int s
 	WRITELOOP_COMP_1;
 }
 
-static void tga_cm24( qbyte *pout, qbyte *pin, qbyte palette[256][4], int size )
+static void tga_cm24( uint8_t *pout, uint8_t *pin, uint8_t palette[256][4], int size )
 {
 	int blue, green, red;
 	int i;
@@ -153,7 +391,7 @@ static void tga_cm24( qbyte *pout, qbyte *pin, qbyte palette[256][4], int size )
 
 #undef WRITEPIXEL
 #define WRITEPIXEL	WRITEPIXEL32
-static void tga_comp_cm32( qbyte *pout, qbyte *pin, qbyte palette[256][4], int size )
+static void tga_comp_cm32( uint8_t *pout, uint8_t *pin, uint8_t palette[256][4], int size )
 {
 	int header, pixelcount;
 	int blue, green, red, alpha;
@@ -162,7 +400,7 @@ static void tga_comp_cm32( qbyte *pout, qbyte *pin, qbyte palette[256][4], int s
 	WRITELOOP_COMP_1;
 }
 
-static void tga_cm32( qbyte *pout, qbyte *pin, qbyte palette[256][4], int size )
+static void tga_cm32( uint8_t *pout, uint8_t *pin, uint8_t palette[256][4], int size )
 {
 	int blue, green, red, alpha;
 	int i;
@@ -182,7 +420,7 @@ static void tga_cm32( qbyte *pout, qbyte *pin, qbyte palette[256][4], int size )
 
 #undef WRITEPIXEL
 #define WRITEPIXEL	WRITEPIXEL24
-static void tga_comp_rgb24( qbyte *pout, qbyte *pin, int size )
+static void tga_comp_rgb24( uint8_t *pout, uint8_t *pin, int size )
 {
 	int header, pixelcount;
 	int blue, green, red;
@@ -211,7 +449,7 @@ static void tga_comp_rgb24( qbyte *pout, qbyte *pin, int size )
 	}
 }
 
-static void tga_rgb24( qbyte *pout, qbyte *pin, int size )
+static void tga_rgb24( uint8_t *pout, uint8_t *pin, int size )
 {
 	memcpy( pout, pin, size * 3 );
 }
@@ -229,7 +467,7 @@ static void tga_rgb24( qbyte *pout, qbyte *pin, int size )
 		*((int*)a) = pix;	\
 		a += 4;
 
-static void tga_comp_rgb32( qbyte *pout, qbyte *pin, int size )
+static void tga_comp_rgb32( uint8_t *pout, uint8_t *pin, int size )
 {
 	int header, pixelcount;
 	int blue, green, red, alpha;
@@ -256,7 +494,7 @@ static void tga_comp_rgb32( qbyte *pout, qbyte *pin, int size )
 	}
 }
 
-static void tga_rgb32( qbyte *pout, qbyte *pin, int size )
+static void tga_rgb32( uint8_t *pout, uint8_t *pin, int size )
 {
 	memcpy( pout, pin, size * 4 );
 }
@@ -264,40 +502,32 @@ static void tga_rgb32( qbyte *pout, qbyte *pin, int size )
 
 #undef READPIXEL
 #define READPIXEL(a)			\
-	blue = green = red = *a++;
+	blue = *a++;
 
 #undef WRITEPIXEL
-#define WRITEPIXEL	WRITEPIXEL24
-static void tga_comp_grey( qbyte *pout, qbyte *pin, int size )
+#define WRITEPIXEL	WRITEPIXEL8
+static void tga_comp_grey( uint8_t *pout, uint8_t *pin, int size )
 {
 	int header, pixelcount;
-	int blue, green, red;
+	int blue;
 	int i, j;
 
 	WRITELOOP_COMP_1;
 }
 
-static void tga_grey( qbyte *pout, qbyte *pin, int size )
+static void tga_grey( uint8_t *pout, uint8_t *pin, int size )
 {
-	int i, a;
-
-	for( i = 0; i < size; i++ )
-	{
-		a = *pin++;
-		*pout++ = a;
-		*pout++ = a;
-		*pout++ = a;
-	}
+	memcpy( pout, pin, size );
 }
 
 /*
 * LoadTGA
 */
-r_imginfo_t LoadTGA( const char *name, qbyte *(*allocbuf)( void *, size_t, const char *, int ), void *uptr )
+r_imginfo_t LoadTGA( const char *name, uint8_t *(*allocbuf)( void *, size_t, const char *, int ), void *uptr )
 {
 	int i, j, columns, rows, samples;
-	qbyte *buf_p, *buffer, *pixbuf, *targa_rgba;
-	qbyte palette[256][4];
+	uint8_t *buf_p, *buffer, *pixbuf, *targa_rgba;
+	uint8_t palette[256][4];
 	TargaHeader targa_header;
 	r_imginfo_t imginfo;
 
@@ -405,6 +635,8 @@ r_imginfo_t LoadTGA( const char *name, qbyte *(*allocbuf)( void *, size_t, const
 			R_FreeFile( buffer );
 			return imginfo;
 		}
+
+		samples = 1;
 	}
 
 	columns = targa_header.width;
@@ -462,8 +694,8 @@ r_imginfo_t LoadTGA( const char *name, qbyte *(*allocbuf)( void *, size_t, const
 	{
 		// Flip the image vertically
 		int rowsize = columns * samples;
-		qbyte *row1, *row2;
-		qbyte *tmpLine = alloca( rowsize );
+		uint8_t *row1, *row2;
+		uint8_t *tmpLine = alloca( rowsize );
 
 		for( i = 0, j = rows - 1; i < j; i++, j-- )
 		{
@@ -495,17 +727,17 @@ r_imginfo_t LoadTGA( const char *name, qbyte *(*allocbuf)( void *, size_t, const
 /*
 * WriteTGA
 */
-qboolean WriteTGA( const char *name, r_imginfo_t *info, int quality )
+bool WriteTGA( const char *name, r_imginfo_t *info, int quality )
 {
 	int file, i, c, temp;
 	int width, height, samples;
-	qbyte header[18], *buffer;
-	qboolean bgr;
+	uint8_t header[18], *buffer;
+	bool bgr;
 
-	if( ri.FS_FOpenFile( name, &file, FS_WRITE ) == -1 )
+	if( ri.FS_FOpenAbsoluteFile( name, &file, FS_WRITE ) == -1 )
 	{
 		Com_Printf( "WriteTGA: Couldn't create %s\n", name );
-		return qfalse;
+		return false;
 	}
 
 	width = info->width;
@@ -538,7 +770,7 @@ qboolean WriteTGA( const char *name, r_imginfo_t *info, int quality )
 	ri.FS_Write( buffer, c, file );
 	ri.FS_FCloseFile( file );
 
-	return qtrue;
+	return true;
 }
 
 /*
@@ -561,9 +793,9 @@ static void q_jpg_error_exit(j_common_ptr cinfo)
 	// cinfo->err really points to a my_error_mgr struct, so coerce pointer
 	struct q_jpeg_error_mgr *qerr = (struct q_jpeg_error_mgr *) cinfo->err;
 
-    // create the message
+	// create the message
 	qerr->pub.format_message( cinfo, buffer );
-	ri.Com_DPrintf( "q_jpg_error_exit: %s\n", buffer );
+	ri.Com_Printf( S_COLOR_YELLOW "LibJPEG error: %s\n", buffer );
 
 	// Return control to the setjmp point
 	longjmp(qerr->setjmp_buffer, 1);
@@ -594,7 +826,7 @@ void q_jpeg_mem_src( j_decompress_ptr cinfo, unsigned char *mem, unsigned long l
 	cinfo->src->init_source = q_jpg_noop;
 	cinfo->src->fill_input_buffer = q_jpg_fill_input_buffer;
 	cinfo->src->skip_input_data = q_jpg_skip_input_data;
-	cinfo->src->resync_to_restart = jpeg_resync_to_restart;
+	cinfo->src->resync_to_restart = qjpeg_resync_to_restart;
 	cinfo->src->term_source = q_jpg_noop;
 	cinfo->src->bytes_in_buffer = len;
 	cinfo->src->next_input_byte = mem;
@@ -603,22 +835,25 @@ void q_jpeg_mem_src( j_decompress_ptr cinfo, unsigned char *mem, unsigned long l
 /*
 * LoadJPG
 */
-r_imginfo_t LoadJPG( const char *name, qbyte *(*allocbuf)( void *, size_t, const char *, int ), void *uptr )
+r_imginfo_t LoadJPG( const char *name, uint8_t *(*allocbuf)( void *, size_t, const char *, int ), void *uptr )
 {
-	unsigned int i, length, samples, widthXsamples;
-	qbyte *img, *scan, *buffer, *line, *jpg_rgb;
+	unsigned int length, samples, widthXsamples;
+	uint8_t *img, *buffer, *jpg_rgb;
 	struct q_jpeg_error_mgr jerr;
 	struct jpeg_decompress_struct cinfo;
 	r_imginfo_t imginfo;
 
 	memset( &imginfo, 0, sizeof( imginfo ) );
 
+	if( !jpegLibrary )
+		return imginfo;
+
 	// load the file
 	length = R_LoadFile( name, (void **)&buffer );
 	if( !buffer )
 		return imginfo;
 
-	cinfo.err = jpeg_std_error( &jerr.pub );
+	cinfo.err = qjpeg_std_error( &jerr.pub );
 	jerr.pub.error_exit = q_jpg_error_exit;
 
 	// establish the setjmp return context for q_jpg_error_exit to use.
@@ -627,50 +862,38 @@ r_imginfo_t LoadJPG( const char *name, qbyte *(*allocbuf)( void *, size_t, const
 		goto error;
 	}
 
-	jpeg_create_decompress( &cinfo );
+	qjpeg_create_decompress( &cinfo );
 	q_jpeg_mem_src( &cinfo, buffer, length );
-	jpeg_read_header( &cinfo, TRUE );
-	jpeg_start_decompress( &cinfo );
+	qjpeg_read_header( &cinfo, TRUE );
+	qjpeg_start_decompress( &cinfo );
 	samples = cinfo.output_components;
 
 	if( samples != 3 && samples != 1 )
 	{
 error:
 		ri.Com_DPrintf( S_COLOR_YELLOW "Bad jpeg file %s\n", name );
-		jpeg_destroy_decompress( &cinfo );
+		qjpeg_destroy_decompress( &cinfo );
 		R_FreeFile( buffer );
 		return imginfo;
 	}
 
-	jpg_rgb = img = allocbuf( uptr, cinfo.output_width * cinfo.output_height * 3, __FILE__, __LINE__ );
+	jpg_rgb = img = allocbuf( uptr, cinfo.output_width * cinfo.output_height * samples, __FILE__, __LINE__ );
 	widthXsamples = cinfo.output_width * samples;
-	line = alloca( widthXsamples );
 
 	while( cinfo.output_scanline < cinfo.output_height )
 	{
-		scan = line;
-		if( !jpeg_read_scanlines( &cinfo, &scan, 1 ) )
+		if( !qjpeg_read_scanlines( &cinfo, &img, 1 ) )
 		{
 			Com_Printf( S_COLOR_YELLOW "Bad jpeg file %s\n", name );
-			jpeg_destroy_decompress( &cinfo );
+			qjpeg_destroy_decompress( &cinfo );
 			R_FreeFile( buffer );
 			return imginfo;
 		}
-
-		if( samples == 1 )
-		{
-			for( i = 0; i < cinfo.output_width; i++, img += 3 )
-				img[0] = img[1] = img[2] = *scan++;
-		}
-		else
-		{
-			memcpy( img, scan, widthXsamples );
-			img += widthXsamples;
-		}
+		img += widthXsamples;
 	}
 
-	jpeg_finish_decompress( &cinfo );
-	jpeg_destroy_decompress( &cinfo );
+	qjpeg_finish_decompress( &cinfo );
+	qjpeg_destroy_decompress( &cinfo );
 
 	R_FreeFile( buffer );
 
@@ -678,71 +901,92 @@ error:
 	imginfo.width = cinfo.output_width;
 	imginfo.height = cinfo.output_height;
 	imginfo.pixels = jpg_rgb;
-	imginfo.samples = 3;
+	imginfo.samples = samples;
 	return imginfo;
 }
 
 #define JPEG_OUTPUT_BUFFER_SIZE		4096
 
-static void q_jpg_init_destination(j_compress_ptr cinfo)
+struct q_jpeg_destination_mgr {
+	struct jpeg_destination_mgr pub;
+
+	int outfile;
+	JOCTET *buffer;
+};
+
+static void q_jpg_init_destination( j_compress_ptr cinfo )
 {
+	struct q_jpeg_destination_mgr *dest = ( struct q_jpeg_destination_mgr * )( cinfo->dest );
+
+	dest->pub.next_output_byte = dest->buffer;
+	dest->pub.free_in_buffer = JPEG_OUTPUT_BUFFER_SIZE;
 }
 
-static boolean q_jpg_write_buf_to_disk(j_compress_ptr cinfo)
+static boolean q_jpg_empty_output_buffer( j_compress_ptr cinfo )
 {
-	int written = JPEG_OUTPUT_BUFFER_SIZE - cinfo->dest->free_in_buffer;
-	qbyte *buffer = ( qbyte * )cinfo->dest->next_output_byte - written;
-	int file = *((int *)(buffer + JPEG_OUTPUT_BUFFER_SIZE));
-	if( ri.FS_Write( buffer, JPEG_OUTPUT_BUFFER_SIZE, file ) == 0 ) {
+	struct q_jpeg_destination_mgr *dest = ( struct q_jpeg_destination_mgr * )( cinfo->dest );
+
+	if( ri.FS_Write( dest->buffer, JPEG_OUTPUT_BUFFER_SIZE, dest->outfile ) == 0 ) {
 		return FALSE;
 	}
+
+	dest->pub.next_output_byte = dest->buffer;
+	dest->pub.free_in_buffer = JPEG_OUTPUT_BUFFER_SIZE;
+
 	return TRUE;
 }
 
-static boolean q_jpg_empty_output_buffer(j_compress_ptr cinfo)
+static void q_jpg_term_destination( j_compress_ptr cinfo )
 {
-	boolean res = q_jpg_write_buf_to_disk( cinfo );
-	cinfo->dest->next_output_byte -= JPEG_OUTPUT_BUFFER_SIZE - cinfo->dest->free_in_buffer;
-	cinfo->dest->free_in_buffer = JPEG_OUTPUT_BUFFER_SIZE;
-	return res;
-}
+	struct q_jpeg_destination_mgr *dest = ( struct q_jpeg_destination_mgr * )( cinfo->dest );
+	size_t datacount = JPEG_OUTPUT_BUFFER_SIZE - dest->pub.free_in_buffer;
 
-static void q_jpg_term_destination(j_compress_ptr cinfo)
-{
-	q_jpg_write_buf_to_disk( cinfo );
+	if( datacount > 0 ) {
+		ri.FS_Write( dest->buffer, datacount, dest->outfile );
+	}
 }
 
 /*
 * WriteJPG
 */
-qboolean WriteJPG( const char *name, r_imginfo_t *info, int quality )
+bool WriteJPG( const char *name, r_imginfo_t *info, int quality )
 {
 	struct jpeg_compress_struct cinfo;
-	struct jpeg_error_mgr jerr;
-	struct jpeg_destination_mgr jdest;
-	char buf[JPEG_OUTPUT_BUFFER_SIZE + sizeof( int )];
+	struct q_jpeg_error_mgr jerr;
+	struct q_jpeg_destination_mgr jdest;
+	JOCTET buffer[JPEG_OUTPUT_BUFFER_SIZE];
 	JSAMPROW s[1];
 	int offset, w3;
 	int file;
 
-	if( ri.FS_FOpenFile( name, &file, FS_WRITE ) == -1 ) {
-		Com_Printf( "WriteJPG: Couldn't create %s\n", name );
-		return qfalse;
+	if( !jpegLibrary ) {
+		Com_Printf( S_COLOR_YELLOW "WriteJPG: libjpeg is not loaded.\n" );
+		return false;
 	}
 
-	// hack file handle into output buffer
-	*((int *)(buf + JPEG_OUTPUT_BUFFER_SIZE)) = file;
+	if( ri.FS_FOpenAbsoluteFile( name, &file, FS_WRITE ) == -1 ) {
+		Com_Printf( S_COLOR_YELLOW "WriteJPG: Couldn't create %s\n", name );
+		return false;
+	}
 
-	jdest.init_destination = q_jpg_init_destination;
-	jdest.empty_output_buffer = q_jpg_empty_output_buffer;
-	jdest.term_destination = q_jpg_term_destination;
-	jdest.next_output_byte = (JOCTET *)buf;
-	jdest.free_in_buffer = JPEG_OUTPUT_BUFFER_SIZE;
+	jdest.pub.init_destination = q_jpg_init_destination;
+	jdest.pub.empty_output_buffer = q_jpg_empty_output_buffer;
+	jdest.pub.term_destination = q_jpg_term_destination;
+	jdest.outfile = file;
+	jdest.buffer = buffer;
 
 	// initialize the JPEG compression object
-	jpeg_create_compress( &cinfo );
-	cinfo.err = jpeg_std_error( &jerr );
-	cinfo.dest = &jdest;
+	cinfo.err = qjpeg_std_error( &jerr.pub );
+	jerr.pub.error_exit = q_jpg_error_exit;
+
+	// establish the setjmp return context for q_jpg_error_exit to use.
+	if( setjmp( jerr.setjmp_buffer ) ) {
+		// if we get here, the JPEG code has signaled an error
+		goto error;
+	}
+
+	qjpeg_create_compress( &cinfo );
+	cinfo.dest = &( jdest.pub );
 
 	// setup JPEG parameters
 	cinfo.image_width = info->width;
@@ -750,12 +994,12 @@ qboolean WriteJPG( const char *name, r_imginfo_t *info, int quality )
 	cinfo.in_color_space = JCS_RGB;
 	cinfo.input_components = info->samples;
 
-	jpeg_set_defaults( &cinfo );
+	qjpeg_set_defaults( &cinfo );
 
 	if( ( quality > 100 ) || ( quality <= 0 ) )
 		quality = 85;
 
-	jpeg_set_quality( &cinfo, quality, TRUE );
+	qjpeg_set_quality( &cinfo, quality, TRUE );
 
 	// If quality is set high, disable chroma subsampling 
 	if( quality >= 85 )
@@ -765,7 +1009,7 @@ qboolean WriteJPG( const char *name, r_imginfo_t *info, int quality )
 	}
 
 	// start compression
-	jpeg_start_compress( &cinfo, qtrue );
+	qjpeg_start_compress( &cinfo, true );
 
 	// feed scanline data
 	w3 = cinfo.image_width * info->samples;
@@ -773,16 +1017,21 @@ qboolean WriteJPG( const char *name, r_imginfo_t *info, int quality )
 	while( cinfo.next_scanline < cinfo.image_height )
 	{
 		s[0] = &info->pixels[offset - cinfo.next_scanline * w3];
-		jpeg_write_scanlines( &cinfo, s, 1 );
+		qjpeg_write_scanlines( &cinfo, s, 1 );
 	}
 
 	// finish compression
-	jpeg_finish_compress( &cinfo );
-	jpeg_destroy_compress( &cinfo );
+	qjpeg_finish_compress( &cinfo );
+	qjpeg_destroy_compress( &cinfo );
 
 	ri.FS_FCloseFile( file );
 
-	return qtrue;
+	return true;
+
+error:
+	qjpeg_destroy_compress( &cinfo );
+	ri.FS_FCloseFile( file );
+	return false;
 }
 
 /*
@@ -794,7 +1043,7 @@ PNG LOADING
 */
 
 typedef struct {
-	qbyte *data;
+	uint8_t *data;
 	size_t size;
 	size_t curptr;
 } q_png_iobuf_t;
@@ -812,31 +1061,33 @@ static void q_png_warning_fn( png_structp png_ptr, const char *message )
 //LordHavoc: removed __cdecl prefix, added overrun protection, and rewrote this to be more efficient
 static void q_png_user_read_fn( png_structp png_ptr, unsigned char *data, size_t length )
 {
-	q_png_iobuf_t *io = (q_png_iobuf_t *)png_get_io_ptr( png_ptr );
+	q_png_iobuf_t *io = (q_png_iobuf_t *)qpng_get_io_ptr( png_ptr );
 	size_t rem = io->size - io->curptr;
 
 	if( length > rem ) {
-        ri.Com_DPrintf( "q_png_user_read_fn: overrun by %i bytes\n", (int)(length - rem) );
+		ri.Com_DPrintf( "q_png_user_read_fn: overrun by %i bytes\n", (int)(length - rem) );
 
-        // a read going past the end of the file, fill in the remaining bytes
-        // with 0 just to be consistent
-        memset( data + rem, 0, length - rem );
-        length = rem;
-    }
+		// a read going past the end of the file, fill in the remaining bytes
+		// with 0 just to be consistent
+		memset( data + rem, 0, length - rem );
+		length = rem;
+	}
 
 	memcpy( data, io->data + io->curptr, length );
-    io->curptr += length;
+	io->curptr += length;
 }
 
 /*
 * LoadPNG
 */
-r_imginfo_t LoadPNG( const char *name, qbyte *(*allocbuf)( void *, size_t, const char *, int ), void *uptr )
+r_imginfo_t LoadPNG( const char *name, uint8_t *(*allocbuf)( void *, size_t, const char *, int ), void *uptr )
 {
-	qbyte *img;
-	qbyte *png_data;
+	uint8_t *img;
+	uint8_t *png_data;
 	size_t png_datasize;
 	q_png_iobuf_t io;
+	png_uint_32 ver;
+	char ver_string[16];
 	png_structp png_ptr = NULL;
 	png_infop info_ptr = NULL;
 	png_uint_32 p_width, p_height;
@@ -848,33 +1099,38 @@ r_imginfo_t LoadPNG( const char *name, qbyte *(*allocbuf)( void *, size_t, const
 
 	memset( &imginfo, 0, sizeof( imginfo ) );
 
+	if( !pngLibrary )
+		return imginfo;
+
 	// load the file
 	png_datasize = R_LoadFile( name, (void **)&png_data );
 	if( !png_data )
 		return imginfo;
 
-	if( png_sig_cmp( png_data, 0, png_datasize ) ) {
+	if( qpng_sig_cmp( png_data, 0, png_datasize ) ) {
 error:
 		ri.Com_DPrintf( S_COLOR_YELLOW "Bad png file %s\n", name );
 
 		if( png_ptr != NULL ) {
-			png_destroy_write_struct( &png_ptr, NULL );
+			qpng_destroy_read_struct( &png_ptr, &info_ptr, NULL );
 		}
 		R_FreeFile( png_data );
-        return imginfo;
+		return imginfo;
 	}
 	
 	// create and initialize the png_struct with the desired error handler
 	// functions. We also supply the  the compiler header file version, so 
 	// that we know if the application was compiled with a compatible 
 	// version of the library. REQUIRED
-	png_ptr = png_create_read_struct( PNG_LIBPNG_VER_STRING, 0, q_png_error_fn, q_png_warning_fn );
+	ver = qpng_access_version_number();
+	Q_snprintfz( ver_string, sizeof( ver_string ), "%u.%u.%u", ver / 10000, ( ver / 100 ) % 100, ver % 100 );
+	png_ptr = qpng_create_read_struct( ver_string, 0, q_png_error_fn, q_png_warning_fn );
 	if( png_ptr == NULL ) {
 		goto error;
 	}
 
 	// allocate/initialize the image information data. REQUIRED
-	info_ptr = png_create_info_struct( png_ptr );
+	info_ptr = qpng_create_info_struct( png_ptr );
 	if( info_ptr == NULL ) {
 		goto error;
 	}
@@ -882,7 +1138,7 @@ error:
 	// set error handling if you are using the setjmp/longjmp method (this is
 	// the normal method of doing things with libpng). REQUIRED unless you
 	// set up your own error handlers in the png_create_read_struct() earlier.
-	if( setjmp( png_jmpbuf( png_ptr ) ) ) {
+	if( setjmp( qpng_jmpbuf( png_ptr ) ) ) {
 		goto error;
 	}
 
@@ -892,56 +1148,52 @@ error:
 
 	// if you are using replacement read functions, instead of calling
 	// png_init_io() here you would call:
-	png_set_read_fn( png_ptr, (void *)&io, q_png_user_read_fn );
+	qpng_set_read_fn( png_ptr, (void *)&io, q_png_user_read_fn );
 	// where user_io_ptr is a structure you want available to the callbacks
 
-	png_set_sig_bytes( png_ptr, 0 );
+	qpng_set_sig_bytes( png_ptr, 0 );
 
 	// the call to png_read_info() gives us all of the information from the
 	// PNG file before the first IDAT (image data chunk). REQUIRED
-	png_read_info( png_ptr, info_ptr );
+	qpng_read_info( png_ptr, info_ptr );
 
-	png_get_IHDR( png_ptr, info_ptr, &p_width, &p_height, &p_bit_depth, &p_color_type,
+	qpng_get_IHDR( png_ptr, info_ptr, &p_width, &p_height, &p_bit_depth, &p_color_type,
 		&p_interlace_type, NULL, NULL );
 
-	if( p_color_type & PNG_COLOR_MASK_ALPHA ) {
-		samples = 4;
+	if( ( p_color_type & ~PNG_COLOR_MASK_ALPHA ) == PNG_COLOR_TYPE_GRAY ) {
+		samples = 1;
 	}
 	else {
 		samples = 3;
-		// add filler (or alpha) byte (before/after each RGB triplet)
-		// png_set_filler( png_ptr, 255, 1 );
+	}
+	if( p_color_type & PNG_COLOR_MASK_ALPHA ) {
+		samples++;
 	}
 
 	// expand paletted colors into true RGB triplets
 	if( p_color_type == PNG_COLOR_TYPE_PALETTE ) {
-        png_set_palette_to_rgb( png_ptr );
-	}
-
-	// expand grayscale images to RGB triplets
-	if( p_color_type == PNG_COLOR_TYPE_GRAY || p_color_type == PNG_COLOR_TYPE_GRAY_ALPHA ) {
-        png_set_gray_to_rgb( png_ptr );
+		qpng_set_palette_to_rgb( png_ptr );
 	}
 
 	// expand paletted or RGB images with transparency to full alpha channels
 	// so the data will be available as RGBA quartets.
-	if( png_get_valid( png_ptr, info_ptr, PNG_INFO_tRNS ) ) {
-        png_set_tRNS_to_alpha( png_ptr );
+	if( qpng_get_valid( png_ptr, info_ptr, PNG_INFO_tRNS ) ) {
+        qpng_set_tRNS_to_alpha( png_ptr );
 	}
 
 	// expand grayscale images to the full 8 bits
 	if( p_bit_depth < 8 ) {
-        png_set_expand( png_ptr );
+		qpng_set_expand( png_ptr );
 	}
 
 	// optional call to gamma correct and add the background to the palette
 	// and update info structure. REQUIRED if you are expecting libpng to
 	// update the palette for you (ie you selected such a transform above).
-    png_read_update_info( png_ptr, info_ptr );
+	qpng_read_update_info( png_ptr, info_ptr );
 
 	// allocate the memory to hold the image using the fields of info_ptr
 
-	row_bytes = png_get_rowbytes( png_ptr, info_ptr );
+	row_bytes = qpng_get_rowbytes( png_ptr, info_ptr );
 	row_pointers = alloca( p_height * sizeof( *row_pointers ) );
 
 	img = allocbuf( uptr, p_height * row_bytes, __FILE__, __LINE__ );
@@ -951,17 +1203,17 @@ error:
 	}
 
 	// now it's time to read the image
-	png_read_image( png_ptr, row_pointers );
+	qpng_read_image( png_ptr, row_pointers );
 
 	// read rest of file, and get additional chunks in info_ptr - REQUIRED
-    png_read_end( png_ptr, info_ptr );
+	qpng_read_end( png_ptr, info_ptr );
 
 	// clean up after the read, and free any memory allocated - REQUIRED
-    png_destroy_read_struct( &png_ptr, &info_ptr, 0 );
+	qpng_destroy_read_struct( &png_ptr, &info_ptr, NULL );
 
 	R_FreeFile( png_data );
 
-	imginfo.comp = (samples == 4 ? IMGCOMP_RGBA : IMGCOMP_RGB);
+	imginfo.comp = (samples & 1 ? IMGCOMP_RGB : IMGCOMP_RGBA);
 	imginfo.width = p_width;
 	imginfo.height = p_height;
 	imginfo.samples = samples;
@@ -991,14 +1243,14 @@ static const int q_etc1_modifierTable[] =
 
 static const int q_etc1_lookup[] = { 0, 1, 2, 3, -4, -3, -2, -1 };
 
-static void q_etc1_subblock( qbyte *out, int stride, qboolean bgr, int r, int g, int b,
-	const int *table, unsigned int low, qboolean second, qboolean flipped )
+static void q_etc1_subblock( uint8_t *out, int stride, bool bgr, int r, int g, int b,
+	const int *table, unsigned int low, bool second, bool flipped )
 {
 	int baseX = 0, baseY = 0;
 	int i;
 	int x, y;
 	int k, delta;
-	qbyte *q;
+	uint8_t *q;
 	if( second )
 	{
 		if( flipped )
@@ -1036,12 +1288,12 @@ static void q_etc1_subblock( qbyte *out, int stride, qboolean bgr, int r, int g,
 	}
 }
 
-static void q_etc1_block( const qbyte *in, qbyte *out, int stride, qboolean bgr )
+static void q_etc1_block( const uint8_t *in, uint8_t *out, int stride, bool bgr )
 {
 	unsigned int high = ( in[0] << 24 ) | ( in[1] << 16 ) | ( in[2] << 8 ) | in[3];
 	unsigned int low = ( in[4] << 24 ) | ( in[5] << 16 ) | ( in[6] << 8 ) | in[7];
 	int r1, r2, g1, g2, b1, b2;
-	qboolean flipped = ( qboolean )( high & 1 );
+	bool flipped = ( bool )( high & 1 );
 
 	if( high & 2 )
 	{
@@ -1074,17 +1326,17 @@ static void q_etc1_block( const qbyte *in, qbyte *out, int stride, qboolean bgr 
 
 	q_etc1_subblock( out, stride, bgr, r1, g1, b1,
 		q_etc1_modifierTable + ( ( high >> 3 ) & ( 7 << 2 ) ),
-		low, qfalse, flipped );
+		low, false, flipped );
 	q_etc1_subblock( out, stride, bgr, r2, g2, b2,
 		q_etc1_modifierTable + ( high & ( 7 << 2 ) ),
-		low, qtrue, flipped );
+		low, true, flipped );
 }
 
-void DecompressETC1( const qbyte *in, int width, int height, qbyte *out, qboolean bgr )
+void DecompressETC1( const uint8_t *in, int width, int height, uint8_t *out, bool bgr )
 {
 	int stride = ALIGN( width, 4 ) * 3;
-	qbyte *uncompressed = alloca( 4 * stride );
-	int i, j, rows, rowSize = width * 3;
+	uint8_t *uncompressed = alloca( 4 * stride );
+	int i, j, rows, rowSize = width * 3, rowSizeAligned = ALIGN( rowSize, 4 );
 	for( i = 0; i < height; i += 4 )
 	{
 		for( j = 0; j < width; j += 4 )
@@ -1098,7 +1350,7 @@ void DecompressETC1( const qbyte *in, int width, int height, qbyte *out, qboolea
 		for( j = 0; j < rows; ++j )
 		{
 			memcpy( out, uncompressed + j * stride, rowSize );
-			out += rowSize;
+			out += rowSizeAligned;
 		}
 	}
 }

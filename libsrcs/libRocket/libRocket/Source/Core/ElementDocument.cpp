@@ -26,9 +26,9 @@
  */
 
 #include "precompiled.h"
-#include <Rocket/Core/ElementDocument.h>
-#include <Rocket/Core/StreamMemory.h>
-#include <Rocket/Core.h>
+#include "../../Include/Rocket/Core/ElementDocument.h"
+#include "../../Include/Rocket/Core/StreamMemory.h"
+#include "../../Include/Rocket/Core.h"
 #include "DocumentHeader.h"
 #include "ElementStyle.h"
 #include "EventDispatcher.h"
@@ -50,6 +50,8 @@ ElementDocument::ElementDocument(const String& tag) : Element(tag)
 	modal = false;
 	layout_dirty = true;
 	lock_layout = 0;
+
+	user_data = NULL;
 
 	ForceLocalStackingContext();
 
@@ -224,6 +226,9 @@ void ElementDocument::Show(int focus_flags)
 
 	// Set to visible and switch focus if necessary
 	SetProperty(VISIBILITY, "visible");
+
+	DispatchEvent("show", Dictionary(), false);
+
 	if (focus_flags & FOCUS || focus_flags & MODAL)
 	{
 		// If no element could be focused, focus the window
@@ -232,8 +237,6 @@ void ElementDocument::Show(int focus_flags)
 			Focus();
 		}
 	}
-
-	DispatchEvent("show", Dictionary(), false);
 }
 
 void ElementDocument::Hide()
@@ -287,14 +290,15 @@ bool ElementDocument::IsModal() const
 }
 
 // Default load script implementation
-void ElementDocument::LoadScript(Stream* ROCKET_UNUSED(stream), const String& ROCKET_UNUSED(source_name))
+void ElementDocument::LoadScript(Stream* ROCKET_UNUSED_PARAMETER(stream), const String& ROCKET_UNUSED_PARAMETER(source_name))
 {
+	ROCKET_UNUSED(stream);
+	ROCKET_UNUSED(source_name);
 }
 
 // Updates the layout if necessary.
 void ElementDocument::_UpdateLayout()
 {
-	layout_dirty = false;
 	lock_layout++;
 
 	Vector2f containing_block(0, 0);
@@ -305,6 +309,7 @@ void ElementDocument::_UpdateLayout()
 	layout_engine.FormatElement(this, containing_block);
 	
 	lock_layout--;
+	layout_dirty = false;
 }
 
 // Updates the position of the document based on the style properties.
@@ -369,6 +374,10 @@ void ElementDocument::OnUpdate()
 void ElementDocument::OnPropertyChange(const PropertyNameList& changed_properties)
 {
 	Element::OnPropertyChange(changed_properties);
+
+	// If the document's font-size has been changed, we need to dirty all rem properties.
+	if (changed_properties.find(FONT_SIZE) != changed_properties.end())
+		GetStyle()->DirtyRemProperties();
 
 	if (changed_properties.find(TOP) != changed_properties.end() ||
 		changed_properties.find(RIGHT) != changed_properties.end() ||
@@ -486,6 +495,7 @@ bool ElementDocument::SearchFocusSubtree(Element* element, bool forward)
 	if (element->GetProperty<int>(TAB_INDEX) == TAB_INDEX_AUTO)
 	{
 		element->Focus();
+		element->ScrollIntoView(false);
 		return true;
 	}
 

@@ -45,18 +45,28 @@ extern "C" QF_DLL_EXPORT cgame_export_t *GetCGameAPI( cgame_import_t *import )
 
 	globals.GetEntitySpatilization = CG_GetEntitySpatilization;
 
-	globals.SetSensitivityScale = CG_SetSensitivityScale;
+	globals.GetSensitivityScale = CG_GetSensitivityScale;
 
 	globals.Trace = CG_Trace;
 	globals.RenderView = CG_RenderView;
 
 	globals.NewFrameSnapshot = CG_NewFrameSnap;
 
+	globals.UpdateInput = CG_UpdateInput;
+	globals.ClearInputState = CG_ClearInputState;
+
+	globals.GetButtonBits = CG_GetButtonBits;
+	globals.AddViewAngles = CG_AddViewAngles;
+	globals.AddMovement = CG_AddMovement;
+
+	globals.TouchEvent = CG_TouchEvent;
+	globals.IsTouchDown = CG_IsTouchDown;
+
 	return &globals;
 }
 
 #if defined ( HAVE_DLLMAIN ) && !defined ( CGAME_HARD_LINKED )
-int _stdcall DLLMain( void *hinstDll, unsigned long dwReason, void *reserved )
+int WINAPI DLLMain( void *hinstDll, unsigned long dwReason, void *reserved )
 {
 	return 1;
 }

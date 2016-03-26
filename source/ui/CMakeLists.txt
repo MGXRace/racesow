@@ -8,6 +8,9 @@ file(GLOB UI_HEADERS
     "widgets/*.h"
     "decorators/*.h"
     "parsers/*.h"
+	"formatters/*.h"
+	"../gameshared/q_*.h"
+	"../qalgo/*.h"
 )
 
 file(GLOB UI_SOURCES
@@ -19,18 +22,39 @@ file(GLOB UI_SOURCES
     "decorators/*.cpp"
     "parsers/*.cpp"
     "../gameshared/q_*.c"
-    "../qalgo/*.c"
+	"../qalgo/*.c"
 )
+
+file(GLOB ROCKET_ROOT_HEADERS
+	"${LIBROCKET_INCLUDE_DIR}/Rocket/*.h"
+)
+file(GLOB ROCKET_CORE_HEADERS
+	"${LIBROCKET_INCLUDE_DIR}/Rocket/Core/*.h"
+)
+file(GLOB ROCKET_CONTROLS_HEADERS
+	"${LIBROCKET_INCLUDE_DIR}/Rocket/Controls/*.h"
+)
+file(GLOB ROCKET_CORE_SOURCES
+	"${LIBROCKET_SOURCE_DIR}/Core/*.cpp"
+	"${LIBROCKET_SOURCE_DIR}/Core/*.inl"
+)
+file(GLOB ROCKET_CONTROLS_SOURCES
+	"${LIBROCKET_SOURCE_DIR}/Controls/*.cpp"
+	"${LIBROCKET_SOURCE_DIR}/Controls/*.inl"
+)
+
+source_group("Rocket\\Header Files" FILES ${ROCKET_ROOT_HEADERS})
+source_group("Rocket\\Header Files\\Core" FILES ${ROCKET_CORE_HEADERS})
+source_group("Rocket\\Header Files\\Controls" FILES ${ROCKET_CONTROLS_HEADERS})
+source_group("Rocket\\Source Files\\Core" FILES ${ROCKET_CORE_SOURCES})
+source_group("Rocket\\Source Files\\Controls" FILES ${ROCKET_CONTROLS_SOURCES})
 
 include_directories(${ANGELSCRIPT_INCLUDE_DIR} ${LIBROCKET_INCLUDE_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}) # for ui_precompiled.h
 
-qf_add_library(ui SHARED ${UI_SOURCES} ${UI_HEADERS})
-target_link_libraries(ui ${LIBROCKET_LIBRARIES} ${FREETYPE_LIBRARIES})
-set_target_properties(ui PROPERTIES COMPILE_DEFINITIONS "STATIC_LIB;_SECURE_SCL=0")
-qf_set_output_dir(ui base)
-
-# TODO: Remove this hack from here
-if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
-    add_dependencies(ui ${LIBROCKET})
-endif()
+add_library(ui SHARED ${ROCKET_ROOT_HEADERS} ${ROCKET_CORE_HEADERS} ${ROCKET_CONTROLS_HEADERS} ${ROCKET_CORE_SOURCES} ${ROCKET_CONTROLS_SOURCES} ${UI_SOURCES} ${UI_HEADERS})
+target_link_libraries(ui PRIVATE)
+add_dependencies(ui angelwrap)
+set_target_properties(ui PROPERTIES COMPILE_DEFINITIONS "ROCKET_STATIC_LIB;_SECURE_SCL=0")
+qf_set_output_dir(ui libs)
+set_property(TARGET ui PROPERTY CXX_STANDARD 11)

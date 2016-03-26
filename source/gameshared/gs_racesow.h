@@ -17,8 +17,8 @@ typedef struct rs_racetime_s
 void RS_ClipRampVelocity(vec3_t in, vec3_t normal, vec3_t out, float overbounce);
 void RS_ResetPjState(int playerNum);
 void RS_ResetPsState(int playerNum);
-qboolean RS_QueryPjState(int playerNum);
-qboolean RS_QueryPsState(int playerNum);
+bool RS_QueryPjState(int playerNum);
+bool RS_QueryPsState(int playerNum);
 void RS_IncrementWallJumps(int playerNum);
 void RS_IncrementDashes(int playerNum);
 void RS_IncrementJumps(int playerNum);

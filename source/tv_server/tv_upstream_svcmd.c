@@ -31,7 +31,7 @@ static void TV_Upstream_HandleConfigstring( upstream_t *upstream, int index, con
 {
 	char hostname[MAX_CONFIGSTRING_CHARS];
 	msg_t msg;
-	qbyte msgbuf[MAX_MSGLEN];
+	uint8_t msgbuf[MAX_MSGLEN];
 
 	if( !val || !val[0] )
 		return;
@@ -71,8 +71,8 @@ static void TV_Upstream_HandleConfigstring( upstream_t *upstream, int index, con
 		Q_strncpyz( temp, filebase, temp_size );
 		COM_ReplaceExtension( temp, APP_DEMO_EXTENSION_STR, temp_size );
 
-		if( Com_GlobMatch( "*_auto[0-9][0-9][0-9][0-9]" APP_DEMO_EXTENSION_STR, temp, qfalse )
-			|| Com_GlobMatch( "*_mvd" APP_DEMO_EXTENSION_STR, temp, qfalse ) )
+		if( Com_GlobMatch( "*_auto[0-9][0-9][0-9][0-9]" APP_DEMO_EXTENSION_STR, temp, false )
+			|| Com_GlobMatch( "*_mvd" APP_DEMO_EXTENSION_STR, temp, false ) )
 			temp[strrchr( temp, '_' ) - temp] = '\0';
 		else
 			COM_StripExtension( temp );
@@ -138,7 +138,7 @@ static void TV_Upstream_ForwardToServer_f( upstream_t *upstream )
 */
 static void TV_Upstream_Precache_f( upstream_t *upstream )
 {
-	upstream->precacheDone = qtrue;
+	upstream->precacheDone = true;
 
 	TV_Upstream_AutoRecordAction( upstream, upstream->configstrings[CS_AUTORECORDSTATE] );
 
@@ -161,7 +161,7 @@ static void TV_Upstream_Multiview_f( upstream_t *upstream )
 static void TV_Upstream_Changing_f( upstream_t *upstream )
 {
 	if( upstream->demo.recording )
-		TV_Upstream_StopDemoRecord( upstream, upstream->demo.autorecording, qfalse );
+		TV_Upstream_StopDemoRecord( upstream, upstream->demo.autorecording, false );
 }
 
 /*
@@ -181,13 +181,13 @@ static void TV_Upstream_ServerReconnect_f( upstream_t *upstream )
 	}
 
 	if( upstream->demo.recording )
-		TV_Upstream_StopDemoRecord( upstream, upstream->demo.autorecording, qfalse );
+		TV_Upstream_StopDemoRecord( upstream, upstream->demo.autorecording, false );
 
 	Com_Printf( "%s: reconnecting...\n", NET_AddressToString( &upstream->serveraddress ) );
 
 	upstream->connect_count = 0;
 	upstream->rejected = 0;
-#ifdef TCP_ALLOW_CONNECT
+#ifdef TCP_ALLOW_TVCONNECT
 	upstream->connect_time = tvs.realtime;
 #else
 	upstream->connect_time = tvs.realtime - 1500;

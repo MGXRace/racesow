@@ -39,18 +39,20 @@ QF_DLL_EXPORT cin_export_t *GetCinematicsAPI( cin_import_t *import )
 	globals.Shutdown = &CIN_Shutdown;
 
 	globals.Open = &CIN_Open;
+	globals.HasOggAudio = &CIN_HasOggAudio;
 	globals.NeedNextFrame = &CIN_NeedNextFrame;
 	globals.ReadNextFrame = &CIN_ReadNextFrame;
 	globals.ReadNextFrameYUV = &CIN_ReadNextFrameYUV;
 	globals.AddRawSamplesListener = &CIN_AddRawSamplesListener;
 	globals.Reset = &CIN_Reset;
 	globals.Close = &CIN_Close;
+	globals.FileName = &CIN_FileName;
 
 	return &globals;
 }
 
 #if defined ( HAVE_DLLMAIN ) && !defined ( CIN_HARD_LINKED )
-int _stdcall DLLMain( void *hinstDll, unsigned long dwReason, void *reserved )
+int WINAPI DLLMain( void *hinstDll, unsigned long dwReason, void *reserved )
 {
 	return 1;
 }

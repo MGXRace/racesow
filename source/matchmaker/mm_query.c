@@ -24,8 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "../qcommon/wswcurl.h"
 #include "../qcommon/cjson.h"
 #include "../qalgo/base64.h"
-
-#include "zlib.h"
+#include "../qcommon/compression.h"
 
 #define SQALLOC( x )	Mem_Alloc( sq_mempool, ( x ) )
 #define SQFREE( x )		Mem_Free( ( x ) )
@@ -37,14 +36,16 @@ struct stat_query_s
 	cJSON		*json_out;		// root of all
 	cJSON		*json_in;
 
-	qboolean	has_json;
+	bool	has_json;
 
 	// if 'req' is NULL we have a GET cause that has to be created
 	// just before launch when we have all parameters
 	// url is stored only for GET, cause we can pass it in POST directly to wswcurl
 	char *url;
 
-	void (*callback_fn)( stat_query_t *, qboolean, void * );
+	char *iface;
+
+	void (*callback_fn)( stat_query_t *, bool, void * );
 	void *customp;
 
 	// cached responses
@@ -60,7 +61,7 @@ stat_query_api_t sq_export;
 mempool_t *sq_mempool = NULL;
 int sq_refcount = 0;	// Refcount Init/Shutdown if server and client exists on same process
 
-void StatQuery_DestroyQuery( stat_query_t *query );
+static void StatQuery_DestroyQuery( stat_query_t *query );
 
 //===============================================
 
@@ -169,7 +170,7 @@ static void StatQuery_CallbackGeneric( wswcurl_req *req, int status, void *custo
 {
 	const char *content_type;
 	stat_query_t *query = (stat_query_t *)customp;
-	qboolean success = status > 0 ? qtrue : qfalse;
+	bool success = status > 0 ? true : false;
 
 	// print some stuff out
 	if( status < 0 )
@@ -225,9 +226,9 @@ static double StatQuery_JsonToNumber( cJSON *obj )
 		case cJSON_String:
 			return atof( obj->valuestring );
 		case cJSON_True:
-			return (double)qtrue;
+			return (double)true;
 		case cJSON_False:
-			return (double)qfalse;
+			return (double)false;
 		default:
 			Com_Printf( "StatQuery: Couldnt cast JSON type %s to number (object name %s)\n",
 						StatQuery_JsonTypeToString( obj->type ), obj->string != 0 ? obj->string : "" );
@@ -270,7 +271,7 @@ static const char *StatQuery_JsonToString( cJSON *obj )
 //===============================================
 
 // TODO; prefer GET/POST
-stat_query_t *StatQuery_CreateQuery( const char *str, qboolean get )
+static stat_query_t *StatQuery_CreateQuery( const char *iface, const char *str, bool get )
 {
 	stat_query_t *query;
 
@@ -282,6 +283,11 @@ stat_query_t *StatQuery_CreateQuery( const char *str, qboolean get )
 	query = SQALLOC( sizeof( *query ) );
 	memset( query, 0, sizeof( *query ) );
 
+	if( iface && *iface ) {
+		query->iface = SQALLOC( strlen( iface ) + 1 );
+		strcpy( query->iface, iface );
+	}
+
 	query->json_out = cJSON_CreateObject();
 
 	if( str[0] == '/' ) {
@@ -289,7 +295,7 @@ stat_query_t *StatQuery_CreateQuery( const char *str, qboolean get )
 	}
 
 	if( !get )
-		query->req = wswcurl_create( "%s/%s", mm_url->string, str );
+		query->req = wswcurl_create( iface, "%s/%s", mm_url->string, str );
 	else
 	{
 		// add in '/', '?' and '\0' = 3
@@ -305,7 +311,7 @@ stat_query_t *StatQuery_CreateQuery( const char *str, qboolean get )
 }
 
 // racesow
-stat_query_t *StatQuery_CreateRootQuery( const char *str, qboolean get )
+static stat_query_t *StatQuery_CreateRootQuery( const char *iface, const char *str, bool get )
 {
 	stat_query_t *query;
 
@@ -317,6 +323,11 @@ stat_query_t *StatQuery_CreateRootQuery( const char *str, qboolean get )
 	query = SQALLOC( sizeof( *query ) );
 	memset( query, 0, sizeof( *query ) );
 
+	if( iface && *iface ) {
+		query->iface = SQALLOC( strlen( iface ) + 1 );
+		strcpy( query->iface, iface );
+	}
+
 	query->json_out = cJSON_CreateObject();
 
 	if( str[0] == '/' ) {
@@ -324,7 +335,7 @@ stat_query_t *StatQuery_CreateRootQuery( const char *str, qboolean get )
 	}
 
 	if( !get )
-		query->req = wswcurl_create( str );
+		query->req = wswcurl_create( iface, str );
 	else
 	{
 		// add in '/', '?' and '\0' = 3
@@ -336,7 +347,7 @@ stat_query_t *StatQuery_CreateRootQuery( const char *str, qboolean get )
 	return query;
 }
 
-int StatQuery_Header( stat_query_t *query, const char *key, const char *value )
+static int StatQuery_Header( stat_query_t *query, const char *key, const char *value )
 {
 	if( !query->req )
 		return -1;
@@ -344,7 +355,7 @@ int StatQuery_Header( stat_query_t *query, const char *key, const char *value )
 	return wswcurl_header( query->req, key, value );
 }
 
-int StatQuery_CustomRequest( stat_query_t *query, const char *method )
+static int StatQuery_CustomRequest( stat_query_t *query, const char *method )
 {
 	if( !query->req )
 		return -1;
@@ -353,7 +364,7 @@ int StatQuery_CustomRequest( stat_query_t *query, const char *method )
 }
 // !racesow
 
-void StatQuery_DestroyQuery( stat_query_t *query )
+static void StatQuery_DestroyQuery( stat_query_t *query )
 {
 	// close wswcurl and json_in json_out
 	if( query->req )
@@ -370,22 +381,25 @@ void StatQuery_DestroyQuery( stat_query_t *query )
 	if( query->response_raw )
 		SQFREE( query->response_raw );
 
+	SQFREE( query->iface );
+	SQFREE( query->url );
+
 	// actual query
 	SQFREE( query );
 }
 
-void StatQuery_SetCallback( stat_query_t *query, void (*callback_fn)( stat_query_t *, qboolean, void *), void *customp )
+static void StatQuery_SetCallback( stat_query_t *query, void( *callback_fn )(stat_query_t *, bool, void *), void *customp )
 {
 	query->callback_fn = callback_fn;
 	query->customp = customp;
 }
 
-void StatQuery_Prepare( stat_query_t *query )
+static void StatQuery_Prepare( stat_query_t *query )
 {
 	if( !query->req && query->url )
 	{
 		// GET request, finish the url and create the object
-		query->req = wswcurl_create( query->url );
+		query->req = wswcurl_create( query->iface, query->url );
 	}
 	// only allow json for POST requests
 	else if( query->has_json )
@@ -413,7 +427,7 @@ void StatQuery_Prepare( stat_query_t *query )
 			Com_Printf("StatQuery: Failed to allocate space for compressed JSON\n");
 			return;
 		}
-		z_result = compress( compData, &compSize, (unsigned char*)json_text, jsonSize );
+		z_result = qzcompress( compData, &compSize, (unsigned char*)json_text, jsonSize );
 		if( z_result != Z_OK )
 		{
 			Com_Printf("StatQuery: Failed to compress JSON\n");
@@ -443,16 +457,24 @@ void StatQuery_Prepare( stat_query_t *query )
 	}
 }
 
-void StatQuery_Send( stat_query_t *query )
+static void StatQuery_Send( stat_query_t *query )
 {
 	StatQuery_Prepare( query );
+
+	// check whether our curl request is valid (might have been delayed-allocated in StatQuery_Prepare)
+	if( !query->req ) {
+		if( query->callback_fn )
+			query->callback_fn( query, false, query->customp );
+		StatQuery_DestroyQuery( query );
+		return;
+	}
 
 	wswcurl_stream_callbacks ( query->req, NULL, StatQuery_CallbackGeneric, NULL, (void*)query );
 	wswcurl_start( query->req );
 }
 
 // racesow
-void StatQuery_PrepareJson( stat_query_t *query, stat_query_section_t *data )
+static void StatQuery_PrepareJson( stat_query_t *query, stat_query_section_t *data )
 {
 	char *json_text;
 	size_t jsonSize;
@@ -473,7 +495,7 @@ void StatQuery_PrepareJson( stat_query_t *query, stat_query_section_t *data )
 	wswcurl_header( query->req, "Content-Length", va( "%u", jsonSize ) );
 }
 
-void StatQuery_SendJson( stat_query_t *query, stat_query_section_t *data )
+static void StatQuery_SendJson( stat_query_t *query, stat_query_section_t *data )
 {
 	if( query->url )
 	{
@@ -487,11 +509,11 @@ void StatQuery_SendJson( stat_query_t *query, stat_query_section_t *data )
 }
 // !racesow
 
-void StatQuery_SetField( stat_query_t *query, const char *name, const char *value )
+static void StatQuery_SetField( stat_query_t *query, const char *name, const char *value )
 {
 	if( query->req )
 		wswcurl_formadd( query->req, name, "%s", value );
-	else
+	else if( query->url )
 	{
 		// GET request, store parameters
 		// add in '=', '&' and '\0' = 3
@@ -506,13 +528,13 @@ void StatQuery_SetField( stat_query_t *query, const char *name, const char *valu
 	}
 }
 
-stat_query_section_t *StatQuery_CreateSection( stat_query_t *query, stat_query_section_t *parent, const char *section_name )
+static stat_query_section_t *StatQuery_CreateSection( stat_query_t *query, stat_query_section_t *parent, const char *section_name )
 {
 	cJSON *cparent = (cJSON *)parent;
 	cJSON *this_section = NULL;
 
 	// this is only set in CreateSection/Array, needless to set in atoms
-	query->has_json = qtrue;
+	query->has_json = true;
 
 	this_section = cJSON_CreateObject();
 
@@ -527,12 +549,12 @@ stat_query_section_t *StatQuery_CreateSection( stat_query_t *query, stat_query_s
 	return (stat_query_section_t*)this_section;
 }
 
-stat_query_section_t *StatQuery_CreateArray( stat_query_t *query, stat_query_section_t *parent, const char *section_name )
+static stat_query_section_t *StatQuery_CreateArray( stat_query_t *query, stat_query_section_t *parent, const char *section_name )
 {
 	cJSON *cparent = (cJSON *)parent;
 	cJSON *this_section = NULL;
 
-	query->has_json = qtrue;
+	query->has_json = true;
 
 	this_section = cJSON_CreateArray();
 
@@ -547,18 +569,18 @@ stat_query_section_t *StatQuery_CreateArray( stat_query_t *query, stat_query_sec
 	return (stat_query_section_t *)this_section;
 }
 
-void StatQuery_SetString( stat_query_section_t *section, const char *prop_name, const char *prop_value )
+static void StatQuery_SetString( stat_query_section_t *section, const char *prop_name, const char *prop_value )
 {
 	cJSON_AddStringToObject( (cJSON *)section, prop_name, prop_value );
 }
 
-void StatQuery_SetNumber( stat_query_section_t *section, const char *prop_name, double prop_value )
+static void StatQuery_SetNumber( stat_query_section_t *section, const char *prop_name, double prop_value )
 {
 	cJSON_AddNumberToObject( (cJSON *)section, prop_name, prop_value );
 }
 
 // remove these 2 in favour of GetArraySection( array, idx ) + SetString/SetNumber
-void StatQuery_SetArrayString( stat_query_section_t *array, int idx, const char *prop_name, const char *prop_value )
+static void StatQuery_SetArrayString( stat_query_section_t *array, int idx, const char *prop_name, const char *prop_value )
 {
 	cJSON *section;
 
@@ -566,7 +588,7 @@ void StatQuery_SetArrayString( stat_query_section_t *array, int idx, const char 
 	StatQuery_SetString( (stat_query_section_t*)section, prop_name, prop_value );
 }
 
-void StatQuery_SetArrayNumber( stat_query_section_t *array, int idx, const char *prop_name, double prop_value )
+static void StatQuery_SetArrayNumber( stat_query_section_t *array, int idx, const char *prop_name, double prop_value )
 {
 	cJSON *section;
 
@@ -574,7 +596,7 @@ void StatQuery_SetArrayNumber( stat_query_section_t *array, int idx, const char 
 	StatQuery_SetNumber( (stat_query_section_t*)section, prop_name, prop_value );
 }
 
-void StatQuery_AddArrayString ( stat_query_section_t *array, const char *value )
+static void StatQuery_AddArrayString( stat_query_section_t *array, const char *value )
 {
 	cJSON *object;
 
@@ -582,7 +604,7 @@ void StatQuery_AddArrayString ( stat_query_section_t *array, const char *value )
 	cJSON_AddItemToArray( (cJSON *)array, object );
 }
 
-void StatQuery_AddArrayNumber ( stat_query_section_t *array, double prop_value )
+static void StatQuery_AddArrayNumber( stat_query_section_t *array, double prop_value )
 {
 	cJSON *object;
 
@@ -590,46 +612,46 @@ void StatQuery_AddArrayNumber ( stat_query_section_t *array, double prop_value )
 	cJSON_AddItemToArray( (cJSON *)array, object );
 }
 
-stat_query_section_t *StatQuery_GetRoot( stat_query_t *query )
+static stat_query_section_t *StatQuery_GetRoot( stat_query_t *query )
 {
 	return (stat_query_section_t *)query->json_in;
 }
 
-stat_query_section_t *StatQuery_GetSection( stat_query_section_t *parent, const char *name )
+static stat_query_section_t *StatQuery_GetSection( stat_query_section_t *parent, const char *name )
 {
 	return (stat_query_section_t *)cJSON_GetObjectItem( (cJSON *)parent, name );
 }
 
-double StatQuery_GetNumber( stat_query_section_t *parent, const char *name )
+static double StatQuery_GetNumber( stat_query_section_t *parent, const char *name )
 {
 	cJSON *object = cJSON_GetObjectItem( (cJSON *)parent, name );
 	return StatQuery_JsonToNumber( object );
 }
 
-const char *StatQuery_GetString( stat_query_section_t *parent, const char *name )
+static const char *StatQuery_GetString( stat_query_section_t *parent, const char *name )
 {
 	cJSON *object = cJSON_GetObjectItem( (cJSON *)parent, name );
 	return StatQuery_JsonToString( object );
 }
 
-stat_query_section_t *StatQuery_GetArraySection( stat_query_section_t *parent, int idx )
+static stat_query_section_t *StatQuery_GetArraySection( stat_query_section_t *parent, int idx )
 {
 	return (stat_query_section_t *)cJSON_GetArrayItem( (cJSON *)parent, idx );
 }
 
-double StatQuery_GetArrayNumber( stat_query_section_t *parent, int idx )
+static double StatQuery_GetArrayNumber( stat_query_section_t *parent, int idx )
 {
 	cJSON *object = cJSON_GetArrayItem( (cJSON *)parent, idx );
 	return StatQuery_JsonToNumber( object );
 }
 
-const char *StatQuery_GetArrayString( stat_query_section_t *parent, int idx )
+static const char *StatQuery_GetArrayString( stat_query_section_t *parent, int idx )
 {
 	cJSON *object = cJSON_GetArrayItem( (cJSON *)parent, idx );
 	return StatQuery_JsonToString( object );
 }
 
-const char *StatQuery_GetRawResponse( stat_query_t *query )
+static const char *StatQuery_GetRawResponse( stat_query_t *query )
 {
 	if( !query->response_raw )
 		StatQuery_CacheResponseRaw( query );
@@ -637,7 +659,7 @@ const char *StatQuery_GetRawResponse( stat_query_t *query )
 }
 
 // char *const *StatQuery_GetTokenizedResponse( stat_query_t *query, int *argc )
-char **StatQuery_GetTokenizedResponse( stat_query_t *query, int *argc )
+static char **StatQuery_GetTokenizedResponse( stat_query_t *query, int *argc )
 {
 	if( !query->response_tokens )
 		StatQuery_CacheTokenized( query );
@@ -649,7 +671,7 @@ char **StatQuery_GetTokenizedResponse( stat_query_t *query, int *argc )
 }
 
 // racesow
-int StatQuery_GetStatus( stat_query_t *query )
+static int StatQuery_GetStatus( stat_query_t *query )
 {
 	if( !query->req )
 		return -1;
@@ -658,7 +680,7 @@ int StatQuery_GetStatus( stat_query_t *query )
 }
 // !racesow
 
-void StatQuery_Poll( void )
+static void StatQuery_Poll( void )
 {
 	// TODO: handle and state validation
 	wswcurl_perform();

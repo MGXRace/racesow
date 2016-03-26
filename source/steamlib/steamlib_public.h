@@ -20,14 +20,11 @@ License along with this library.
 #define _STEAMLIB_PUBLIC_H_
 
 #include <stdint.h>
-
-#if defined(__APPLE__)
 #include <stddef.h> // For size_t
-#endif
 
 // steamlib_public.h - steam integration subsystem
 
-#define	STEAMLIB_API_VERSION 1
+#define	STEAMLIB_API_VERSION 3
 
 //===============================================================
 
@@ -42,6 +39,9 @@ typedef struct
 	// console messages
 	void ( *Com_Printf )( const char *format, ... );
 	void ( *Com_DPrintf )( const char *format, ... );
+
+	// console commands
+	void ( *Cbuf_ExecuteText )( int exec_when, const char *text );
 } steamlib_import_t;
 
 //
@@ -58,6 +58,10 @@ typedef struct
 
 	uint64_t ( *GetSteamID )( void );
 	int ( *GetAuthSessionTicket )( void (*callback)( void *, size_t ) );
+
+	void ( *AdvertiseGame )( const uint8_t *ip, unsigned short port );
+
+	void ( *GetPersonaName )( char *name, size_t namesize );
 } steamlib_export_t;
 
 #endif

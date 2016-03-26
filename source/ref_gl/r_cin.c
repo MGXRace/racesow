@@ -27,15 +27,15 @@ typedef struct r_cinhandle_s
 {
 	unsigned int	id;
 	int				registrationSequence;
-	qboolean		reset;
+	bool		reset;
 	char			*name;
 	char			*uploadName;
 	struct cinematics_s	*cin;
 	image_t			*image;
 	int				width, height;
-	qbyte			*pic;
-	qboolean		new_frame;
-	qboolean		yuv;
+	uint8_t			*pic;
+	bool		new_frame;
+	bool		yuv;
 	ref_yuv_t		*cyuv;
 	image_t			*yuv_images[3];
 	struct r_cinhandle_s *prev, *next;
@@ -47,28 +47,28 @@ static r_cinhandle_t r_cinematics_headnode, *r_free_cinematics;
 /*
 * R_RunCin
 */
-static qboolean R_RunCin( r_cinhandle_t *h )
+static bool R_RunCin( r_cinhandle_t *h )
 {
-	qboolean redraw;
+	bool redraw;
 	unsigned int now = ri.Sys_Milliseconds();
 
 	// don't advance cinematics during registration
 	if( rsh.registrationOpen ) {
-		return qfalse;
+		return false;
 	}
 
 	if( h->reset ) {
-		h->reset = qfalse;
+		h->reset = false;
 		ri.CIN_Reset( h->cin, now );
 	}
 
 	if( !ri.CIN_NeedNextFrame( h->cin, now ) ) {
-		return qfalse;
+		return false;
 	}
 
 	if( h->yuv ) {
 		h->cyuv = ri.CIN_ReadNextFrameYUV( h->cin, &h->width, &h->height, NULL, NULL, &redraw );
-		h->pic = ( qbyte * )h->cyuv;
+		h->pic = ( uint8_t * )h->cyuv;
 	}
 	else {
 		h->pic = ri.CIN_ReadNextFrame( h->cin, &h->width, &h->height, NULL, NULL, &redraw );
@@ -93,19 +93,19 @@ static image_t *R_ResampleCinematicFrame( r_cinhandle_t *handle )
 		int i;
 
 		if( !handle->yuv_images[0] ) {
-			qbyte *fake_data[1] = { NULL };
+			uint8_t *fake_data[1] = { NULL };
 			const char *letters[3] = { "y", "u", "v" };
 
 			for( i = 0; i < 3; i++ ) {
 				handle->yuv_images[i] = R_LoadImage( va( "%s_%s", handle->name, letters[i] ), 
-					fake_data, 1, 1, IT_CINEMATIC|IT_LUMINANCE, 1 );
+					fake_data, 1, 1, IT_SPECIAL, 1, IMAGE_TAG_GENERIC, 1 );
 			}
-			handle->new_frame = qtrue;
+			handle->new_frame = true;
 		}
 		
 		if( handle->new_frame ) {
 			int fbo;
-			qboolean in2D;
+			bool in2D;
 			
 			// render/convert three 8-bit YUV images into RGB framebuffer
 
@@ -118,11 +118,11 @@ static image_t *R_ResampleCinematicFrame( r_cinhandle_t *handle )
 
 			R_InitViewportTexture( &handle->image, handle->name, 0, 
 				handle->cyuv->image_width, handle->cyuv->image_height, 
-				0, IT_CINEMATIC|IT_FRAMEBUFFER, samples );
+				0, IT_SPECIAL|IT_FRAMEBUFFER, IMAGE_TAG_GENERIC, samples );
 
 			R_BindFrameBufferObject( handle->image->fbo );
 
-			R_Set2DMode( qtrue );
+			R_Set2DMode( true );
 
 			RB_Scissor( 0, 0, handle->image->upload_width, handle->image->upload_height );
 
@@ -139,24 +139,24 @@ static image_t *R_ResampleCinematicFrame( r_cinhandle_t *handle )
 				handle->cyuv->yuv, handle->yuv_images, 2 );
 
 			if( !in2D ) {
-				R_PopRefInst( 0 );
+				R_PopRefInst();
 			}
 			R_BindFrameBufferObject( fbo );
 
 			R_Set2DMode( in2D );
 
-			handle->new_frame = qfalse;
+			handle->new_frame = false;
 		}
 	}
 	else {
 		if( !handle->image ) {
 			handle->image = R_LoadImage( handle->name, &handle->pic, handle->width, handle->height, 
-				IT_CINEMATIC, samples );
-			handle->new_frame = qfalse;
+				IT_SPECIAL, 1, IMAGE_TAG_GENERIC, samples );
+			handle->new_frame = false;
 		} else if( handle->new_frame ) {
 			R_ReplaceImage( handle->image, &handle->pic, handle->width, handle->height, 
-				handle->image->flags, samples );
-			handle->new_frame = qfalse;
+				handle->image->flags, 1, samples );
+			handle->new_frame = false;
 		}
 	}
 
@@ -242,7 +242,6 @@ void R_RunAllCinematics( void )
 */
 static r_cinhandle_t *R_GetCinematicHandleById( unsigned int id )
 {
-	assert( id > 0 && id <= MAX_CINEMATICS );
 	if( id == 0 || id > MAX_CINEMATICS ) {
 		return NULL;
 	}
@@ -298,9 +297,19 @@ unsigned int R_StartCinematic( const char *arg )
 {
 	char uploadName[128];
 	size_t name_size;
+	char *name;
 	r_cinhandle_t *handle, *hnode, *next;
 	struct cinematics_s *cin;
-	qboolean yuv;
+	bool yuv;
+
+	name_size = strlen( "video/" ) + strlen( arg ) + 1;
+	name = alloca( name_size );
+
+	if( strstr( arg, "/" ) == NULL && strstr( arg, "\\" ) == NULL ) {
+		Q_snprintfz( name, name_size, "video/%s", arg );
+	} else {
+		Q_snprintfz( name, name_size, "%s", arg );
+	}
 
 	// find cinematics with the same name
 	hnode = &r_cinematics_headnode;
@@ -310,12 +319,12 @@ unsigned int R_StartCinematic( const char *arg )
 		assert( handle->cin );
 
 		// reuse
-		if( !Q_stricmp( handle->name, arg ) )
+		if( !Q_stricmp( handle->name, name ) )
 			return handle->id;
 	}
 
 	// open the file, read header, etc
-	cin = ri.CIN_Open( arg, ri.Sys_Milliseconds(), qtrue, &yuv, NULL );
+	cin = ri.CIN_Open( name, ri.Sys_Milliseconds(), &yuv, NULL );
 
 	// take a free cinematic handle if possible
 	if( !r_free_cinematics || !cin )
@@ -325,9 +334,7 @@ unsigned int R_StartCinematic( const char *arg )
 	r_free_cinematics = handle->next;
 
 	// copy name
-	name_size = strlen( arg ) + 1;
-	handle->name = R_Malloc( name_size );
-	memcpy( handle->name, arg, name_size );
+	handle->name = R_CopyString( name );
 
 	// copy upload name
 	Q_snprintfz( uploadName, sizeof( uploadName ), "***r_cinematic%i***", handle->id-1 );
@@ -336,7 +343,7 @@ unsigned int R_StartCinematic( const char *arg )
 	memcpy( handle->uploadName, uploadName, name_size );
 
 	handle->cin = cin;
-	handle->new_frame = qfalse;
+	handle->new_frame = false;
 	handle->yuv = yuv;
 	handle->image = NULL;
 	handle->yuv_images[0] = handle->yuv_images[1] = handle->yuv_images[2] = NULL;
@@ -369,16 +376,16 @@ void R_TouchCinematic( unsigned int id )
 	handle->registrationSequence = rsh.registrationSequence;
 
 	if( handle->image ) {
-		R_TouchImage( handle->image );
+		R_TouchImage( handle->image, IMAGE_TAG_GENERIC );
 	}
 	for( i = 0; i < 3; i++ ) {
 		if( handle->yuv_images[i] ) {
-			R_TouchImage( handle->yuv_images[i] );
+			R_TouchImage( handle->yuv_images[i], IMAGE_TAG_GENERIC );
 		}
 	}
 
 	// do not attempt to reupload the new frame until successful R_RunCin 
-	handle->new_frame = qfalse;
+	handle->new_frame = false;
 	handle->pic = NULL;
 	handle->cyuv = NULL;
 }
@@ -436,7 +443,7 @@ void R_FreeCinematic( unsigned int id )
 */
 static void R_ResetCinematic( r_cinhandle_t *handle )
 {
-	handle->reset = qtrue;
+	handle->reset = true;
 }
 
 /*

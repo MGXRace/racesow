@@ -32,6 +32,7 @@ const field_t fields[] = {
 	{ "pathtarget", FOFS( pathtarget ), F_LSTRING },
 	{ "killtarget", FOFS( killtarget ), F_LSTRING },
 	{ "message", FOFS( message ), F_LSTRING },
+	{ "helpmessage", FOFS( helpmessage ), F_LSTRING },
 	{ "team", FOFS( team ), F_LSTRING },
 	{ "wait", FOFS( wait ), F_FLOAT },
 	{ "delay", FOFS( delay ), F_FLOAT },
@@ -80,6 +81,7 @@ const field_t fields[] = {
 	{ "debris2", STOFS( debris2 ), F_LSTRING, FFL_SPAWNTEMP },
 	{ "shaderName", STOFS( shaderName ), F_LSTRING, FFL_SPAWNTEMP },
 	{ "size", STOFS( size ), F_INT, FFL_SPAWNTEMP },
+	{ "colorCorrection", STOFS( colorCorrection ), F_LSTRING, FFL_SPAWNTEMP },
 
 	{ NULL, 0, F_INT, 0 }
 };
@@ -143,6 +145,8 @@ spawn_t	spawns[] = {
 	{ "target_changelevel", SP_target_changelevel },
 	{ "target_relay", SP_target_relay },
 	{ "target_delay", SP_target_delay },
+	{ "target_teleporter", SP_target_teleporter },
+	{ "target_kill", SP_target_kill },
 
 	{ "worldspawn", SP_worldspawn },
 
@@ -366,7 +370,7 @@ static char *ED_NewString( const char *string )
 static void ED_ParseField( char *key, char *value, edict_t *ent )
 {
 	const field_t *f;
-	qbyte *b;
+	uint8_t *b;
 	float v;
 	vec3_t vec;
 
@@ -376,9 +380,9 @@ static void ED_ParseField( char *key, char *value, edict_t *ent )
 		{
 			// found it
 			if( f->flags & FFL_SPAWNTEMP )
-				b = (qbyte *)&st;
+				b = (uint8_t *)&st;
 			else
-				b = (qbyte *)ent;
+				b = (uint8_t *)ent;
 
 			switch( f->type )
 			{
@@ -464,6 +468,8 @@ static char *ED_ParseEdict( char *data, edict_t *ent )
 
 	if( !init )
 		ent->classname = NULL;
+	if( ent->classname && ent->helpmessage )
+		ent->mapmessage_index = G_RegisterHelpMessage( ent->helpmessage );
 
 	return data;
 }
@@ -546,7 +552,7 @@ void G_PrecacheMedia( void )
 	trap_SkinIndex( "models/players/bigvic/default" );
 
 	// FIXME: Temporarily use normal gib until the head is fixed
-	trap_ModelIndex( "models/objects/gibs/gib1/gib1.md3" );
+	trap_ModelIndex( "models/objects/gibs/illuminati1/illuminati1.md3" );
 
 	//
 	// SOUNDS
@@ -777,7 +783,7 @@ void G_InitLevel( char *mapname, char *entities, int entstrlen, unsigned int lev
 	{
 		game.edicts[i+1].s.number = i+1;
 		game.edicts[i+1].r.client = &game.clients[i];
-		game.edicts[i+1].r.inuse = ( trap_GetClientState( i ) >= CS_CONNECTED ) ? qtrue : qfalse;
+		game.edicts[i+1].r.inuse = ( trap_GetClientState( i ) >= CS_CONNECTED ) ? true : false;
 		memset( &game.clients[i].level, 0, sizeof( game.clients[0].level ) );
 		game.clients[i].level.timeStamp = level.time;
 	}
@@ -793,20 +799,24 @@ void G_InitLevel( char *mapname, char *entities, int entstrlen, unsigned int lev
 	trap_ConfigString( CS_MATCHNAME, "" );
 	trap_ConfigString( CS_MATCHSCORE, "" );
 
+	// reset map messages
+	for( i = 0; i < MAX_HELPMESSAGES; i++ ) {
+		trap_ConfigString( CS_HELPMESSAGES + i, "" );
+	}
+
 	G_InitGameCommands();
 	G_MapLocations_Init();
 	G_CallVotes_Init();
 	G_SpawnQueue_Init();
 	G_Teams_Init();
+	// load map script
+	G_asLoadMapScript( level.mapname );
 	G_Gametype_Init();
 	// ch : this would be the location to "transfer ratings"
 	G_PrecacheItems(); // set configstrings for items (gametype must be initialized)
 	G_PrecacheMedia();
 	G_PrecacheGameCommands(); // adding commands after this point won't update them to the client
 	AI_InitLevel(); // load navigation file of the current map
-
-	// load map script
-	G_asLoadMapScript( level.mapname );
 
 	// start spawning entities
 
@@ -942,7 +952,7 @@ static void SP_worldspawn( edict_t *ent )
 {
 	ent->movetype = MOVETYPE_PUSH;
 	ent->r.solid = SOLID_YES;
-	ent->r.inuse = qtrue;       // since the world doesn't use G_Spawn()
+	ent->r.inuse = true;       // since the world doesn't use G_Spawn()
 	VectorClear( ent->s.origin );
 	VectorClear( ent->s.angles );
 	GClip_SetBrushModel( ent, "*0" ); // sets mins / maxs and modelindex 1
@@ -978,4 +988,10 @@ static void SP_worldspawn( edict_t *ent )
 
 	if( st.gravity )
 		level.gravity = atof( st.gravity );
+
+	if( st.colorCorrection )
+	{
+		level.colorCorrection = trap_ImageIndex( st.colorCorrection );
+		gs.gameState.stats[GAMESTAT_COLORCORRECTION] = level.colorCorrection;
+	}
 }

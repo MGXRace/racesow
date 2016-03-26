@@ -145,7 +145,7 @@ static inline void trap_FS_FCloseFile( int file )
 	SOUND_IMPORT.FS_FCloseFile( file );
 }
 
-static inline qboolean trap_FS_RemoveFile( const char *filename )
+static inline bool trap_FS_RemoveFile( const char *filename )
 {
 	return SOUND_IMPORT.FS_RemoveFile( filename );
 }
@@ -155,7 +155,7 @@ static inline int trap_FS_GetFileList( const char *dir, const char *extension, c
 	return SOUND_IMPORT.FS_GetFileList( dir, extension, buf, bufsize, start, end );
 }
 
-static inline qboolean trap_FS_IsUrl( const char *url )
+static inline bool trap_FS_IsUrl( const char *url )
 {
 	return SOUND_IMPORT.FS_IsUrl( url );
 }
@@ -163,17 +163,12 @@ static inline qboolean trap_FS_IsUrl( const char *url )
 // misc
 static inline unsigned int trap_Milliseconds( void )
 {
-	return SOUND_IMPORT.Milliseconds();
+	return SOUND_IMPORT.Sys_Milliseconds();
 }
 
 static inline void trap_Sleep( unsigned int milliseconds )
 {
-	SOUND_IMPORT.Sleep( milliseconds );
-}
-
-static inline void trap_PageInMemory( qbyte *buffer, int size )
-{
-	SOUND_IMPORT.PageInMemory( buffer, size );
+	SOUND_IMPORT.Sys_Sleep( milliseconds );
 }
 
 static inline struct mempool_s *trap_MemAllocPool( const char *name, const char *filename, int fileline )
@@ -208,17 +203,17 @@ static inline void trap_GetEntitySpatilization( int entnum, vec3_t origin, vec3_
 
 static inline void *trap_LoadLibrary( char *name, dllfunc_t *funcs )
 {
-	return SOUND_IMPORT.LoadLibrary( name, funcs );
+	return SOUND_IMPORT.Sys_LoadLibrary( name, funcs );
 }
 
 static inline void trap_UnloadLibrary( void **lib )
 {
-	SOUND_IMPORT.UnloadLibrary( lib );
+	SOUND_IMPORT.Sys_UnloadLibrary( lib );
 }
 
-static inline int trap_Thread_Create( struct qthread_s **pthread, void *(*routine) (void*), void *param )
+static inline struct qthread_s *trap_Thread_Create( void *(*routine) (void*), void *param )
 {
-	return SOUND_IMPORT.Thread_Create( pthread, routine, param );
+	return SOUND_IMPORT.Thread_Create( routine, param );
 }
 
 static inline void trap_Thread_Join( struct qthread_s *thread )
@@ -231,12 +226,12 @@ static inline void trap_Thread_Yield( void )
 	SOUND_IMPORT.Thread_Yield();
 }
 
-static inline int trap_Mutex_Create( struct qmutex_s **pmutex )
+static inline struct qmutex_s *trap_Mutex_Create( void )
 {
-	return SOUND_IMPORT.Mutex_Create( pmutex );
+	return SOUND_IMPORT.Mutex_Create();
 }
 
-static inline void trap_Mutex_Destroy( struct qmutex_s *mutex )
+static inline void trap_Mutex_Destroy( struct qmutex_s **mutex )
 {
 	SOUND_IMPORT.Mutex_Destroy( mutex );
 }
@@ -251,27 +246,33 @@ static inline void trap_Mutex_Unlock( struct qmutex_s *mutex )
 	SOUND_IMPORT.Mutex_Unlock( mutex );
 }
 
-static inline qbufQueue_t *trap_BufQueue_Create( size_t bufSize, int flags )
+static inline qbufPipe_t *trap_BufPipe_Create( size_t bufSize, int flags )
 {
-	return SOUND_IMPORT.BufQueue_Create( bufSize, flags );
+	return SOUND_IMPORT.BufPipe_Create( bufSize, flags );
 }
 
-static inline void trap_BufQueue_Destroy( qbufQueue_t **pqueue )
+static inline void trap_BufPipe_Destroy( qbufPipe_t **pqueue )
 {
-	SOUND_IMPORT.BufQueue_Destroy( pqueue );
+	SOUND_IMPORT.BufPipe_Destroy( pqueue );
 }
 
-static inline void trap_BufQueue_Finish( qbufQueue_t *queue )
+static inline void trap_BufPipe_Finish( qbufPipe_t *queue )
 {
-	SOUND_IMPORT.BufQueue_Finish( queue );
+	SOUND_IMPORT.BufPipe_Finish( queue );
 }
 
-static inline void trap_BufQueue_EnqueueCmd( qbufQueue_t *queue, const void *cmd, unsigned cmd_size )
+static inline void trap_BufPipe_WriteCmd( qbufPipe_t *queue, const void *cmd, unsigned cmd_size )
 {
-	SOUND_IMPORT.BufQueue_EnqueueCmd( queue, cmd, cmd_size );
+	SOUND_IMPORT.BufPipe_WriteCmd( queue, cmd, cmd_size );
 }
 
-static inline int trap_BufQueue_ReadCmds( qbufQueue_t *queue, unsigned (**cmdHandlers)( const void * ) )
+static inline int trap_BufPipe_ReadCmds( qbufPipe_t *queue, unsigned (**cmdHandlers)( const void * ) )
 {
-	return SOUND_IMPORT.BufQueue_ReadCmds( queue, cmdHandlers );
+	return SOUND_IMPORT.BufPipe_ReadCmds( queue, cmdHandlers );
+}
+
+static inline void trap_BufPipe_Wait( qbufPipe_t *queue, int (*read)( qbufPipe_t *, unsigned( ** )(const void *), bool ), 
+	unsigned (**cmdHandlers)( const void * ), unsigned timeout_msec )
+{
+	SOUND_IMPORT.BufPipe_Wait( queue, read, cmdHandlers, timeout_msec );
 }

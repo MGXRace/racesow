@@ -35,12 +35,12 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 static bgTrack_t *s_bgTrack;
 static bgTrack_t *s_bgTrackHead;
 
-static qboolean s_bgTrackPaused = qfalse;  // the track is manually paused
-static qboolean s_bgTrackLocked = qfalse;  // the track is blocked by the game (e.g. the window's minimized)
-static qboolean s_bgTrackMuted = qfalse;
-static volatile qboolean s_bgTrackBuffering = qfalse;
-static volatile qboolean s_bgTrackLoading = qfalse; // unset by s_bgOpenTread when finished loading
-static struct qthread_s *s_bgOpenTread;
+static bool s_bgTrackPaused = false;  // the track is manually paused
+static int s_bgTrackLocked = 0;		// the track is blocked by the game (e.g. the window's minimized)
+static bool s_bgTrackMuted = false;
+static volatile bool s_bgTrackBuffering = false;
+static volatile bool s_bgTrackLoading = false; // unset by s_bgOpenThread when finished loading
+static struct qthread_s *s_bgOpenThread;
 
 /*
 * S_AllocTrack
@@ -51,10 +51,11 @@ static bgTrack_t *S_AllocTrack( const char *filename )
 
 	track = S_Malloc( sizeof( *track ) + strlen( filename ) + 1 );
 	track->stream = NULL;
-	track->ignore = qfalse;
-	track->filename = (char *)((qbyte *)track + sizeof( *track ));
+	track->ignore = false;
+	track->filename = (char *)((uint8_t *)track + sizeof( *track ));
 	strcpy( track->filename, filename );
 	track->isUrl = trap_FS_IsUrl( filename );
+	track->muteOnPause = track->isUrl;
 	track->anext = s_bgTrackHead;
 	s_bgTrackHead = track;
 
@@ -64,7 +65,7 @@ static bgTrack_t *S_AllocTrack( const char *filename )
 /*
 * S_ValidMusicFile
 */
-static qboolean S_ValidMusicFile( bgTrack_t *track )
+static bool S_ValidMusicFile( bgTrack_t *track )
 {
 	return (track->stream != NULL) && ( !track->isUrl || !S_EoStream( track->stream ) );
 }
@@ -84,20 +85,20 @@ static void S_CloseMusicTrack( bgTrack_t *track )
 /*
 * S_OpenMusicTrack
 */
-static qboolean S_OpenMusicTrack( bgTrack_t *track, qboolean *buffering )
+static bool S_OpenMusicTrack( bgTrack_t *track, bool *buffering )
 {
 	const char *filename = track->filename;
 
 	if( track->ignore )
-		return qfalse;
+		return false;
 
 mark0:
 	if( buffering )
-		*buffering = qfalse;
+		*buffering = false;
 
 	if( !track->stream )
 	{
-		qboolean delay = qfalse;
+		bool delay = false;
 
 		track->stream = S_OpenStream( filename, &delay );
 		if( track->stream && delay )
@@ -105,7 +106,7 @@ mark0:
 			// let the background track buffer for a while
 			//Com_Printf( "S_OpenMusicTrack: buffering %s...\n", track->filename );
 			if( buffering )
-				*buffering = qtrue;
+				*buffering = true;
 		}
 	}
 	else
@@ -118,7 +119,7 @@ mark0:
 		}
 	}
 
-	return qtrue;
+	return true;
 }
 
 /*
@@ -166,7 +167,7 @@ static void *S_OpenBackgroundTrackProc( void *ptrack )
 {
 	bgTrack_t *track = ptrack;
 	unsigned start;
-	qboolean buffering;
+	bool buffering;
 
 	S_OpenMusicTrack( track, &buffering );
 
@@ -188,13 +189,13 @@ static void *S_OpenBackgroundTrackProc( void *ptrack )
 		// in case we delayed openening to let the stream be cached for a while,
 		// start actually reading from it now
 		if( !S_ContOpenStream( track->stream ) ) {
-			track->ignore = qtrue;
+			track->ignore = true;
 		}
-		s_bgTrackBuffering = qfalse;
+		s_bgTrackBuffering = false;
 	}
 
 	s_bgTrack = track;
-	s_bgTrackLoading = qfalse;
+	s_bgTrackLoading = false;
 	return NULL;
 }
 
@@ -203,9 +204,9 @@ static void *S_OpenBackgroundTrackProc( void *ptrack )
 */
 static void S_OpenBackgroundTrackTask( bgTrack_t *track )
 {
-	s_bgTrackLoading = qtrue;
-	s_bgTrackBuffering = qfalse;
-	trap_Thread_Create( &s_bgOpenTread, S_OpenBackgroundTrackProc, track );
+	s_bgTrackLoading = true;
+	s_bgTrackBuffering = false;
+	s_bgOpenThread = trap_Thread_Create( S_OpenBackgroundTrackProc, track );
 }
 
 /*
@@ -213,9 +214,9 @@ static void S_OpenBackgroundTrackTask( bgTrack_t *track )
 */
 static void S_CloseBackgroundTrackTask( void )
 {
-	s_bgTrackBuffering = qfalse;
-	trap_Thread_Join( s_bgOpenTread );
-	s_bgOpenTread = NULL;
+	s_bgTrackBuffering = false;
+	trap_Thread_Join( s_bgOpenThread );
+	s_bgOpenThread = NULL;
 }
 
 // =================================
@@ -247,7 +248,7 @@ static void R_SortPlaylistItems( int numItems, playlistItem_t *items )
 /*
 * S_ReadPlaylistFile
 */
-static bgTrack_t *S_ReadPlaylistFile( const char *filename, qboolean shuffle, qboolean loop )
+static bgTrack_t *S_ReadPlaylistFile( const char *filename, bool shuffle, bool loop )
 {
 	int filenum, length;
 	char *tmpname = 0;
@@ -350,7 +351,7 @@ static bgTrack_t *S_ReadPlaylistFile( const char *filename, qboolean shuffle, qb
 /*
 * S_AdvanceBackgroundTrack
 */
-static qboolean S_AdvanceBackgroundTrack( int n )
+static bool S_AdvanceBackgroundTrack( int n )
 {
 	bgTrack_t *track;
 
@@ -364,10 +365,10 @@ static qboolean S_AdvanceBackgroundTrack( int n )
 		S_CloseBackgroundTrackTask();
 		S_CloseMusicTrack( s_bgTrack );
 		S_OpenBackgroundTrackTask( track );
-		return qtrue;
+		return true;
 	}
 
-	return qfalse;
+	return false;
 }
 
 // =================================
@@ -375,11 +376,11 @@ static qboolean S_AdvanceBackgroundTrack( int n )
 /*
 * Local helper functions
 */
-static qboolean music_process( void )
+static bool music_process( void )
 {
 	int l = 0;
 	snd_stream_t *music_stream;
-	qbyte decode_buffer[MUSIC_BUFFER_SIZE];
+	uint8_t decode_buffer[MUSIC_BUFFER_SIZE];
 
 	while( S_GetRawSamplesLength() < MUSIC_PRELOAD_MSEC )
 	{
@@ -393,28 +394,23 @@ static qboolean music_process( void )
 
 		if( !l )
 		{
-			bgTrack_t *cur = s_bgTrack;
-			
-			if( !cur->loop )
+			if( !s_bgTrack->loop )
 			{
 				if( !S_AdvanceBackgroundTrack( 1 ) )
 				{
 					if( !S_ValidMusicFile( s_bgTrack ) )
-					{
-						S_StopBackgroundTrack();
-						return qfalse;
-					}
+						return false;
 				}
 
-				if( s_bgTrackBuffering || s_bgTrackLoading ) {
-					return qtrue;
-				}
+				if( s_bgTrackBuffering || s_bgTrackLoading )
+					return true;
 			}
 
-			if( !S_ResetStream( music_stream ) )
+			music_stream = s_bgTrack->stream;
+			if( !music_stream || !S_ResetStream( music_stream ) )
 			{
 				// if failed, close the track?
-				return qfalse;
+				return false;
 			}
 
 			continue;
@@ -422,11 +418,11 @@ static qboolean music_process( void )
 
 		S_RawSamples2( l / (music_stream->info.width * music_stream->info.channels),
 			music_stream->info.rate, music_stream->info.width, 
-			music_stream->info.channels, decode_buffer, qtrue,
+			music_stream->info.channels, decode_buffer, true,
 			s_bgTrackMuted ? 0 : 1 );
 	}
 
-	return qtrue;
+	return true;
 }
 
 /*
@@ -437,9 +433,9 @@ void S_UpdateMusic( void )
 {
 	if( !s_bgTrack )
 		return;
-	if( !s_musicvolume->value && !s_bgTrack->isUrl )
+	if( !s_musicvolume->value && !s_bgTrack->muteOnPause )
 		return;
-	if( s_bgTrackLoading || s_bgTrackPaused || s_bgTrackLocked )
+	if( s_bgTrackLoading || s_bgTrackPaused || s_bgTrackLocked > 0 )
 		return;
 
 	if( !music_process() )
@@ -453,7 +449,7 @@ void S_UpdateMusic( void )
 /*
 * Global functions (sound.h)
 */
-void S_StartBackgroundTrack( const char *intro, const char *loop )
+void S_StartBackgroundTrack( const char *intro, const char *loop, int mode )
 {
 	const char *ext;
 	bgTrack_t *introTrack, *loopTrack;
@@ -465,22 +461,21 @@ void S_StartBackgroundTrack( const char *intro, const char *loop )
 	if( !intro || !intro[0] )
 		return;
 
-	s_bgTrackMuted = qfalse;
-	s_bgTrackPaused = qfalse;
+	s_bgTrackMuted = false;
+	s_bgTrackPaused = false;
 
 	ext = COM_FileExtension( intro );
 	if( ext && !Q_stricmp( ext, ".m3u" ) )
 	{
-		int mode = 0;
-
 		// mode bits:
 		// 1 - shuffle
 		// 2 - loop the selected track
+		// 3 - stream (even if muted)
 		if( loop && loop[0] )
 			mode = atoi( loop );
 
 		firstTrack = S_ReadPlaylistFile( intro, 
-			mode & 1 ? qtrue : qfalse, mode & 2 ? qtrue : qfalse );
+			mode & 1 ? true : false, mode & 2 ? true : false );
 		if( firstTrack )
 			goto start_playback;
 	}
@@ -488,6 +483,7 @@ void S_StartBackgroundTrack( const char *intro, const char *loop )
 	// the intro track loops unless another loop track has been specified
 	introTrack = S_AllocTrack( intro );
 	introTrack->next = introTrack->prev = introTrack;
+	introTrack->muteOnPause = introTrack->isUrl || mode & 4 ? true : false;
 
 	if( loop && loop[0] && Q_stricmp( intro, loop ) )
 	{
@@ -497,9 +493,10 @@ void S_StartBackgroundTrack( const char *intro, const char *loop )
 			S_CloseMusicTrack( loopTrack );
 
 			introTrack->next = introTrack->prev = loopTrack;
-			introTrack->loop = qfalse;
+			introTrack->loop = false;
 
-			loopTrack->loop = qtrue;
+			loopTrack->loop = true;
+			loopTrack->muteOnPause = loopTrack->isUrl || mode & 4 ? true : false;
 			loopTrack->next = loopTrack->prev = loopTrack;
 		}
 	}
@@ -540,8 +537,8 @@ void S_StopBackgroundTrack( void )
 	s_bgTrack = NULL;
 	s_bgTrackHead = NULL;
 
-	s_bgTrackMuted = qfalse;
-	s_bgTrackPaused = qfalse;
+	s_bgTrackMuted = false;
+	s_bgTrackPaused = false;
 }
 
 /*
@@ -569,8 +566,8 @@ void S_PauseBackgroundTrack( void )
 		return;
 	}
 
-	// in case of a streaming URL, reset the stream
-	if( s_bgTrack->isUrl ) {
+	// in case of a streaming URL or video, mute but keep streaming
+	if( s_bgTrack->muteOnPause ) {
 		s_bgTrackMuted = !s_bgTrackMuted;
 		return;
 	}
@@ -581,11 +578,11 @@ void S_PauseBackgroundTrack( void )
 /*
 * S_LockBackgroundTrack
 */
-void S_LockBackgroundTrack( qboolean lock )
+void S_LockBackgroundTrack( bool lock )
 {
 	if( s_bgTrack && !s_bgTrack->isUrl ) {
-		s_bgTrackLocked = lock;
+		s_bgTrackLocked += lock ? 1 : -1;
 	} else {
-		s_bgTrackLocked = qfalse;
+		s_bgTrackLocked = 0;
 	}
 }

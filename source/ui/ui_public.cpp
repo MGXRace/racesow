@@ -34,7 +34,8 @@ namespace WSWUI
 		return UI_API_VERSION;
 	}
 
-	void Init( int vidWidth, int vidHeight, int protocol, const char *demoExtension )
+	void Init( int vidWidth, int vidHeight, float pixelRatio,
+		int protocol, const char *demoExtension, const char *basePath )
 	{
 		// destructor doesnt throw
 		if( ui_main ) {
@@ -45,7 +46,8 @@ namespace WSWUI
 		// constructor may throw
 		try
 		{
-			ui_main = UI_Main::Instance( vidWidth, vidHeight, protocol, demoExtension );
+			ui_main = UI_Main::Instance( vidWidth, vidHeight, pixelRatio,
+				protocol, demoExtension, basePath );
 		}
 		catch( std::runtime_error &err )
 		{
@@ -71,54 +73,86 @@ namespace WSWUI
 	}
 
 	void Refresh( unsigned int time, int clientState, int serverState, 
-		qboolean demoPlaying, const char *demoName, qboolean demoPaused, unsigned int demoTime, 
-		qboolean backGround, qboolean showCursor )
+		bool demoPlaying, const char *demoName, bool demoPaused, unsigned int demoTime, 
+		bool backGround, bool showCursor )
 	{
 		if( ui_main ) {
 			ui_main->refreshScreen( time, clientState, serverState, 
-				demoPlaying == qtrue, demoName ? demoName : "",
-				demoPaused == qtrue, demoTime, backGround == qtrue, showCursor == qtrue );
+				demoPlaying == true, demoName ? demoName : "",
+				demoPaused == true, demoTime, backGround == true, showCursor == true );
 		}
 	}
 
 	void UpdateConnectScreen( const char *serverName, const char *rejectmessage, 
 		int downloadType, const char *downloadfilename, float downloadPercent, int downloadSpeed, 
-		int connectCount, qboolean backGround )
+		int connectCount, bool backGround )
 	{
 		if( ui_main )
 			ui_main->drawConnectScreen( serverName, rejectmessage, downloadType, downloadfilename, 
-				downloadPercent, downloadSpeed, connectCount, (backGround == qtrue) );
+				downloadPercent, downloadSpeed, connectCount, (backGround == true) );
 	}
 
-	void Keydown( int key )
+	void Keydown( int context, int key )
 	{
 		if( ui_main ) {
-			ui_main->keyEvent( key, true );
+			ui_main->keyEvent( context, key, true );
 		}
 	}
 
-	void Keyup( int key )
+	void Keyup( int context, int key )
 	{
 		if( ui_main ) {
-			ui_main->keyEvent( key, false );
+			ui_main->keyEvent( context, key, false );
 		}
 	}
 
-	void CharEvent( qwchar key )
+	void CharEvent( int context, wchar_t key )
 	{
 		// Check if the character is printable.
 		// Emitting textinput events for non-printable chars might cause 
 		// surprising behavior (e.g. backspace key not working in librocket's
 		// text input fields).
 		if( ui_main ) {
-			if(isprint(key)) ui_main->textInput( key );
+			if(isprint(key)) ui_main->textInput( context, key );
 		}
 	}
 
-	void MouseMove( int dx, int dy )
+	void MouseMove( int context, int dx, int dy )
 	{
 		if( ui_main ) {
-			ui_main->mouseMove( dx, dy );
+			ui_main->mouseMove( context, dx, dy, false, true );
+		}
+	}
+
+	void MouseSet( int context, int mx, int my, bool showCursor )
+	{
+		if( ui_main ) {
+			ui_main->mouseMove( context, mx, my, true, showCursor );
+		}
+	}
+
+	bool TouchEvent( int context, int id, touchevent_t type, int x, int y )
+	{
+		if( ui_main ) {
+			return ui_main->touchEvent( context, id, type, x, y );
+		}
+
+		return false;
+	}
+
+	bool IsTouchDown( int context, int id )
+	{
+		if( ui_main ) {
+			return ui_main->isTouchDown( context, id );
+		}
+
+		return false;
+	}
+
+	void CancelTouches( int context )
+	{
+		if( ui_main ) {
+			ui_main->cancelTouches( context );
 		}
 	}
 
@@ -127,6 +161,21 @@ namespace WSWUI
 		if( ui_main ) {
 			ui_main->forceMenuOff();
 		}
+	}
+
+	void ShowQuickMenu( bool show )
+	{
+		if( ui_main ) {
+			ui_main->showQuickMenu( show );
+		}
+	}
+
+	bool HaveQuickMenu( void )
+	{
+		if( ui_main ) {
+			return ui_main->haveQuickMenu();
+		}
+		return false;
 	}
 
 	void AddToServerList( const char *adr, const char *info )
@@ -160,8 +209,14 @@ ui_export_t *GetUIAPI( ui_import_t *import )
 	globals.Keyup = WSWUI::Keyup;
 	globals.CharEvent = WSWUI::CharEvent;
 	globals.MouseMove = WSWUI::MouseMove;
+	globals.MouseSet = WSWUI::MouseSet;
+	globals.TouchEvent = WSWUI::TouchEvent;
+	globals.IsTouchDown = WSWUI::IsTouchDown;
+	globals.CancelTouches = WSWUI::CancelTouches;
 
 	globals.ForceMenuOff = WSWUI::ForceMenuOff;
+	globals.ShowQuickMenu = WSWUI::ShowQuickMenu;
+	globals.HaveQuickMenu = WSWUI::HaveQuickMenu;
 
 	globals.AddToServerList = WSWUI::AddToServerList;
 
@@ -198,7 +253,7 @@ void Com_Printf( const char *format, ... )
 #endif
 
 #if defined(HAVE_DLLMAIN) && !defined(UI_HARD_LINKED)
-int _stdcall DLLMain( void *hinstDll, unsigned long dwReason, void *reserved )
+int WINAPI DLLMain( void *hinstDll, unsigned long dwReason, void *reserved )
 {
 	return 1;
 }

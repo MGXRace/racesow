@@ -35,7 +35,7 @@ static void CL_FTLibModule_Print( const char *msg )
 	Com_Printf( "%s", msg );
 }
 
-static void *CL_FTLibModule_MemAlloc( mempool_t *pool, int size, const char *filename, int fileline )
+static void *CL_FTLibModule_MemAlloc( mempool_t *pool, size_t size, const char *filename, int fileline )
 {
 	return _Mem_Alloc( pool, size, MEMPOOL_CINMODULE, 0, filename, fileline );
 }
@@ -65,14 +65,24 @@ static struct shader_s *CL_FTLibModule_RegisterPic( const char *name )
 	return re.RegisterPic( name );
 }
 
-static struct shader_s *CL_FTLibModule_RegisterRawPic( const char *name, int width, int height, qbyte *data )
+static struct shader_s *CL_FTLibModule_RegisterRawPic( const char *name, int width, int height, uint8_t *data, int samples )
 {
-	return re.RegisterRawPic( name, width, height, data );
+	return re.RegisterRawPic( name, width, height, data, samples );
+}
+
+static struct shader_s *CL_FTLibModule_RegisterRawAlphaMask( const char *name, int width, int height, uint8_t *data )
+{
+	return re.RegisterRawAlphaMask( name, width, height, data );
 }
 
 static void CL_FTLibModule_DrawStretchPic( int x, int y, int w, int h, float s1, float t1, float s2, float t2, const vec4_t color, const struct shader_s *shader )
 {
 	re.DrawStretchPic( x, y, w, h, s1, t1, s2, t2, color, shader );
+}
+
+static void CL_FTLibModule_ReplaceRawSubPic( struct shader_s *shader, int x, int y, int width, int height, uint8_t *data )
+{
+	re.ReplaceRawSubPic( shader, x, y, width, height, data );
 }
 
 static void CL_FTLibModule_Scissor( int x, int y, int w, int h )
@@ -85,10 +95,15 @@ static void CL_FTLibModule_GetScissor( int *x, int *y, int *w, int *h )
 	re.GetScissor( x, y, w, h );
 }
 
+static void CL_FTLibModule_ResetScissor( void )
+{
+	re.ResetScissor();
+}
+
 /*
 * FTLIB_LoadLibrary
 */
-void FTLIB_LoadLibrary( qboolean verbose )
+void FTLIB_LoadLibrary( bool verbose )
 {
 	static ftlib_import_t import;
 	dllfunc_t funcs[2];
@@ -131,15 +146,22 @@ void FTLIB_LoadLibrary( qboolean verbose )
 
 	import.R_RegisterPic = &CL_FTLibModule_RegisterPic;
 	import.R_RegisterRawPic = &CL_FTLibModule_RegisterRawPic;
+	import.R_RegisterRawAlphaMask = &CL_FTLibModule_RegisterRawAlphaMask;
 	import.R_DrawStretchPic = &CL_FTLibModule_DrawStretchPic;
+	import.R_ReplaceRawSubPic = &CL_FTLibModule_ReplaceRawSubPic;
 	import.R_Scissor = &CL_FTLibModule_Scissor;
 	import.R_GetScissor = &CL_FTLibModule_GetScissor;
+	import.R_ResetScissor = &CL_FTLibModule_ResetScissor;
 
-	import.Milliseconds = &Sys_Milliseconds;
-	import.Microseconds = &Sys_Microseconds;
+	import.Sys_Milliseconds = &Sys_Milliseconds;
+	import.Sys_Microseconds = &Sys_Microseconds;
+
+	import.Sys_LoadLibrary = &Com_LoadSysLibrary;
+	import.Sys_UnloadLibrary = Com_UnloadLibrary;
 
 	import.Mem_AllocPool = &CL_FTLibModule_MemAllocPool;
 	import.Mem_Alloc = &CL_FTLibModule_MemAlloc;
+	import.Mem_Realloc = &_Mem_Realloc;
 	import.Mem_Free = &CL_FTLibModule_MemFree;
 	import.Mem_FreePool = &CL_FTLibModule_MemFreePool;
 	import.Mem_EmptyPool = &CL_FTLibModule_MemEmptyPool;
@@ -153,7 +175,7 @@ void FTLIB_LoadLibrary( qboolean verbose )
 	funcs[0].name = "GetFTLibAPI";
 	funcs[0].funcPointer = ( void ** ) &GetFTLibAPI;
 	funcs[1].name = NULL;
-	ftlib_libhandle = Com_LoadLibrary( LIB_DIRECTORY "/ftlib_" ARCH LIB_SUFFIX, funcs );
+	ftlib_libhandle = Com_LoadLibrary( LIB_DIRECTORY "/" LIB_PREFIX "ftlib_" ARCH LIB_SUFFIX, funcs );
 
 	if( ftlib_libhandle )
 	{
@@ -198,13 +220,13 @@ void FTLIB_LoadLibrary( qboolean verbose )
 		}
 	}
 
-	Mem_CheckSentinelsGlobal();
+	Mem_DebugCheckSentinelsGlobal();
 }
 
 /*
 * FTLIB_UnloadLibrary
 */
-void FTLIB_UnloadLibrary( qboolean verbose )
+void FTLIB_UnloadLibrary( bool verbose )
 {
 	if( ftlib_export != NULL ) {
 		ftlib_export->Shutdown( verbose );
@@ -229,9 +251,9 @@ void FTLIB_UnloadLibrary( qboolean verbose )
 /*
 * FTLIB_RegisterFont
 */
-struct qfontface_s *FTLIB_RegisterFont( const char *family, int style, unsigned int size, unsigned int lastChar )
+struct qfontface_s *FTLIB_RegisterFont( const char *family, const char *fallback, int style, unsigned int size )
 {
-	return ftlib_export ? ftlib_export->RegisterFont( family, style, size, lastChar ) : NULL;
+	return ftlib_export ? ftlib_export->RegisterFont( family, fallback, style, size ) : NULL;
 }
 
 /*
@@ -257,7 +279,7 @@ void FTLIB_TouchAllFonts( void )
 /*
 * FTLIB_PrecacheFonts
 */
-void FTLIB_PrecacheFonts( qboolean verbose )
+void FTLIB_PrecacheFonts( bool verbose )
 {
 	if( ftlib_export ) {
 		ftlib_export->PrecacheFonts( verbose );
@@ -267,7 +289,7 @@ void FTLIB_PrecacheFonts( qboolean verbose )
 /*
 * FTLIB_FreeFonts
 */
-void FTLIB_FreeFonts( qboolean verbose )
+void FTLIB_FreeFonts( bool verbose )
 {
 	if( ftlib_export ) {
 		ftlib_export->FreeFonts( verbose );
@@ -275,6 +297,14 @@ void FTLIB_FreeFonts( qboolean verbose )
 }
 
 // drawing functions
+
+/*
+* FTLIB_FontSize
+*/
+size_t FTLIB_FontSize( struct qfontface_s *font )
+{
+	return ftlib_export ? ftlib_export->FontSize( font ) : 0;
+}
 
 /*
 * FTLIB_FontHeight
@@ -287,23 +317,62 @@ size_t FTLIB_FontHeight( struct qfontface_s *font )
 /*
 * FTLIB_StringWidth
 */
-size_t FTLIB_StringWidth( const char *str, struct qfontface_s *font, size_t maxlen )
+size_t FTLIB_StringWidth( const char *str, struct qfontface_s *font, size_t maxlen, int flags )
 {
-	return ftlib_export ? ftlib_export->StringWidth( str, font, maxlen ) : 0;
+	return ftlib_export ? ftlib_export->StringWidth( str, font, maxlen, flags ) : 0;
 }
 
 /*
 * FTLIB_StrlenForWidth
 */
-size_t FTLIB_StrlenForWidth( const char *str, struct qfontface_s *font, size_t maxwidth )
+size_t FTLIB_StrlenForWidth( const char *str, struct qfontface_s *font, size_t maxwidth, int flags )
 {
-	return ftlib_export ? ftlib_export->StrlenForWidth( str, font, maxwidth ) : 0;
+	return ftlib_export ? ftlib_export->StrlenForWidth( str, font, maxwidth, flags ) : 0;
+}
+
+/*
+* FTLIB_FontUnderline
+*/
+int FTLIB_FontUnderline( struct qfontface_s *font, int *thickness )
+{
+	if( ftlib_export ) {
+		return ftlib_export->FontUnderline( font, thickness );
+	}
+
+	if( thickness ) {
+		*thickness = 0;
+	}
+	return 0;
+}
+
+/*
+* FTLIB_FontAdvance
+*/
+size_t FTLIB_FontAdvance( struct qfontface_s *font )
+{
+	return ftlib_export ? ftlib_export->FontAdvance( font ) : 0;
+}
+
+/*
+* FTLIB_FontXHeight
+*/
+size_t FTLIB_FontXHeight( struct qfontface_s *font )
+{
+	return ftlib_export ? ftlib_export->FontXHeight( font ) : 0;
+}
+
+/*
+* FTLIB_SetDrawCharIntercept
+*/
+fdrawchar_t FTLIB_SetDrawCharIntercept( fdrawchar_t intercept )
+{
+	return ftlib_export ? ftlib_export->SetDrawIntercept( intercept ) : 0;
 }
 
 /*
 * FTLIB_DrawRawChar
 */
-void FTLIB_DrawRawChar( int x, int y, qwchar num, struct qfontface_s *font, vec4_t color )
+void FTLIB_DrawRawChar( int x, int y, wchar_t num, struct qfontface_s *font, vec4_t color )
 {
 	if( ftlib_export ) {
 		ftlib_export->DrawRawChar( x, y, num, font, color );
@@ -311,20 +380,38 @@ void FTLIB_DrawRawChar( int x, int y, qwchar num, struct qfontface_s *font, vec4
 }
 
 /*
-* FTLIB_DrawClampString
+* FTLIB_DrawClampChar
 */
-void FTLIB_DrawClampString( int x, int y, const char *str, int xmin, int ymin, int xmax, int ymax, struct qfontface_s *font, vec4_t color )
+void FTLIB_DrawClampChar( int x, int y, wchar_t num, int xmin, int ymin, int xmax, int ymax, struct qfontface_s *font, vec4_t color )
 {
 	if( ftlib_export ) {
-		ftlib_export->DrawClampString( x, y, str, xmin, ymin, xmax, ymax, font, color );
+		ftlib_export->DrawClampChar( x, y, num, xmin, ymin, xmax, ymax, font, color );
+	}
+}
+
+/*
+* FTLIB_DrawClampString
+*/
+void FTLIB_DrawClampString( int x, int y, const char *str, int xmin, int ymin, int xmax, int ymax, struct qfontface_s *font, vec4_t color, int flags )
+{
+	if( ftlib_export ) {
+		ftlib_export->DrawClampString( x, y, str, xmin, ymin, xmax, ymax, font, color, flags );
 	}
 }
 
 /*
 * FTLIB_DrawRawString
 */
-size_t FTLIB_DrawRawString( int x, int y, const char *str, size_t maxwidth, struct qfontface_s *font, vec4_t color )
+size_t FTLIB_DrawRawString( int x, int y, const char *str, size_t maxwidth, int *width, struct qfontface_s *font, vec4_t color, int flags )
 {
-	return ftlib_export ? ftlib_export->DrawRawString( x, y, str, maxwidth, font, color ) : 0;
+	return ftlib_export ? ftlib_export->DrawRawString( x, y, str, maxwidth, width, font, color, flags ) : 0;
+}
+
+/*
+* FTLIB_DrawMultilineString
+*/
+int FTLIB_DrawMultilineString( int x, int y, const char *str, int halign, int maxwidth, int maxlines, struct qfontface_s *font, vec4_t color, int flags )
+{
+	return ftlib_export ? ftlib_export->DrawMultilineString( x, y, str, halign, maxwidth, maxlines, font, color, flags ) : 0;
 }
 

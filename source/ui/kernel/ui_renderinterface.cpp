@@ -22,13 +22,18 @@ typedef Rocket::Core::CompiledGeometryHandle CompiledGeometryHandle;
 
 typedef struct shader_s shader_t;
 
-UI_RenderInterface::UI_RenderInterface( int vidWidth, int vidHeight )
+UI_RenderInterface::UI_RenderInterface( int vidWidth, int vidHeight, float pixelRatio )
 	: vid_width( vidWidth ), vid_height( vidHeight ), polyAlloc()
 {
+	pixelsPerInch = 160.0f * pixelRatio;
+
 	texCounter = 0;
 
 	scissorEnabled = false;
-	scissorX = scissorY = scissorWidth = scissorHeight = -1;
+	scissorX = 0;
+	scissorY = 0;
+	scissorWidth = vid_width;
+	scissorHeight = vid_height;
 
 	whiteShader = trap::R_RegisterPic( "$whiteimage" );
 }
@@ -93,7 +98,7 @@ void UI_RenderInterface::EnableScissorRegion(bool enable)
 	if( enable )
 		trap::R_Scissor( scissorX, scissorY, scissorWidth, scissorHeight );
 	else
-		trap::R_Scissor( -1, -1, -1, -1 );
+		trap::R_ResetScissor();
 
 	scissorEnabled = enable;
 }
@@ -103,13 +108,13 @@ void UI_RenderInterface::ReleaseTexture(Rocket::Core::TextureHandle texture_hand
 
 }
 
-bool UI_RenderInterface::GenerateTexture(Rocket::Core::TextureHandle & texture_handle, const Rocket::Core::byte *source, const Rocket::Core::Vector2i & source_dimensions)
+bool UI_RenderInterface::GenerateTexture(Rocket::Core::TextureHandle & texture_handle, const Rocket::Core::byte *source, const Rocket::Core::Vector2i & source_dimensions, int source_samples)
 {
 	shader_t *shader;
 	Rocket::Core::String name( MAX_QPATH, "ui_raw_%d", texCounter++ );
 
 	// Com_Printf("RenderInterface::GenerateTexture: going to register %s %dx%d\n", name.CString(), source_dimensions.x, source_dimensions.y );
-	shader = trap::R_RegisterRawPic( name.CString(), source_dimensions.x, source_dimensions.y, (qbyte*)source );
+	shader = trap::R_RegisterRawPic( name.CString(), source_dimensions.x, source_dimensions.y, (uint8_t*)source, source_samples );
 	if( !shader )
 	{
 		Com_Printf(S_COLOR_RED"Warning: RenderInterface couldnt register raw pic %s!\n", name.CString() );
@@ -126,22 +131,37 @@ bool UI_RenderInterface::GenerateTexture(Rocket::Core::TextureHandle & texture_h
 
 bool UI_RenderInterface::LoadTexture(Rocket::Core::TextureHandle & texture_handle, Rocket::Core::Vector2i & texture_dimensions, const Rocket::Core::String & source)
 {
-	shader_t *shader;
+	shader_t *shader = NULL;
 	Rocket::Core::String source2( source );
 
-	if( source2[0] == '/' )
+	if( source2[0] == '/' ) {
 		source2.Erase( 0, 1 );
+	}
+	else if( source2[0] == '?' ) {
+		String protocol = source2.Substring( 1, source2.Find( "::" ) - 1 );
+		if( protocol == "fonthandle" ) {
+			if( sscanf( source2.CString(), "?fonthandle::%p", &shader ) != 1 ) {
+				Com_Printf( S_COLOR_RED "Warning: RenderInterface couldnt load pic %s!\n", source.CString() );
+				return false;
+			}
+		}
+	}
 
-	shader = trap::R_RegisterPic( source2.CString() );
+	if( !shader ) {
+		shader = trap::R_RegisterPic( source2.CString() );
+	}
+
 	if( !shader )
 	{
-		Com_Printf(S_COLOR_RED"Warning: RenderInterface couldnt load pic %s!\n", source.CString() );
+		Com_Printf( S_COLOR_RED "Warning: RenderInterface couldnt load pic %s!\n", source.CString() );
 		return false;
 	}
 
 	trap::R_GetShaderDimensions( shader, &texture_dimensions.x, &texture_dimensions.y );
 
-	AddShaderToCache( source2 );
+	if( source2[0] != '?' ) {
+		AddShaderToCache( source2 );
+	}
 
 	texture_handle = TextureHandle( shader );
 
@@ -158,6 +178,16 @@ int UI_RenderInterface::GetHeight( void )
 int UI_RenderInterface::GetWidth( void )
 {
 	return this->vid_width;
+}
+
+float UI_RenderInterface::GetPixelsPerInch( void )
+{
+	return this->pixelsPerInch;
+}
+
+float UI_RenderInterface::GetBasePixelsPerInch( void )
+{
+	return 160.0f;
 }
 
 poly_t *UI_RenderInterface::RocketGeometry2Poly( bool temp, Rocket::Core::Vertex* vertices, int num_vertices, int* indices, int num_indices, Rocket::Core::TextureHandle texture )
@@ -193,6 +223,9 @@ poly_t *UI_RenderInterface::RocketGeometry2Poly( bool temp, Rocket::Core::Vertex
 		poly->colors[i][2] = vertices[i].colour.blue;
 		poly->colors[i][3] = vertices[i].colour.alpha;
 	}
+
+	for( i = 0; i < num_indices; i++ )
+		poly->elems[i] = indices[i];
 
 	poly->shader = ( texture == 0 ? whiteShader : ( shader_t* )texture );
 

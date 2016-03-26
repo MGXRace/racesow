@@ -32,10 +32,12 @@ typedef struct
 	void *wndproc;
 
 	char *applicationName;
+	WCHAR *applicationNameW;
 	HDC hDC;                    // handle to device context
 	HWND hWnd;                  // handle to window
 	HWND parenthWnd;			// handle to parent window
 	HGLRC hGLRC;                // handle to GL rendering context
+	int applicationIconResourceID;
 
 	char windowClassName[WINDOW_CLASSNAME_SIZE];
 	WCHAR windowClassNameW[WINDOW_CLASSNAME_SIZE];
@@ -43,7 +45,7 @@ typedef struct
 	HINSTANCE hinstOpenGL;      // HINSTANCE for the OpenGL library
 
 	int win_x, win_y;
-	qboolean allowdisplaydepthchange;
+	bool allowdisplaydepthchange;
 } glwstate_t;
 
 extern glwstate_t glw_state;

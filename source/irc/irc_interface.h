@@ -6,7 +6,7 @@
 #include "../qcommon/cvar.h"
 #include "../qalgo/q_trie.h"
 
-#define IRC_API_VERSION 3
+#define IRC_API_VERSION 4
 
 // numeric commands as specified by RFC 1459 - Internet Relay Chat Protocol
 typedef enum irc_numeric_e {
@@ -196,7 +196,7 @@ typedef struct
 	struct qfontface_s *(*SCR_RegisterFont)(const char *name, int style, unsigned int size );
 	void			(*SCR_DrawString)(int x, int y, int align, const char *str, struct qfontface_s *font, vec4_t color);
 	size_t			(*SCR_DrawStringWidth)(int x, int y, int align, const char *str, size_t maxwidth, struct qfontface_s *font, vec4_t color);
-	void			(*SCR_DrawRawChar)(int x, int y, qwchar num, struct qfontface_s *font, vec4_t color);
+	void			(*SCR_DrawRawChar)(int x, int y, wchar_t num, struct qfontface_s *font, vec4_t color);
 	size_t			(*SCR_strHeight)(struct qfontface_s *font );
 	size_t			(*SCR_strWidth)(const char *str, struct qfontface_s *font, size_t maxlen);
 	size_t			(*SCR_StrlenForWidth)(const char *str, struct qfontface_s *font, size_t maxwidth);
@@ -205,8 +205,8 @@ typedef struct
 	unsigned int	(*SCR_GetScreenWidth)( void );
 	unsigned int	(*SCR_GetScreenHeight)( void );
 	// clock
-	unsigned int	(*Milliseconds)(void);
-	quint64			(*Microseconds)(void);
+	unsigned int	(*Sys_Milliseconds)(void);
+	uint64_t			(*Sys_Microseconds)(void);
 	// managed memory allocation
 	struct mempool_s *(*Mem_AllocPool)(const char *name, const char *filename, int fileline);	
 	void		*(*Mem_Alloc)(int size, const char *filename, int fileline);
@@ -214,7 +214,7 @@ typedef struct
 	void		(*Mem_FreePool)(const char *filename, int fileline);
 	void		(*Mem_EmptyPool)(const char *filename, int fileline);
 	// dynvars
-	dynvar_t	*(*Dynvar_Create)(const char *name, qboolean console, dynvar_getter_f getter, dynvar_setter_f setter);
+	dynvar_t	*(*Dynvar_Create)(const char *name, bool console, dynvar_getter_f getter, dynvar_setter_f setter);
 	void		(*Dynvar_Destroy)(dynvar_t *dynvar);
 	dynvar_t	*(*Dynvar_Lookup)(const char *name);
 	const char	*(*Dynvar_GetName)(dynvar_t *dynvar);
@@ -266,10 +266,10 @@ typedef struct
 
 typedef struct irc_export_s {
 	int			(*API)(void);		// API version
-	qboolean	(*Init)(void);
+	bool	(*Init)(void);
 	void		(*Shutdown)(void);
-	qboolean	(*Connect)(void);	// connects to irc_server:irc_port
-	qboolean	(*Disconnect)(void);
+	bool	(*Connect)(void);	// connects to irc_server:irc_port
+	bool	(*Disconnect)(void);
 	void		(*AddListener)(irc_command_t cmd, irc_listener_f listener);
 	void		(*RemoveListener)(irc_command_t cmd, irc_listener_f listener);
 

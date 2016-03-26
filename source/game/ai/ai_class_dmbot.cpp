@@ -121,17 +121,18 @@ bool AI_NodeReached_Generic( edict_t *self )
 
 			// see if reached the second
 			if( n2 != NODE_INVALID &&
-				( DistanceFast( n2origin, origin ) < RADIUS ) && 
 				( ( nodes[n2].origin[2] - 16 ) < self->s.origin[2] ) &&
-				( nodes[n2].origin[2] + RADIUS > self->s.origin[2] ) )
+				( nodes[n2].origin[2] + RADIUS > self->s.origin[2] ) &&
+				( DistanceFast( n2origin, origin ) < RADIUS )
+				)
 			{
 				AI_NodeReached( self ); // advance the first
 				reached = true;		// return the second as reached
 			}
 			// see if reached the first
-			else if( ( DistanceFast( n1origin, origin ) < RADIUS ) && 
-				( ( nodes[n1].origin[2] - 16 ) < self->s.origin[2] ) &&
-				( nodes[n1].origin[2] + RADIUS > self->s.origin[2] ) )
+			else if( ( ( nodes[n1].origin[2] - 16 ) < self->s.origin[2] ) &&
+				( nodes[n1].origin[2] + RADIUS > self->s.origin[2] ) &&
+				( DistanceFast( n1origin, origin ) < RADIUS ) )
 			{
 				reached = true; // return the first as reached
 			}
@@ -164,18 +165,18 @@ bool AI_NodeReached_Special( edict_t *self )
 			n1origin[2] = n2origin[2] = origin[2] = 0;
 
 			// see if reached the second
-			if( ( DistanceFast( n2origin, origin ) < NODE_WIDE_REACH_RADIUS ) && 
-				( ( nodes[n2].origin[2] - 16 ) < self->s.origin[2] ) &&
+			if( ( ( nodes[n2].origin[2] - 16 ) < self->s.origin[2] ) &&
 				( nodes[n2].origin[2] + NODE_WIDE_REACH_RADIUS > self->s.origin[2] ) &&
+				( DistanceFast( n2origin, origin ) < NODE_WIDE_REACH_RADIUS ) && 
 				AI_ReachabilityVisible( self, nodes[n2].origin ) )
 			{
 				AI_NodeReached( self ); // advance the first
 				reached = true;		// return the second as reached
 			}
 			// see if reached the first
-			else if( ( DistanceFast( n1origin, origin ) < NODE_WIDE_REACH_RADIUS ) && 
-				( ( nodes[n1].origin[2] - 16 ) < self->s.origin[2] ) &&
+			else if( ( ( nodes[n1].origin[2] - 16 ) < self->s.origin[2] ) &&
 				( nodes[n1].origin[2] + NODE_WIDE_REACH_RADIUS > self->s.origin[2] ) &&
+				( DistanceFast( n1origin, origin ) < NODE_WIDE_REACH_RADIUS ) && 
 				AI_ReachabilityVisible( self, nodes[n1].origin ) )
 			{
 				reached = true; // return the first as reached
@@ -188,10 +189,46 @@ bool AI_NodeReached_Special( edict_t *self )
 	return reached;
 }
 
+static bool AI_AttemptWalljump( edict_t *self )
+{
+	if( self->ai->path.numNodes >= 1 )
+	{
+		int n1 = self->ai->current_node;
+		int n2 = self->ai->next_node;
+		vec3_t n1origin, n2origin, origin;
+
+		if( n1 == n2 )
+			return false;
+
+		// we use a wider radius in 2D, and a height range enough so they can't be jumped over
+		AI_GetNodeOrigin( n1, n1origin );
+		AI_GetNodeOrigin( n2, n2origin );
+		VectorCopy( self->s.origin, origin );
+
+		if( fabs( n1origin[2] - n2origin[2] ) < 32.0f && origin[2] >= n1origin[2] - 4.0f ) {
+			float dist = DistanceFast( n1origin, n2origin );
+			float n1d, n2d;
+
+			n1d = DistanceFast( n1origin, origin );
+			n2d = DistanceFast( n2origin, origin );
+
+			if( dist >= 150.0f && 
+				n1d >= dist*0.5f &&
+				n2d < dist ) {
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
 void BOT_DMclass_SpecialMove( edict_t *self, vec3_t lookdir, vec3_t pathdir, usercmd_t *ucmd )
 {
-	bool wallJump = true;
+	bool wallJump = false;
+#if 0
 	bool dash = true;
+#endif
 	bool bunnyhop = true;
 	trace_t trace;
 	vec3_t end;
@@ -212,12 +249,14 @@ void BOT_DMclass_SpecialMove( edict_t *self, vec3_t lookdir, vec3_t pathdir, use
 	// do not dash if the next link will be a fall, jump or 
 	// any other kind of special link
 	nextMoveType = AI_PlinkMoveType( n1, n2 );
+#if 0
 	if( nextMoveType & (LINK_LADDER|LINK_PLATFORM|LINK_ROCKETJUMP|LINK_FALL|LINK_JUMP|LINK_CROUCH) )
 		dash = false;
+#endif
 
 	if( nextMoveType &(LINK_LADDER|LINK_PLATFORM|LINK_FALL|LINK_CROUCH) )
 		bunnyhop = false;
-
+#if 0
 	if( VectorLengthFast( self->velocity ) < AI_JUMP_SPEED )
 	{
 		if( dash && self->groundentity ) // attempt dash
@@ -236,7 +275,9 @@ void BOT_DMclass_SpecialMove( edict_t *self, vec3_t lookdir, vec3_t pathdir, use
 			}
 		}
 	}
-	else if( bunnyhop )
+	else 
+#endif
+	if( bunnyhop && ( (nextMoveType &LINK_JUMP) || level.gametype.spawnableItemsMask == 0 ) )
 	{
 		if( self->groundentity )
 			ucmd->upmove = 1;
@@ -326,6 +367,17 @@ void BOT_DMclass_Move( edict_t *self, usercmd_t *ucmd )
 
 		nodeReached = AI_NodeReached_Generic( self );
 	}
+	else if( linkType & LINK_JUMPPAD )
+	{
+		VectorCopy( self->s.origin, v1 );
+		VectorCopy( nodes[self->ai->next_node].origin, v2 );
+		v1[2] = v2[2] = 0;
+		if( DistanceFast( v1, v2 ) > 32 && lookDot > BOT_FORWARD_EPSILON ) {
+			ucmd->forwardmove = 1; // push towards destination
+			ucmd->buttons |= BUTTON_WALK;
+		}
+		nodeReached = self->groundentity != NULL && AI_NodeReached_Generic( self );
+	}
 	// Platform riding - No move, riding elevator
 	else if( linkType & LINK_PLATFORM )
 	{
@@ -401,6 +453,9 @@ void BOT_DMclass_Move( edict_t *self, usercmd_t *ucmd )
 			{
 				if( linkType & LINK_JUMP )
 				{
+					if( AI_AttemptWalljump( self ) ) {
+						ucmd->buttons |= BUTTON_SPECIAL;
+					}
 					if( VectorLengthFast( tv( self->velocity[0], self->velocity[1], 0 ) ) < 600 )
 						VectorMA( self->velocity, 6.0f, lookdir, self->velocity );
 				}
@@ -544,65 +599,65 @@ void BOT_DMclass_MoveWander( edict_t *self, usercmd_t *ucmd )
 	}
 
 	// Move To Goal (Short Range Goal, not following paths)
-	if( AI_MoveToShortRangeGoalEntity( self, ucmd ) )
-		return;
-
-	// Swimming?
-	VectorCopy( self->s.origin, temp );
-	temp[2] += 24;
-
-	if( G_PointContents( temp ) & MASK_WATER )
+	if( !AI_MoveToShortRangeGoalEntity( self, ucmd ) )
 	{
-		// If drowning and no node, move up
-		if( self->r.client && self->r.client->resp.next_drown_time > 0 )
+		// Swimming?
+		VectorCopy( self->s.origin, temp );
+		temp[2] += 24;
+
+		if( G_PointContents( temp ) & MASK_WATER )
 		{
-			ucmd->upmove = 1;
-			self->s.angles[PITCH] = -45;
-		}
-		else
-			ucmd->upmove = 1;
+			// If drowning and no node, move up
+			if( self->r.client && self->r.client->resp.next_drown_time > 0 )
+			{
+				ucmd->upmove = 1;
+				self->s.angles[PITCH] = -45;
+			}
+			else
+				ucmd->upmove = 1;
 
-		ucmd->forwardmove = 1;
-	}
-	// else self->r.client->next_drown_time = 0; // probably shound not be messing with this, but
-
-
-	// Lava?
-	temp[2] -= 48;
-	if( G_PointContents( temp ) & ( CONTENTS_LAVA|CONTENTS_SLIME ) )
-	{
-		self->s.angles[YAW] += random() * 360 - 180;
-		ucmd->forwardmove = 1;
-		if( self->groundentity )
-			ucmd->upmove = 1;
-		else
-			ucmd->upmove = 0;
-		return;
-	}
-
-
-	// Check for special movement
-	if( VectorLengthFast( self->velocity ) < 37 )
-	{
-		if( random() > 0.1 && AI_SpecialMove( self, ucmd ) )  //jumps, crouches, turns...
-			return;
-
-		self->s.angles[YAW] += random() * 180 - 90;
-
-		if( !self->is_step )  // if there is ground continue otherwise wait for next move
-			ucmd->forwardmove = 0; //0
-		else if( AI_CanMove( self, BOT_MOVE_FORWARD ) )
-		{
 			ucmd->forwardmove = 1;
-			ucmd->buttons |= BUTTON_WALK;
+		}
+		// else self->r.client->next_drown_time = 0; // probably shound not be messing with this, but
+
+
+		// Lava?
+		temp[2] -= 48;
+		if( G_PointContents( temp ) & ( CONTENTS_LAVA|CONTENTS_SLIME ) )
+		{
+			self->s.angles[YAW] += random() * 360 - 180;
+			ucmd->forwardmove = 1;
+			if( self->groundentity )
+				ucmd->upmove = 1;
+			else
+				ucmd->upmove = 0;
+			return;
 		}
 
-		return;
+
+		// Check for special movement
+		if( VectorLengthFast( self->velocity ) < 37 )
+		{
+			if( random() > 0.1 && AI_SpecialMove( self, ucmd ) )  //jumps, crouches, turns...
+				return;
+
+			self->s.angles[YAW] += random() * 180 - 90;
+
+			if( !self->is_step )  // if there is ground continue otherwise wait for next move
+				ucmd->forwardmove = 0; //0
+			else if( AI_CanMove( self, BOT_MOVE_FORWARD ) )
+			{
+				ucmd->forwardmove = 1;
+				ucmd->buttons |= BUTTON_WALK;
+			}
+
+			return;
+		}
+
+		// Otherwise move slowly, walking wondering what's going on
+		ucmd->buttons |= BUTTON_WALK;
 	}
 
-
-	// Otherwise move slowly, walking wondering what's going on
-	ucmd->buttons |= BUTTON_WALK;
 	if( AI_CanMove( self, BOT_MOVE_FORWARD ) )
 		ucmd->forwardmove = 1;
 	else
@@ -850,6 +905,7 @@ void BOT_DMclass_FindEnemy( edict_t *self )
 	nav_ents_t *goalEnt;
 	edict_t *bestTarget = NULL;
 	float dist, weight, bestWeight = 9999999;
+	vec3_t forward, vec;
 	int i;
 
 	if( G_ISGHOSTING( self ) 
@@ -883,7 +939,7 @@ void BOT_DMclass_FindEnemy( edict_t *self )
 		if( G_ISGHOSTING( goalEnt->ent ) )
 			continue;
 
-		if( self->ai->status.entityWeights[i] <= 0 || goalEnt->ent->flags & FL_NOTARGET )
+		if( self->ai->status.entityWeights[i] <= 0 || goalEnt->ent->flags & (FL_NOTARGET|FL_BUSY) )
 			continue;
 
 		if( GS_TeamBasedGametype() && goalEnt->ent->s.team == self->s.team )
@@ -895,16 +951,25 @@ void BOT_DMclass_FindEnemy( edict_t *self )
 		if( dist > 500 && self->ai->status.entityWeights[i] <= 0.1f )
 			continue;
 
-		if( dist > 700 && dist > WEIGHT_MAXDISTANCE_FACTOR * self->ai->status.entityWeights[i] )
-			continue;
+		//if( dist > 700 && dist > WEIGHT_MAXDISTANCE_FACTOR * self->ai->status.entityWeights[i] )
+		//	continue;
 
-		if( trap_inPVS( self->s.origin, goalEnt->ent->s.origin ) && G_Visible( self, goalEnt->ent ) )
+		weight = dist / self->ai->status.entityWeights[i];
+
+		if( weight < bestWeight )
 		{
-			weight = dist / self->ai->status.entityWeights[i];
-
-			if( ( dist < 350 ) || G_InFront( self, goalEnt->ent ) )
+			if( trap_inPVS( self->s.origin, goalEnt->ent->s.origin ) && G_Visible( self, goalEnt->ent ) )
 			{
-				if( weight < bestWeight )
+				bool close = dist < 2000 || goalEnt->ent == self->ai->last_attacker;
+
+				if( !close )
+				{
+					VectorSubtract( goalEnt->ent->s.origin, self->s.origin, vec );
+					VectorNormalize( vec );
+					close = DotProduct( vec, forward ) > 0.3;
+				}
+
+				if( close )				
 				{
 					bestWeight = weight;
 					bestTarget = goalEnt->ent;
@@ -1097,11 +1162,9 @@ static bool BOT_DMclass_FireWeapon( edict_t *self, usercmd_t *ucmd )
 #define WFAC_GENERIC_INSTANT 150.0
 	float firedelay;
 	vec3_t target;
-	vec3_t angles;
 	int weapon, i;
 	float wfac;
 	vec3_t fire_origin;
-	vec3_t dir;
 	trace_t	trace;
 	bool continuous_fire = false;
 	firedef_t *firedef = GS_FiredefForPlayerState( &self->r.client->ps, self->r.client->ps.stats[STAT_WEAPON] );
@@ -1201,7 +1264,9 @@ static bool BOT_DMclass_FireWeapon( edict_t *self, usercmd_t *ucmd )
 
 		if( firedelay > 0.0f )
 		{
-			ucmd->buttons |= BUTTON_ATTACK;; // could fire, but wants to?
+			if( G_InFront( self, self->enemy ) ) {
+				ucmd->buttons |= BUTTON_ATTACK; // could fire, but wants to?
+			}
 			// mess up angles only in the attacking frames
 			if( self->r.client->ps.weaponState == WEAPON_STATE_READY ||
 				self->r.client->ps.weaponState == WEAPON_STATE_REFIRE ||
@@ -1221,10 +1286,8 @@ static bool BOT_DMclass_FireWeapon( edict_t *self, usercmd_t *ucmd )
 	}
 
 	//update angles
-	VectorSubtract( target, fire_origin, dir );
-	VecToAngles( dir, angles );
-	VectorCopy( angles, self->s.angles );
-	VectorCopy( angles, self->r.client->ps.viewangles );
+	VectorSubtract( target, fire_origin, self->ai->move_vector );
+	AI_ChangeAngle( self );
 
 	if( nav.debugMode && bot_showcombat->integer )
 		G_PrintChasersf( self, "%s: attacking %s\n", self->ai->pers.netname, self->enemy->r.client ? self->enemy->r.client->netname : self->classname );
@@ -1239,7 +1302,7 @@ float BOT_DMclass_PlayerWeight( edict_t *self, edict_t *enemy )
 	if( !enemy || enemy == self )
 		return 0;
 
-	if( G_ISGHOSTING( enemy ) || enemy->flags & FL_NOTARGET )
+	if( G_ISGHOSTING( enemy ) || enemy->flags & (FL_NOTARGET|FL_BUSY) )
 		return 0;
 
 	if( self->r.client->ps.inventory[POWERUP_QUAD] || self->r.client->ps.inventory[POWERUP_SHELL] )
@@ -1247,7 +1310,7 @@ float BOT_DMclass_PlayerWeight( edict_t *self, edict_t *enemy )
 
 	// don't fight against powerups.
 	if( enemy->r.client && ( enemy->r.client->ps.inventory[POWERUP_QUAD] || enemy->r.client->ps.inventory[POWERUP_SHELL] ) )
-		return 0.05;
+		return 0.2;
 
 	//if not team based give some weight to every one
 	if( GS_TeamBasedGametype() && ( enemy->s.team == self->s.team ) )
@@ -1256,6 +1319,9 @@ float BOT_DMclass_PlayerWeight( edict_t *self, edict_t *enemy )
 	// if having EF_CARRIER we can assume it's someone important
 	if( enemy->s.effects & EF_CARRIER )
 		return 2.0f;
+
+	if( enemy == self->ai->last_attacker )
+		return rage_mode ? 4.0f : 1.0f;
 
 	return rage_mode ? 4.0f : 0.3f;
 }
@@ -1309,7 +1375,21 @@ static void BOT_DMclass_UpdateStatus( edict_t *self )
 			{
 				if( client->ps.inventory[ent->item->tag] )
 				{
-					ai->status.entityWeights[i] *= LowNeedFactor;
+					if( client->ps.inventory[ent->item->ammo_tag] )
+					{
+						// find ammo item for this weapon
+						gsitem_t *ammoItem = GS_FindItemByTag( ent->item->ammo_tag );
+						if( ammoItem->inventory_max )
+						{
+							ai->status.entityWeights[i] *= (0.5 + 0.5 * (1.0 - (float)client->ps.inventory[ent->item->ammo_tag] / ammoItem->inventory_max));
+						}
+						ai->status.entityWeights[i] *= LowNeedFactor;
+					}
+					else
+					{
+						// we need some ammo
+						ai->status.entityWeights[i] *= LowNeedFactor;
+					}
 					onlyGotGB = false;
 				}
 			}
@@ -1321,6 +1401,7 @@ static void BOT_DMclass_UpdateStatus( edict_t *self )
 				}
 				else
 				{
+#if 0
 					// find weapon item for this ammo
 					gsitem_t *weaponItem;
 					int weapon;
@@ -1334,6 +1415,7 @@ static void BOT_DMclass_UpdateStatus( edict_t *self )
 								self->ai->status.entityWeights[i] *= LowNeedFactor;
 						}
 					}
+#endif
 				}
 			}
 			else if( ent->item->type & IT_ARMOR )
@@ -1355,11 +1437,11 @@ static void BOT_DMclass_UpdateStatus( edict_t *self )
 			}
 			else if( ent->item->type & IT_HEALTH )
 			{
-				if( ent->item->tag == HEALTH_MEGA || ent->item->tag == HEALTH_ULTRA )
+				if( ent->item->tag == HEALTH_MEGA || ent->item->tag == HEALTH_ULTRA || ent->item->tag == HEALTH_SMALL )
 					ai->status.entityWeights[i] = self->ai->pers.inventoryWeights[ent->item->tag];
 				else
 				{
-					if( self->health == self->max_health )
+					if( self->health >= self->max_health )
 						ai->status.entityWeights[i] = 0;
 					else
 					{
@@ -1398,6 +1480,8 @@ static void BOT_DMclass_UpdateStatus( edict_t *self )
 static void BOT_DMclass_VSAYmessages( edict_t *self )
 {
 	if( GS_MatchState() != MATCH_STATE_PLAYTIME )
+		return;
+	if( level.gametype.dummyBots || bot_dummy->integer )
 		return;
 
 	if( self->snap.damageteam_given > 25 )
@@ -1497,7 +1581,8 @@ static void BOT_DMclass_VSAYmessages( edict_t *self )
 //==========================================
 static void BOT_DMClass_BlockedTimeout( edict_t *self )
 {
-	if( bot_dummy->integer ) {
+	if( level.gametype.dummyBots || bot_dummy->integer ) {
+		self->ai->blocked_timeout = level.time + 15000;
 		return;
 	}
 	self->health = 0;
@@ -1577,7 +1662,11 @@ static void BOT_DMclass_RunFrame( edict_t *self )
 	&& self->r.client->teamstate.timeStamp + 4000 < level.time )
 		G_Match_Ready( self );
 
-	if( !bot_dummy->integer )
+	if( level.gametype.dummyBots || bot_dummy->integer )
+	{
+		self->r.client->level.last_activity = level.time;
+	}
+	else
 	{
 		BOT_DMclass_FindEnemy( self );
 
@@ -1613,13 +1702,6 @@ static void BOT_DMclass_RunFrame( edict_t *self )
 	// set approximate ping and show values
 	ucmd.msec = game.frametime;
 	ucmd.serverTimeStamp = game.serverTime;
-
-	ucmd.forwardfrac = ucmd.forwardmove;
-	clamp( ucmd.forwardfrac, -1, 1 );
-	ucmd.sidefrac = ucmd.sidemove;
-	clamp( ucmd.sidefrac, -1, 1 );
-	ucmd.upfrac = ucmd.upmove;
-	clamp( ucmd.upfrac, -1, 1 );
 
 	ClientThink( self, &ucmd, 0 );
 	self->nextThink = level.time + 1;
@@ -1667,29 +1749,29 @@ void BOT_DMclass_InitPersistant( edict_t *self )
 
 	// ammo
 	self->ai->pers.inventoryWeights[AMMO_WEAK_GUNBLADE] = 0.0f;
-	self->ai->pers.inventoryWeights[AMMO_BULLETS] = 0.6f;
-	self->ai->pers.inventoryWeights[AMMO_SHELLS] = 0.6f;
-	self->ai->pers.inventoryWeights[AMMO_GRENADES] = 0.6f;
-	self->ai->pers.inventoryWeights[AMMO_ROCKETS] = 0.6f;
-	self->ai->pers.inventoryWeights[AMMO_PLASMA] = 0.6f;
-	self->ai->pers.inventoryWeights[AMMO_BOLTS] = 0.6f;
-	self->ai->pers.inventoryWeights[AMMO_LASERS] = 0.6f;
+	self->ai->pers.inventoryWeights[AMMO_BULLETS] = 0.7f;
+	self->ai->pers.inventoryWeights[AMMO_SHELLS] = 0.7f;
+	self->ai->pers.inventoryWeights[AMMO_GRENADES] = 0.7f;
+	self->ai->pers.inventoryWeights[AMMO_ROCKETS] = 0.7f;
+	self->ai->pers.inventoryWeights[AMMO_PLASMA] = 0.7f;
+	self->ai->pers.inventoryWeights[AMMO_BOLTS] = 0.7f;
+	self->ai->pers.inventoryWeights[AMMO_LASERS] = 0.7f;
 
 	// armor
 	self->ai->pers.inventoryWeights[ARMOR_RA] = self->ai->pers.cha.armor_grabber * 2.0f;
 	self->ai->pers.inventoryWeights[ARMOR_YA] = self->ai->pers.cha.armor_grabber * 1.0f;
 	self->ai->pers.inventoryWeights[ARMOR_GA] = self->ai->pers.cha.armor_grabber * 0.75f;
-	self->ai->pers.inventoryWeights[ARMOR_SHARD] = self->ai->pers.cha.armor_grabber * 0.6f;
+	self->ai->pers.inventoryWeights[ARMOR_SHARD] = self->ai->pers.cha.armor_grabber * 0.5f;
 
 	// health
 	self->ai->pers.inventoryWeights[HEALTH_MEGA] = /*self->ai->pers.cha.health_grabber **/ 2.0f;
 	self->ai->pers.inventoryWeights[HEALTH_ULTRA] = /*self->ai->pers.cha.health_grabber **/ 2.0f;
 	self->ai->pers.inventoryWeights[HEALTH_LARGE] = /*self->ai->pers.cha.health_grabber **/ 1.0f;
 	self->ai->pers.inventoryWeights[HEALTH_MEDIUM] = /*self->ai->pers.cha.health_grabber **/ 0.9f;
-	self->ai->pers.inventoryWeights[HEALTH_SMALL] = /*self->ai->pers.cha.health_grabber **/ 0.6f;
+	self->ai->pers.inventoryWeights[HEALTH_SMALL] = /*self->ai->pers.cha.health_grabber **/ 0.4f;
 
 	// backpack
-	self->ai->pers.inventoryWeights[AMMO_PACK_WEAK] = 0.4f;
+	self->ai->pers.inventoryWeights[AMMO_PACK] = 0.4f;
 
 	self->ai->pers.inventoryWeights[POWERUP_QUAD] = self->ai->pers.cha.offensiveness * 2.0f;
 	self->ai->pers.inventoryWeights[POWERUP_SHELL] = self->ai->pers.cha.offensiveness * 2.0f;

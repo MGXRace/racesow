@@ -112,32 +112,32 @@ void RS_IncrementWallJumps(int playerNum)
  * RS_QueryPjState
  * Determines if the player has prejumped or not
  * @param playerNum the player's client number
- * @return qtrue if the player has prejumped
+ * @return true if the player has prejumped
  */
-qboolean RS_QueryPjState(int playerNum)
+bool RS_QueryPjState(int playerNum)
 {
 	if ( pj_jumps[playerNum] > 1 ||
 		pj_dashes[playerNum] > 1 ||
 		pj_walljumps[playerNum] > 1 )
-		return qtrue;
+		return true;
 	else
-		return qfalse;
+		return false;
 }
 
 /**
  * RS_QueryPsState
  * Determines if the player has preshot or not
  * @param playerNum the player's client number
- * @return qtrue if the player has preshot
+ * @return true if the player has preshot
  */
-qboolean RS_QueryPsState(int playerNum)
+bool RS_QueryPsState(int playerNum)
 {
 	if ( ps_rockets[playerNum] > 1 ||
 		ps_plasma[playerNum] > 20 ||
 		ps_grenades[playerNum] > 2 )
-		return qtrue;
+		return true;
 	else
-		return qfalse;
+		return false;
 }
 		
 /**

@@ -46,6 +46,13 @@ public:
 
 	~ASWindow()
 	{
+		shutdown();
+	}
+
+	void shutdown()
+	{
+		shuttingDown = true;
+
 		// detatch itself from the possibly opened modal window
 		detachAsEventListener();
 
@@ -55,6 +62,8 @@ public:
 			FunctionCallScheduler *scheduler = it->second;
 
 			doc->RemoveReference();
+			doc->RemoveEventListener( "beforeUnload", this );
+
 			scheduler->shutdown();
 			__delete__( scheduler );
 		}
@@ -62,21 +71,46 @@ public:
 	}
 
 	/// Loads document from the passed URL.
-	void open( const ASURL &location )
+	ElementDocument *open( const asstring_t &location )
 	{
-		WSWUI::NavigationStack *stack = UI_Main::Get()->getNavigator();
+		WSWUI::NavigationStack *stack = GetCurrentUIStack();
 		if( stack == NULL ) {
+			return NULL;
+		}
+
+		// create new stack in the same context
+		WSWUI::NavigationStack *new_stack = UI_Main::Get()->createStack( stack->getContextId() );
+		if( new_stack == NULL ) {
+			return NULL;
+		}
+
+		WSWUI::Document *ui_document = new_stack->pushDocument( location.buffer );
+		if( !ui_document ) {
+			return NULL;
+		
+		}
+		ui_document->addReference();
+		return ui_document->getRocketDocument();
+	}
+
+	void preload( const asstring_t &location )
+	{
+		if( !UI_Main::preloadEnabled() ) {
 			return;
 		}
 
-		stack->pushDocument( location.GetURL()->buffer );
+		WSWUI::NavigationStack *stack = GetCurrentUIStack();
+		if( stack == NULL ) {
+			return;
+		}
+		stack->preloadDocument( location.buffer );
 	}
 
 	/// Loads modal document from the URL.
 	/// FIXME: move to window.
-	void modal( const ASURL &location, int defaultCode = -1 )
+	void modal( const asstring_t &location, int defaultCode = -1 )
 	{
-		WSWUI::NavigationStack *stack = UI_Main::Get()->getNavigator();
+		WSWUI::NavigationStack *stack = GetCurrentUIStack();
 
 		// default return value when modal window is not closed via window.close()
 		modalValue = defaultCode;
@@ -92,7 +126,7 @@ public:
 		if( suspendedContext ) {
 			// attach itself as a listener of hide event so the context
 			// can be resumed after the modal document is hidden
-			WSWUI::Document *doc = stack->pushDocument( location.GetURL()->buffer, true, true );
+			WSWUI::Document *doc = stack->pushDocument( location.buffer, true, true );
 			if( doc ) {
 				attachedModalDocument = doc->getRocketDocument();
 				attachedModalDocument->AddEventListener( "hide", this );
@@ -110,7 +144,7 @@ public:
 	/// Stores exit code to be passed to suspended context if modal.
 	void close( int code = 0 )
 	{
-		WSWUI::NavigationStack *stack = UI_Main::Get()->getNavigator();
+		WSWUI::NavigationStack *stack = GetCurrentUIStack();
 		if( stack == NULL ) {
 			return;
 		}
@@ -128,7 +162,7 @@ public:
 			modalValue = code;
 			stack->popDocument();
 		}
-		else {
+		else if( stack->getContextId() == UI_CONTEXT_MAIN ) {
 			// not really a modal window, clear the stack
 			UI_Main::Get()->showUI( false );
 		}
@@ -140,40 +174,55 @@ public:
 	{
 		SchedulerMap::iterator it = schedulers.begin();
 		while( it != schedulers.end() ) {
-			ElementDocument *doc = it->first;
 			FunctionCallScheduler *scheduler = it->second;
-
-			if( doc->GetReferenceCount() == 1 ) {
-				scheduler->shutdown();
-				__delete__( scheduler );
-
-				doc->RemoveReference();
-
-				schedulers.erase( it++ );
-			}
-			else {
-				scheduler->update();
-				++it;
-			}
+			scheduler->update();
+			++it;
 		}
+	}
+
+	virtual void OnDetach( Element *element ) {
+		if( shuttingDown ) {
+			return;
+		}
+
+		ElementDocument *doc = dynamic_cast<ElementDocument *>(element);
+		SchedulerMap::iterator it = schedulers.find( doc );
+		if( it == schedulers.end() ) {
+			// FIXME
+			return;
+		}
+
+		FunctionCallScheduler *scheduler = it->second;
+		scheduler->shutdown();
+		__delete__( scheduler );
+
+		doc->RemoveReference();
+
+		schedulers.erase( it );
 	}
 
 	ElementDocument *getDocument( void ) const
 	{
 		ElementDocument *document = GetCurrentUIDocument();
+		assert( document != NULL );
 		document->AddReference();
 		return document;
 	}
 
-	ASURL getLocation( void ) const
+	asstring_t *getLocation( void ) const
 	{
 		ElementDocument *document = GetCurrentUIDocument();
-		return ASURL( document->GetSourceURL().CString() );
+		assert( document != NULL );
+		return ASSTR( document->GetSourceURL().CString() );
 	}
 
-	void setLocation( const ASURL &location )
+	void setLocation( const asstring_t &location )
 	{
-		open( location );
+		WSWUI::NavigationStack *stack = GetCurrentUIStack();
+		if( stack == NULL ) {
+			return;
+		}
+		stack->pushDocument( location.buffer );
 	}
 
 	unsigned int getTime( void ) const
@@ -200,9 +249,15 @@ public:
 		return state.height;
 	}
 
+	float getPixelRatio( void ) const
+	{
+		const RefreshState &state = UI_Main::Get()->getRefreshState();
+		return state.pixelRatio;
+	}
+
 	unsigned int historySize( void ) const
 	{
-		WSWUI::NavigationStack *stack = UI_Main::Get()->getNavigator();
+		WSWUI::NavigationStack *stack = GetCurrentUIStack();
 		if( stack != NULL ) {
 			return stack->getStackSize();
 		}
@@ -211,7 +266,7 @@ public:
 
 	void historyBack( void ) const
 	{
-		WSWUI::NavigationStack *stack = UI_Main::Get()->getNavigator();
+		WSWUI::NavigationStack *stack = GetCurrentUIStack();
 		if( stack != NULL && stack->hasAtLeastTwoDocuments() && !stack->isTopModal() ) {
 			stack->popDocument();
 		}
@@ -263,7 +318,7 @@ public:
 	void startBackgroundTrack( const asstring_t &intro, const asstring_t &loop, bool stopIfPlaying )
 	{
 		if( stopIfPlaying || !backgroundTrackPlaying ) {
-			trap::S_StartBackgroundTrack( intro.buffer, loop.buffer );
+			trap::S_StartBackgroundTrack( intro.buffer, loop.buffer, 3 );
 			backgroundTrackPlaying = true;
 		}
 	}
@@ -282,6 +337,26 @@ public:
 	int getConnectCount( void )
 	{
 		return UI_Main::Get()->getConnectCount();
+	}
+
+	unsigned int getSupportedInputDevices( void )
+	{
+		return trap::IN_SupportedDevices();
+	}
+
+	void showSoftKeyboard( bool show )
+	{
+		trap::IN_ShowSoftKeyboard( show ? true : false );
+	}
+
+	bool isBrowserAvailable( void )
+	{
+		return trap::CL_IsBrowserAvailable();
+	}
+
+	asstring_t *getOSName( void ) const
+	{
+		return ASSTR( OSNAME );
 	}
 
 private:
@@ -304,9 +379,24 @@ private:
 
 	static ElementDocument *GetCurrentUIDocument( void )
 	{
-		// we assume we set the user data at document instancing in asui_scriptdocument.cpp
-		// also note that this method can called outside of AS execution context!
-		return static_cast<ElementDocument *>( UI_Main::Get()->getAS()->getActiveModule()->GetUserData() );
+		// note that this method can be called outside the AS execution context!
+		asIScriptModule *m = UI_Main::Get()->getAS()->getActiveModule();
+		if( !m ) {
+			return NULL;
+		}
+		WSWUI::Document *ui_document = static_cast<WSWUI::Document *>( m->GetUserData() );
+		return ui_document ? ui_document->getRocketDocument() : NULL;
+	}
+
+	static WSWUI::NavigationStack *GetCurrentUIStack( void )
+	{
+		// note that this method can be called outside the AS execution context!
+		asIScriptModule *m = UI_Main::Get()->getAS()->getActiveModule();
+		if( !m ) {
+			return NULL;
+		}
+		WSWUI::Document *ui_document = static_cast<WSWUI::Document *>( m->GetUserData() );
+		return ui_document ? ui_document->getStack() : NULL;
 	}
 
 	void detachAsEventListener( void )
@@ -321,11 +411,15 @@ private:
 	FunctionCallScheduler *getSchedulerForCurrentUIDocument( void )
 	{
 		ElementDocument *doc = GetCurrentUIDocument();
+
+		assert( doc != NULL );
+
 		SchedulerMap::iterator it = schedulers.find( doc );
 
 		FunctionCallScheduler *scheduler;
 		if( it == schedulers.end() ) {
 			doc->AddReference();
+			doc->AddEventListener( "beforeUnload", this );
 
 			scheduler = __new__( FunctionCallScheduler )();
 			scheduler->init( UI_Main::Get()->getAS() );
@@ -348,6 +442,7 @@ private:
 
 	// exit code passed via document.close() of the modal document
 	int modalValue;
+	bool shuttingDown;
 
 	bool backgroundTrackPlaying;
 };
@@ -371,11 +466,20 @@ void BindWindow( ASInterface *as )
 		.funcdef( &FunctionCallScheduler::ASFuncdef2, "TimerCallback2" )
 	;
 
+	ASBind::Enum( as->getEngine(), "eInputDeviceMask" )
+		( "IN_DEVICE_KEYBOARD", IN_DEVICE_KEYBOARD )
+		( "IN_DEVICE_MOUSE", IN_DEVICE_MOUSE )
+		( "IN_DEVICE_JOYSTICK", IN_DEVICE_JOYSTICK )
+		( "IN_DEVICE_TOUCHSCREEN", IN_DEVICE_TOUCHSCREEN )
+		( "IN_DEVICE_SOFTKEYBOARD", IN_DEVICE_SOFTKEYBOARD )
+	;
+
 	ASBind::GetClass<ASWindow>( as->getEngine() )
 		.method( &ASWindow::open, "open" )
 		.method2( &ASWindow::close, "void close( int code = 0 )" )
 		.method2( &ASWindow::modal, "void modal( const String &location, int defaultCode = -1 )" )
 		.method( &ASWindow::getModalValue, "getModalValue" )
+		.method( &ASWindow::preload, "preload" )
 
 		.method( &ASWindow::getDocument, "get_document" )
 
@@ -386,6 +490,7 @@ void BindWindow( ASInterface *as )
 		.method( &ASWindow::getDrawBackground, "get_drawBackground" )
 		.method( &ASWindow::getWidth, "get_width" )
 		.method( &ASWindow::getHeight, "get_height" )
+		.method( &ASWindow::getPixelRatio, "get_pixelRatio" )
 
 		.method( &ASWindow::historySize, "history_size" )
 		.method( &ASWindow::historyBack, "history_back" )
@@ -410,6 +515,14 @@ void BindWindow( ASInterface *as )
 		.method( &ASWindow::flash, "flash" )
 
 		.method( &ASWindow::getConnectCount, "get_connectCount" )
+
+		.method( &ASWindow::getSupportedInputDevices, "get_supportedInputDevices" )
+
+		.method( &ASWindow::showSoftKeyboard, "showSoftKeyboard" )
+
+		.method( &ASWindow::isBrowserAvailable, "get_browserAvailable" )
+
+		.method( &ASWindow::getOSName, "get_osName" )
 	;
 }
 
@@ -435,7 +548,8 @@ void RunWindowFrame( void )
 
 void UnbindWindow( void )
 {
-	__delete__( asWindow );
+	if( asWindow )
+		__delete__( asWindow );
 	asWindow = NULL;
 }
 

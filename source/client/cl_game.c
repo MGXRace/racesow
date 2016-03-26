@@ -73,6 +73,11 @@ static inline struct cmodel_s *CL_GameModule_CM_ModelForBBox( vec3_t mins, vec3_
 static inline struct cmodel_s *CL_GameModule_CM_OctagonModelForBBox( vec3_t mins, vec3_t maxs ) {
 	return CM_OctagonModelForBBox( cl.cms, mins, maxs );
 }
+
+static inline bool CL_GameModule_CM_InPVS( const vec3_t p1, const vec3_t p2 ) {
+	return CM_InPVS( cl.cms, p1, p2 );
+}
+
 //======================================================================
 
 /*
@@ -193,7 +198,7 @@ static void CL_GameModule_SoundUpdate( const vec3_t origin, const vec3_t velocit
 */
 static void CL_GameModule_AsyncStream_Init( void )
 {
-	cg_async_stream = AsyncStream_InitModule( "UI", CL_GameModule_MemAlloc, CL_GameModule_MemFree );
+	cg_async_stream = AsyncStream_InitModule( "CGame", CL_GameModule_MemAlloc, CL_GameModule_MemFree );
 }
 
 /*
@@ -254,9 +259,9 @@ void CL_GameModule_L10n_ClearDomain( void )
 * CL_GameModule_S_RawSamples
 */
 static void CL_GameModule_S_RawSamples( unsigned int samples, unsigned int rate, 
-	unsigned short width, unsigned short channels, const qbyte *data )
+	unsigned short width, unsigned short channels, const uint8_t *data )
 {
-	CL_SoundModule_RawSamples( samples, rate, width, channels, data, qfalse );
+	CL_SoundModule_RawSamples( samples, rate, width, channels, data, false );
 }
 
 //==============================================
@@ -269,7 +274,7 @@ static void CL_GameModule_S_RawSamples( unsigned int samples, unsigned int rate,
 #define MAX_CGAME_RAW_SAMPLES_LISTENERS	8
 
 typedef struct {
-	qboolean inuse;
+	bool inuse;
 	struct cinematics_s *cin;
 	void *ptr;
 	int load_seq;
@@ -284,7 +289,7 @@ cg_raw_samples_listener_t cg_raw_samples_listeners[MAX_CGAME_RAW_SAMPLES_LISTENE
 */
 static void CL_GameModule_RawSamples( void *ptr, unsigned int samples, 
 	unsigned int rate, unsigned short width, unsigned short channels, 
-	const qbyte *data )
+	const uint8_t *data )
 {
 	cg_raw_samples_listener_t *cglistener;
 
@@ -292,7 +297,7 @@ static void CL_GameModule_RawSamples( void *ptr, unsigned int samples,
 	cglistener = ( cg_raw_samples_listener_t * )ptr;
 
 	// each listener gets samples passed exactly once
-	cglistener->inuse = qfalse;
+	cglistener->inuse = false;
 
 	if( cglistener->load_seq != cg_load_seq ) {
 		return;
@@ -317,7 +322,7 @@ static unsigned int CL_GameModule_GetRawSamplesLength( void *ptr )
 /*
 * CL_GameModule_AddRawSamplesListener
 */
-static qboolean CL_GameModule_AddRawSamplesListener( struct cinematics_s *cin, 
+static bool CL_GameModule_AddRawSamplesListener( struct cinematics_s *cin, 
 	void *listener, cg_raw_samples_cb_t rs, cg_get_raw_samples_cb_t grs )
 {
 	int i;
@@ -337,18 +342,18 @@ static qboolean CL_GameModule_AddRawSamplesListener( struct cinematics_s *cin,
 			&& cglistener->rs == rs
 			&& cglistener->grs == grs ) {
 				// same listener
-				return qtrue;
+				return true;
 		}
 		cglistener++;
 	}
 	
 	if( !freel ) {
-		return qfalse;
+		return false;
 	}
 
 	// fill in our proxy
 	cglistener = freel;
-	cglistener->inuse = qtrue;
+	cglistener->inuse = true;
 	cglistener->cin = cin;
 	cglistener->ptr = listener;
 	cglistener->load_seq = cg_load_seq;
@@ -358,11 +363,11 @@ static qboolean CL_GameModule_AddRawSamplesListener( struct cinematics_s *cin,
 	if( !CIN_AddRawSamplesListener( cin, cglistener, &CL_GameModule_RawSamples, 
 		&CL_GameModule_GetRawSamplesLength ) ) {
 		// free listener
-		cglistener->inuse = qfalse;
-		return qfalse;
+		cglistener->inuse = false;
+		return false;
 	}
 
-	return qtrue;
+	return true;
 }
 
 //==============================================
@@ -373,7 +378,6 @@ static qboolean CL_GameModule_AddRawSamplesListener( struct cinematics_s *cin,
 void CL_GameModule_Init( void )
 {
 	int apiversion;
-	connstate_t oldState;
 	unsigned int start;
 	cgame_import_t import;
 	void *( *builtinAPIfunc )(void *) = NULL;
@@ -382,7 +386,7 @@ void CL_GameModule_Init( void )
 #endif
 
 	// stop all playing sounds
-	CL_SoundModule_StopAllSounds();
+	CL_SoundModule_StopAllSounds( true, true );
 
 	CL_GameModule_Shutdown();
 
@@ -479,6 +483,7 @@ void CL_GameModule_Init( void )
 	import.R_DrawRotatedStretchPic = re.DrawRotatedStretchPic;
 	import.R_Scissor = re.Scissor;
 	import.R_GetScissor = re.GetScissor;
+	import.R_ResetScissor = re.ResetScissor;
 	import.R_GetShaderDimensions = re.GetShaderDimensions;
 	import.R_TransformVectorToScreen = re.TransformVectorToScreen;
 	import.R_SkeletalGetNumBones = re.SkeletalGetNumBones;
@@ -498,6 +503,7 @@ void CL_GameModule_Init( void )
 	import.CM_ModelForBBox = CL_GameModule_CM_ModelForBBox;
 	import.CM_OctagonModelForBBox = CL_GameModule_CM_OctagonModelForBBox;
 	import.CM_InlineModelBounds = CL_GameModule_CM_InlineModelBounds;
+	import.CM_InPVS = CL_GameModule_CM_InPVS;
 
 	import.S_RegisterSound = CL_SoundModule_RegisterSound;
 	import.S_StartFixedSound = CL_SoundModule_StartFixedSound;
@@ -511,15 +517,27 @@ void CL_GameModule_Init( void )
 	import.S_PositionedRawSamples = CL_SoundModule_PositionedRawSamples;
 	import.S_GetRawSamplesLength = CL_SoundModule_GetRawSamplesLength;
 	import.S_GetPositionedRawSamplesLength = CL_SoundModule_GetPositionedRawSamplesLength;
+	import.S_SetEntitySpatilization = CL_SoundModule_SetEntitySpatilization;
 
 	import.SCR_RegisterFont = SCR_RegisterFont;
 	import.SCR_RegisterSpecialFont = SCR_RegisterSpecialFont;
 	import.SCR_DrawString = SCR_DrawString;
 	import.SCR_DrawStringWidth = SCR_DrawStringWidth;
 	import.SCR_DrawClampString = SCR_DrawClampString;
-	import.SCR_strHeight = SCR_strHeight;
+	import.SCR_DrawMultilineString = SCR_DrawMultilineString;
+	import.SCR_DrawRawChar = SCR_DrawRawChar;
+	import.SCR_DrawClampChar = SCR_DrawClampChar;
+	import.SCR_FontSize = SCR_FontSize;
+	import.SCR_FontHeight = SCR_FontHeight;
+	import.SCR_FontUnderline = SCR_FontUnderline;
+	import.SCR_FontAdvance = SCR_FontAdvance;
+	import.SCR_FontXHeight = SCR_FontXHeight;
+	import.SCR_SetDrawCharIntercept = SCR_SetDrawCharIntercept;
 	import.SCR_strWidth = SCR_strWidth;
 	import.SCR_StrlenForWidth = SCR_StrlenForWidth;
+	import.SCR_EnableQuickMenu = SCR_EnableQuickMenu;
+	import.SCR_HaveQuickMenu = CL_UIModule_HaveQuickMenu;
+	import.SCR_IsQuickMenuShown = SCR_IsQuickMenuShown;
 
 	import.AsyncStream_UrlEncode = AsyncStream_UrlEncode;
 	import.AsyncStream_UrlDecode = AsyncStream_UrlDecode;
@@ -534,6 +552,10 @@ void CL_GameModule_Init( void )
 	import.L10n_ClearDomain = &CL_GameModule_L10n_ClearDomain;
 
 	import.CIN_AddRawSamplesListener = &CL_GameModule_AddRawSamplesListener;
+
+	import.IN_GetThumbsticks = IN_GetThumbsticks;
+	import.IN_IME_GetCandidates = IN_IME_GetCandidates;
+	import.IN_SupportedDevices = IN_SupportedDevices;
 
 	if( builtinAPIfunc ) {
 		cge = builtinAPIfunc( &import );
@@ -555,25 +577,21 @@ void CL_GameModule_Init( void )
 		Com_Error( ERR_DROP, "Client game is version %i, not %i", apiversion, CGAME_API_VERSION );
 	}
 
-	oldState = cls.state;
-	cls.state = CA_LOADING;
-
 	CL_GameModule_AsyncStream_Init();
 
+	SCR_EnableQuickMenu( false );
+
 	start = Sys_Milliseconds();
-	cge->Init( cls.servername, cl.playernum, viddef.width, viddef.height, 
+	cge->Init( cls.servername, cl.playernum,
+		viddef.width, viddef.height, VID_GetPixelRatio(),
 		cls.demo.playing, cls.demo.playing ? cls.demo.filename : "",
-		cls.sv_pure, cl.snapFrameTime, APP_PROTOCOL_VERSION, cls.mediaRandomSeed );
+		cls.sv_pure, cl.snapFrameTime, APP_PROTOCOL_VERSION, APP_DEMO_EXTENSION_STR,
+		cls.mediaRandomSeed, cl.gamestart );
 
 	Com_DPrintf( "CL_GameModule_Init: %.2f seconds\n", (float)( Sys_Milliseconds() - start ) * 0.001f );
 
-	cls.state = oldState;
-	cls.cgameActive = qtrue;
-
-	// check memory integrity
-	Mem_CheckSentinelsGlobal();
-
-	Sys_SendKeyEvents(); // pump message loop
+	cl.gamestart = false;
+	cls.cgameActive = true;
 }
 
 /*
@@ -594,7 +612,7 @@ void CL_GameModule_Shutdown( void )
 		return;
 
 	cg_load_seq++;
-	cls.cgameActive = qfalse;
+	cls.cgameActive = false;
 
 	CL_GameModule_AsyncStream_Shutdown();
 
@@ -634,12 +652,12 @@ void CL_GameModule_ConfigString( int number, const char *value )
 }
 
 /*
-* CL_GameModule_SetSensitivityScale
+* CL_GameModule_GetSensitivityScale
 */
-float CL_GameModule_SetSensitivityScale( const float sens )
+float CL_GameModule_GetSensitivityScale( float sens, float zoomSens )
 {
 	if( cge )
-		return cge->SetSensitivityScale( sens );
+		return cge->GetSensitivityScale( sens, zoomSens );
 	else
 		return 1.0f;
 }
@@ -647,7 +665,7 @@ float CL_GameModule_SetSensitivityScale( const float sens )
 /*
 * CL_GameModule_NewSnapshot
 */
-qboolean CL_GameModule_NewSnapshot( int pendingSnapshot )
+bool CL_GameModule_NewSnapshot( int pendingSnapshot )
 {
 	snapshot_t *currentSnap, *newSnap;
 
@@ -655,11 +673,10 @@ qboolean CL_GameModule_NewSnapshot( int pendingSnapshot )
 	{
 		currentSnap = ( cl.currentSnapNum <= 0 ) ? NULL : &cl.snapShots[cl.currentSnapNum & UPDATE_MASK];
 		newSnap = &cl.snapShots[pendingSnapshot & UPDATE_MASK];
-		cge->NewFrameSnapshot( newSnap, currentSnap );
-		return qtrue;
+		return cge->NewFrameSnapshot( newSnap, currentSnap );
 	}
 
-	return qfalse;
+	return false;
 }
 
 /*
@@ -667,7 +684,74 @@ qboolean CL_GameModule_NewSnapshot( int pendingSnapshot )
 */
 void CL_GameModule_RenderView( float stereo_separation )
 {
-	if( cge )
+	if( cge && cls.cgameActive )
 		cge->RenderView( cls.frametime, cls.realframetime, cls.realtime, cl.serverTime, stereo_separation, 
-		cl_extrapolate->integer && !cls.demo.playing ? cl_extrapolationTime->integer : 0 );
+		cl_extrapolate->integer && !cls.demo.playing ? cl_extrapolationTime->integer : 0, cl_flip->integer != 0 );
 }
+
+/*
+* CL_GameModule_UpdateInput
+*/
+void CL_GameModule_UpdateInput( float frametime )
+{
+	if( cge )
+		cge->UpdateInput( frametime );
+}
+
+/*
+* CL_GameModule_ClearInputState
+*/
+void CL_GameModule_ClearInputState( void )
+{
+	if( cge )
+		cge->ClearInputState();
+}
+
+/*
+* CL_GameModule_GetButtonBits
+*/
+uint8_t CL_GameModule_GetButtonBits( void )
+{
+	if( cge )
+		return cge->GetButtonBits();
+	return 0;
+}
+
+/*
+* CL_GameModule_AddViewAngles
+*/
+void CL_GameModule_AddViewAngles( vec3_t viewangles, float frametime, bool flipped )
+{
+	if( cge )
+		cge->AddViewAngles( viewangles, frametime, flipped );
+}
+
+/*
+* CL_GameModule_AddMovement
+*/
+void CL_GameModule_AddMovement( vec3_t movement )
+{
+	if( cge )
+		cge->AddMovement( movement );
+}
+
+/*
+* CL_GameModule_TouchEvent
+*/
+void CL_GameModule_TouchEvent( int id, touchevent_t type, int x, int y, unsigned int time )
+{
+	if( cge )
+		cge->TouchEvent( id, type, x, y, time );
+}
+
+/*
+* CL_GameModule_IsTouchDown
+*/
+bool CL_GameModule_IsTouchDown( int id )
+{
+	if( cge )
+		return cge->IsTouchDown( id );
+
+	return false;
+}
+

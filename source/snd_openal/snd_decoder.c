@@ -24,8 +24,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "snd_decoder.h"
 
 static snd_decoder_t *decoders;
-static char *extensionlist = NULL;
-static int extensionlist_size = 0;
 
 /*
 * Local helper functions
@@ -55,29 +53,14 @@ static void decoder_register( snd_decoder_t *decoder )
 {
 	decoder->next = decoders;
 	decoders = decoder;
-
-	if( extensionlist_size - strlen( extensionlist ) - 1 < strlen( decoder->ext ) + 1 )
-	{
-		char *oldlist = extensionlist;
-		extensionlist_size = max( extensionlist_size * 2, (int)( strlen( extensionlist ) + strlen( decoder->ext ) + 1 + 1 ) );
-		extensionlist = S_Malloc( extensionlist_size );
-		Q_strncpyz( extensionlist, oldlist, extensionlist_size );
-		S_Free( oldlist );
-	}
-	Q_strncatz( extensionlist, " ", extensionlist_size );
-	Q_strncatz( extensionlist, decoder->ext, extensionlist_size );
 }
 
 /**
 * Sound system wide functions (snd_local.h)
 */
 
-qboolean S_InitDecoders( qboolean verbose )
+bool S_InitDecoders( bool verbose )
 {
-	extensionlist_size = 32;
-	extensionlist = S_Malloc( extensionlist_size );
-	extensionlist[0] = 0;
-
 	// First codec has the priority.
 	decoders = NULL;
 
@@ -85,17 +68,14 @@ qboolean S_InitDecoders( qboolean verbose )
 	if( SNDOGG_Init( verbose ) )
 	{
 		decoder_register( &ogg_decoder );
+		decoder_register( &ogv_decoder );
 	}
 
-	return qtrue;
+	return true;
 }
 
-void S_ShutdownDecoders( qboolean verbose )
+void S_ShutdownDecoders( bool verbose )
 {
-	S_Free( extensionlist );
-	extensionlist = NULL;
-	extensionlist_size = 0;
-
 	decoders = NULL;
 	SNDOGG_Shutdown( verbose );
 }
@@ -118,7 +98,7 @@ void *S_LoadSound( const char *filename, snd_info_t *info )
 	return decoder->load( fn, info );
 }
 
-snd_stream_t *S_OpenStream( const char *filename, qboolean *delay )
+snd_stream_t *S_OpenStream( const char *filename, bool *delay )
 {
 	snd_decoder_t *decoder;
 	char fn[MAX_QPATH];
@@ -136,7 +116,7 @@ snd_stream_t *S_OpenStream( const char *filename, qboolean *delay )
 	return decoder->open( fn, delay );
 }
 
-qboolean S_ContOpenStream( snd_stream_t *stream )
+bool S_ContOpenStream( snd_stream_t *stream )
 {
 	return stream->decoder->cont_open( stream );
 }
@@ -151,12 +131,12 @@ void S_CloseStream( snd_stream_t *stream )
 	stream->decoder->close( stream );
 }
 
-qboolean S_ResetStream( snd_stream_t *stream )
+bool S_ResetStream( snd_stream_t *stream )
 {
 	return stream->decoder->reset( stream );
 }
 
-qboolean S_EoStream( snd_stream_t *stream )
+bool S_EoStream( snd_stream_t *stream )
 {
 	return stream->decoder->eof( stream );
 }

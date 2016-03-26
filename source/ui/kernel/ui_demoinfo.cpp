@@ -54,7 +54,7 @@ const bool DemoInfo::isValid( void ) const
 void DemoInfo::setName( const std::string & name )
 {
 	this->name = name;
-	this->directory = "";
+	this->directory.clear();
 	this->hasMetaData = false;
 	this->time = 0;
 	this->isPlaying = this->isPaused = false;
@@ -131,7 +131,7 @@ void DemoInfo::readMetaData( void )
 			break;
 		}
 
-		metaData[key] = COM_RemoveColorTokensExt( value, qfalse );
+		metaData[key] = COM_RemoveColorTokensExt( value, false );
 		s = value + strlen( value ) + 1;
 	}
 }

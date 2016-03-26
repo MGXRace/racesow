@@ -68,11 +68,11 @@ static inline struct cmodel_s *PF_CM_OctagonModelForBBox( vec3_t mins, vec3_t ma
 	return CM_OctagonModelForBBox( svs.cms, mins, maxs );
 }
 
-static inline qboolean PF_CM_AreasConnected( int area1, int area2 ) {
+static inline bool PF_CM_AreasConnected( int area1, int area2 ) {
 	return CM_AreasConnected( svs.cms, area1, area2 );
 }
 
-static inline void PF_CM_SetAreaPortalState( int area, int otherarea, qboolean open ) {
+static inline void PF_CM_SetAreaPortalState( int area, int otherarea, bool open ) {
 	CM_SetAreaPortalState( svs.cms, area, otherarea, open );
 }
 
@@ -377,40 +377,10 @@ static void PF_PureModel( const char *name )
 }
 
 /*
-* PF_inVisSet
-*
-* Also checks portalareas so that doors block sight
-*/
-static qboolean PF_inVisSet( const vec3_t p1, const vec3_t p2, qbyte *( *vis )( cmodel_state_t *, int ) )
-{
-	int leafnum;
-	int cluster;
-	int area1, area2;
-	qbyte *mask;
-
-	leafnum = CM_PointLeafnum( svs.cms, p1 );
-	cluster = CM_LeafCluster( svs.cms, leafnum );
-	area1 = CM_LeafArea( svs.cms, leafnum );
-	mask = vis( svs.cms, cluster );
-
-	leafnum = CM_PointLeafnum( svs.cms, p2 );
-	cluster = CM_LeafCluster( svs.cms, leafnum );
-	area2 = CM_LeafArea( svs.cms, leafnum );
-
-	if( ( !( mask[cluster>>3] & ( 1<<( cluster&7 ) ) ) ) )
-		return qfalse;
-
-	if( !CM_AreasConnected( svs.cms, area1, area2 ) )
-		return qfalse; // a door blocks sight
-
-	return qtrue;
-}
-
-/*
 * PF_inPVS
 */
-static qboolean PF_inPVS( const vec3_t p1, const vec3_t p2 ) {
-	return PF_inVisSet( p1, p2, CM_ClusterPVS );
+static bool PF_inPVS( const vec3_t p1, const vec3_t p2 ) {
+	return CM_InPVS( svs.cms, p1, p2 );
 }
 
 /*
@@ -425,6 +395,23 @@ static void *PF_MemAlloc( size_t size, const char *filename, int fileline ) {
 */
 static void PF_MemFree( void *data, const char *filename, int fileline ) {
 	_Mem_Free( data, MEMPOOL_GAMEPROGS, 0, filename, fileline );
+}
+
+/*
+* PF_StatQuery_GetAPI
+*
+* Overrides CreateQuery entry with proxy function.
+*/
+static stat_query_api_t *PF_StatQuery_GetAPI( void )
+{
+	static stat_query_api_t api;
+	stat_query_api_t *p;
+	
+	p = StatQuery_GetAPI();
+	api = *p;
+	api.CreateQuery = SV_MM_CreateQuery;
+	
+	return &api;
 }
 
 //==============================================
@@ -576,7 +563,7 @@ void SV_InitGameProgs( void )
 
 	import.asGetAngelExport = Com_asGetAngelExport;
 
-	import.GetStatQueryAPI = StatQuery_GetAPI;
+	import.GetStatQueryAPI = PF_StatQuery_GetAPI;
 	import.MM_SendQuery = SV_MM_SendQuery;
 	import.MM_GameState = SV_MM_GameState;
 
@@ -588,7 +575,7 @@ void SV_InitGameProgs( void )
 		ge = builtinAPIfunc( &import );
 	}
 	else {
-		ge = (game_export_t *)Com_LoadGameLibrary( "game", "GetGameAPI", &module_handle, &import, qfalse, manifest );
+		ge = (game_export_t *)Com_LoadGameLibrary( "game", "GetGameAPI", &module_handle, &import, false, manifest );
 	}
 	if( !ge )
 		Com_Error( ERR_DROP, "Failed to load game DLL" );
@@ -608,5 +595,5 @@ void SV_InitGameProgs( void )
 
 	SV_SetServerConfigStrings();
 
-	ge->Init( time( NULL ), svc.snapFrameTime, APP_PROTOCOL_VERSION );
+	ge->Init( time( NULL ), svc.snapFrameTime, APP_PROTOCOL_VERSION, APP_DEMO_EXTENSION_STR );
 }

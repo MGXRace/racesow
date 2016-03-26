@@ -25,7 +25,16 @@ void IN_Restart( void );
 
 void IN_Commands( void ); // opportunity for devices to stick commands on the script buffer
 void IN_MouseMove( usercmd_t *cmd );
-void IN_JoyMove( usercmd_t *cmd );
+void IN_GetThumbsticks( vec4_t sticks );
 
 void IN_Frame( void );
-void IN_Activate( qboolean active );
+
+unsigned int IN_SupportedDevices( void );
+
+void IN_ShowSoftKeyboard( bool show );
+
+void IN_GetInputLanguage( char *dest, size_t size );
+
+void IN_IME_Enable( bool enable );
+size_t IN_IME_GetComposition( char *str, size_t strSize, size_t *cursorPos, size_t *convStart, size_t *convLen );
+unsigned int IN_IME_GetCandidates( char * const *cands, size_t candSize, unsigned int maxCands, int *selected, int *firstKey );

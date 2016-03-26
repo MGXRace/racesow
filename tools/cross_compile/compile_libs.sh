@@ -12,6 +12,11 @@ fi
 OS="$1"
 ARCH="$2"
 
+if [ "$OS" = "lin" ]; then
+    echo "Dynamic linking is used for $OS, skipping"
+    exit 0
+fi
+
 set -e
 
 . `pwd`/inc/common.inc.sh
@@ -22,7 +27,7 @@ if [ ! -d "$TARGET_DIR" ]; then
     mkdir -p "$TARGET_DIR"
 fi
 
-COMMAND_PREF="PATH=\"${PATH}\" HOST=${HOST} SOURCE_DIR=\"${SOURCE_DIR}\" TARGET_DIR=\"${TARGET_DIR}\" CFLAGS=\"${CFLAGS_COMMON}\" MAKE=\"${MAKE}\""
+COMMAND_PREF="PATH=\"${PATH}\" HOST=${HOST} SOURCE_DIR=\"${SOURCE_DIR}\" TARGET_DIR=\"${TARGET_DIR}\" CHOST=${HOST}  CFLAGS=\"${CFLAGS_COMMON}\" MAKE=\"${MAKE}\" ARCH=\"$ARCH\" "
 if [ ! -z "$DATA_DIR" ]; then
     COMMAND_PREF="${COMMAND_PREF} DATA_DIR=\"${DATA_DIR}\""
 fi
@@ -46,6 +51,9 @@ fi
 # libcurl
 if [ -z "$3" ] || [ "$3" == "curl" ]; then
     COMMAND="${COMMAND_PREF}"
+    if [ "$OS" = "win32" ]; then
+        COMMAND="${COMMAND} ENABLE_WINSSL=YES"
+    fi
     COMMAND="${COMMAND} ./libs/curl.sh"
     echo "$COMMAND" && eval $COMMAND
 fi

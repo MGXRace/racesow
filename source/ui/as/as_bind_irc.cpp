@@ -37,7 +37,7 @@ public:
 
 	bool isConnected( void )
 	{
-		qboolean *c;
+		bool *c;
 
 		if( !irc_connected )
 			irc_connected = trap::Dynvar_Lookup( "irc_connected" );
@@ -45,10 +45,10 @@ public:
 
 		trap::Dynvar_GetValue( irc_connected, (void **) &c );
 		if( *c ) {
-			return qtrue;
+			return true;
 		}
 
-		return qfalse;
+		return false;
 	}
 
 	void connect( void )
@@ -175,7 +175,7 @@ public:
 			trap::Cvar_Set( irc_perform->name, (irc_perform_str + "\n" ).c_str() );
 		}
 		else {
-			irc_perform_str = "";
+			irc_perform_str.clear();
 			trap::Cvar_Set( irc_perform->name, irc_perform->dvalue );
 		}
 	}

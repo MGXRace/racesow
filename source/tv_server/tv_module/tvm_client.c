@@ -29,24 +29,24 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 //==============================================================
 
-//==============
-//InitClientPersistant
-//==============
+/*
+* InitClientPersistant
+*/
 static void InitClientPersistant( gclient_t *client )
 {
 	assert( client );
 
 	memset( &client->pers, 0, sizeof( client->pers ) );
 
-	client->pers.connected = qtrue;
+	client->pers.connected = true;
 }
 
-//=================
-//TVM_ClientEndSnapFrame
-//
-//Called for each player at the end of the server frame
-//and right after spawning
-//=================
+/*
+* TVM_ClientEndSnapFrame
+* 
+* Called for each player at the end of the server frame
+* and right after spawning
+*/
 void TVM_ClientEndSnapFrame( edict_t *ent )
 {
 	edict_t *spec;
@@ -87,36 +87,32 @@ void TVM_ClientEndSnapFrame( edict_t *ent )
 		ent->r.client->ps.POVnum = 255; // FIXME
 	else
 		ent->r.client->ps.POVnum = relay->playernum + 1;
-	if( TVM_ClientIsZoom( ent ) )
-		ent->r.client->ps.fov = ent->r.client->pers.zoomfov;
-	else
-		ent->r.client->ps.fov = ent->r.client->pers.fov;
 }
 
-//=================
-//TVM_ClientIsZoom
-//=================
-qboolean TVM_ClientIsZoom( edict_t *ent )
+/*
+* TVM_ClientIsZoom
+*/
+bool TVM_ClientIsZoom( edict_t *ent )
 {
 	assert( ent && ent->local && ent->r.client );
 
 #if 0
 	if( ent->r.client->ps.stats[STAT_HEALTH] <= 0 )
-		return qfalse;
+		return false;
 #endif
 
 	if( ent->snap.buttons & BUTTON_ZOOM )
-		return qtrue;
+		return true;
 
-	return qfalse;
+	return false;
 }
 
-//===========
-//TVM_ClientBegin
-//
-//called when a client has finished connecting, and is ready
-//to be placed into the game.  This will happen every level load.
-//============
+/*
+* TVM_ClientBegin
+* 
+* called when a client has finished connecting, and is ready
+* to be placed into the game. This will happen every level load.
+*/
 void TVM_ClientBegin( tvm_relay_t *relay, edict_t *ent )
 {
 	edict_t *spot, *other;
@@ -127,7 +123,7 @@ void TVM_ClientBegin( tvm_relay_t *relay, edict_t *ent )
 
 	//TVM_Printf( "Begin: %s\n", ent->r.client->pers.netname );
 
-	ent->r.client->pers.connecting = qfalse;
+	ent->r.client->pers.connecting = false;
 
 	spot = TVM_SelectSpawnPoint( ent );
 	if( spot )
@@ -147,7 +143,7 @@ void TVM_ClientBegin( tvm_relay_t *relay, edict_t *ent )
 		VectorClear( ent->r.client->ps.viewangles );
 	}
 
-	ent->s.teleported = qtrue;
+	ent->s.teleported = true;
 	// set the delta angle
 	for( i = 0; i < 3; i++ )
 		ent->r.client->ps.pmove.delta_angles[i] = ANGLE2SHORT( ent->s.angles[i] ) - ent->r.client->pers.cmd_angles[i];
@@ -177,18 +173,17 @@ void TVM_ClientBegin( tvm_relay_t *relay, edict_t *ent )
 		TVM_ClientEndSnapFrame( ent );
 }
 
-//===========
-//TVM_ClientUserInfoChanged
-//
-//called whenever the player updates a userinfo variable.
-//
-//The game can override any of the settings in place
-//(forcing skins or names, etc) before copying it off.
-//============
+/*
+* TVM_ClientUserInfoChanged
+* 
+* called whenever the player updates a userinfo variable.
+* 
+* The game can override any of the settings in place
+* (forcing skins or names, etc) before copying it off.
+*/
 void TVM_ClientUserinfoChanged( tvm_relay_t *relay, edict_t *ent, char *userinfo )
 {
 	gclient_t *cl;
-	char *s;
 
 	assert( ent && ent->local && ent->r.client );
 
@@ -210,44 +205,21 @@ void TVM_ClientUserinfoChanged( tvm_relay_t *relay, edict_t *ent, char *userinfo
 	// set name, it's validated and possibly changed first
 	Q_strncpyz( cl->pers.netname, Info_ValueForKey( userinfo, "name" ), sizeof( cl->pers.netname ) );
 
-	// fov
-	s = Info_ValueForKey( userinfo, "fov" );
-	if( !s )
-	{
-		cl->pers.fov = 100;
-	}
-	else
-	{
-		cl->pers.fov = atoi( s );
-		clamp( cl->pers.fov, 1, 140 );
-	}
-
-	s = Info_ValueForKey( userinfo, "zoomfov" );
-	if( !s )
-	{
-		cl->pers.zoomfov = 30;
-	}
-	else
-	{
-		cl->pers.zoomfov = atoi( s );
-		clamp( cl->pers.zoomfov, 1, 60 );
-	}
-
 	// save off the userinfo in case we want to check something later
 	Q_strncpyz( cl->pers.userinfo, userinfo, sizeof( cl->pers.userinfo ) );
 }
 
-//===========
-//TVM_CanConnect
-//============
-qboolean TVM_CanConnect( tvm_relay_t *relay, char *userinfo )
+/*
+* TVM_CanConnect
+*/
+bool TVM_CanConnect( tvm_relay_t *relay, char *userinfo )
 {
-	return qtrue;
+	return true;
 }
 
-//===========
-//TVM_ClientConnect
-//============
+/*
+* TVM_ClientConnect
+*/
 void TVM_ClientConnect( tvm_relay_t *relay, edict_t *ent, char *userinfo )
 {
 	edict_t *spec;
@@ -261,9 +233,9 @@ void TVM_ClientConnect( tvm_relay_t *relay, edict_t *ent, char *userinfo )
 		spec = NULL;
 	else
 		spec = ent->relay->edicts + ent->relay->playernum + 1;
-	ent->local = qtrue;
+	ent->local = true;
 	ent->relay = relay;
-	ent->r.inuse = qtrue;
+	ent->r.inuse = true;
 	ent->r.svflags = SVF_NOCLIENT;
 	ent->s.team = spec ? spec->s.team : 0;
 	ent->r.client = relay->local_clients + PLAYERNUM( ent );
@@ -276,23 +248,23 @@ void TVM_ClientConnect( tvm_relay_t *relay, edict_t *ent, char *userinfo )
 
 	//TVM_Printf( "Connect: %s\n", ent->r.client->pers.netname );
 
-	ent->r.client->pers.connected = qtrue;
-	ent->r.client->pers.connecting = qtrue;
+	ent->r.client->pers.connected = true;
+	ent->r.client->pers.connecting = true;
 }
 
-//===========
-//TVM_ClientDisconnect
-//
-//Called when a player drops from the server.
-//Will not be called between levels.
-//============
+/*
+* TVM_ClientDisconnect
+* 
+* Called when a player drops from the server.
+* Will not be called between levels.
+*/
 void TVM_ClientDisconnect( tvm_relay_t *relay, edict_t *ent )
 {
 	assert( ent && ent->local && ent->r.client );
 
 	//TVM_Printf( "Disconnect: %s\n", ent->r.client->pers.netname );
 
-	ent->r.inuse = qfalse;
+	ent->r.inuse = false;
 	ent->r.svflags = SVF_NOCLIENT;
 	memset( ent->r.client, 0, sizeof( *ent->r.client ) );
 	ent->r.client->ps.playerNum = PLAYERNUM( ent );
@@ -300,18 +272,18 @@ void TVM_ClientDisconnect( tvm_relay_t *relay, edict_t *ent )
 	GClip_UnlinkEntity( ent->relay, ent );
 }
 
-//==============
-//TVM_ClientMultiviewChanged
-//
-//This will be called when client tries to change multiview mode
-//Mode change can be disallowed by returning qfalse
-//==============
-qboolean TVM_ClientMultiviewChanged( tvm_relay_t *relay, edict_t *ent, qboolean multiview )
+/*
+* TVM_ClientMultiviewChanged
+* 
+* This will be called when client tries to change multiview mode
+* Mode change can be disallowed by returning false
+*/
+bool TVM_ClientMultiviewChanged( tvm_relay_t *relay, edict_t *ent, bool multiview )
 {
 	assert( ent && ent->local && ent->r.client );
 
 	ent->r.client->pers.multiview = multiview;
-	return qtrue;
+	return true;
 }
 
 static void TVM_ClientMakePlrkeys( gclient_t *client, usercmd_t *ucmd )
@@ -339,12 +311,12 @@ static void TVM_ClientMakePlrkeys( gclient_t *client, usercmd_t *ucmd )
 		client->plrkeys |= ( 1 << KEYICON_SPECIAL );
 }
 
-//==============
-//TVM_ClientThink
-//
-//This will be called once for each client frame, which will
-//usually be a couple times for each server frame.
-//==============
+/*
+* TVM_ClientThink
+* 
+* This will be called once for each client frame, which will
+* usually be a couple times for each server frame.
+*/
 void TVM_ClientThink( tvm_relay_t *relay, edict_t *ent, usercmd_t *ucmd, int timeDelta )
 {
 	gclient_t *client;
@@ -384,7 +356,7 @@ void TVM_ClientThink( tvm_relay_t *relay, edict_t *ent, usercmd_t *ucmd, int tim
 			client->ps.pmove.pm_type = PM_FREEZE;
 			if( !VectorCompare( ent->s.origin, spec->s.origin ) )
 			{
-				ent->s.teleported = qtrue;
+				ent->s.teleported = true;
 				VectorCopy( spec->s.origin, ent->s.origin );
 				VectorCopy( spec->s.angles, ent->s.angles );
 				VectorCopy( spec->s.angles, client->ps.viewangles );
@@ -409,7 +381,7 @@ void TVM_ClientThink( tvm_relay_t *relay, edict_t *ent, usercmd_t *ucmd, int tim
 	VectorCopy( ent->r.maxs, pm.maxs );
 
 	if( memcmp( &client->old_pmove, &client->ps.pmove, sizeof( pmove_state_t ) ) )
-		pm.snapinitial = qtrue;
+		pm.snapinitial = true;
 
 	// perform a pmove
 	TVM_Pmove( &pm );

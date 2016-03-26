@@ -94,6 +94,9 @@ typedef struct
 	int bombs_planted;
 	int bombs_defused;
 	int flags_capped;
+	int fairplay_count;
+	int muted_count;
+	bool had_playtime;
 
 	// loggedFrag_t
 	linear_allocator_t *fragAllocator;
@@ -139,6 +142,7 @@ typedef struct
 
 	bool isTeamBased;
 	bool isRace;
+	bool isTutorial;
 	bool inverseScore;
 	bool hasChallengersQueue;
 	int maxPlayersPerTeam;
@@ -163,10 +167,14 @@ typedef struct
 	bool canShowMinimap;
 	bool teamOnlyMinimap;
 	bool customDeadBodyCam;
+	bool removeInactivePlayers;
 
-	int spawnpoint_radius;
+	int spawnpointRadius;
 
 	bool mmCompatible;
+
+	int numBots;
+	bool dummyBots;
 
 	// racesow
 	bool autoInactivityRemove;

@@ -124,19 +124,19 @@ float weapon_affinity[WEAP_TOTAL];
 static const ai_character bot_personalities[] = {
 	// yaw  reac comb  yacc off  camp fire armor health weapon affinities
 	//	no gb mg   rg   gl   rl   pg   lg   eb   ig
-	{ "JoeB",    750, 600, 800,  95,  1.0, 1.0, 1.0, 1.0,  1.0,   { 0, 1, 1,   1,   1,   1,   1,   1,   1,   1} },
-	{ "Rock",    950, 700, 600,  95,  1.2, 4.0, 0.6, 1.0,  1.0,   { 0, 1, 1,   1.4, 1,   1,   1.4, 1,   1,   1} },
-	{ "PGuy",    800, 500,1200,  100,  0.7, 4.0, 0.4, 1.0,  1.0,   { 0, 1, 1.2, 2,   1,   1,   1.2, 1.6, 1.2, 1} },
-	{ "proBot",  600, 600, 300,  90,  0.8, 4.0, 1.0, 1.2,  1.2,   { 0, 1, 1.2, 1.6, 1,   1,   1.2, 1.2, 1.2, 1} },
-	{ "Baas",    700, 500, 800,  95,  0.9, 0.1, 0.5, 1.0,  1.0,   { 0, 1, 1,   1.2, 1,   1,   1,   1.2, 1.6, 1} },
-	{ "camB",    650, 800, 700,  90,  0.8, 0.1, 1.2, 1.0,  1.0,   { 0, 1, 1,   1.2, 1.2, 1,   1,   1,   1,   1} },
-	{ "Ovot",    750, 650, 800,  110,  0.9, 2.5, 0.1, 1.0,  1.0,   { 0, 1, 1,   1,   1,   1,   1,   1,   1,   1} },
-	{ "Bumm",    650, 500, 600,  90,  1.1, 1.5, 1.0, 1.0,  1.1,   { 0, 1, 1,   1.2, 1.6, 1.2, 1,   1.2, 1,   1} },
-	{ "Gran",    700, 800, 600,  115,  1.3, 1.5, 1.0, 1.0,  1.0,   { 0, 1, 1,   1,   1,   1.6, 1,   1,   1,   1} },
-	{ "Laaz",    600, 500, 600,  85,  1.2, 1.5, 0.6, 1.0,  1.0,   { 0, 1, 1,   1,   1.2, 1,   1,   1,   1.6, 1} },
-	{ "Peacy",   900, 800, 1300, 110, 0.8, 2.0, 1.0, 0.9,  0.9,   { 0, 1, 1,   1.6, 1,   1.2, 1.2, 1.2, 1,   1} },
-	{ "m-sook",  650, 500, 400,  95,  0.8, 2.0, 0.7, 1.0,  1.0,   { 0, 1, 1,   1,   1.2, 1.6, 1,   1,   1,   1} },
-	{ "boom",    800, 400, 200,  90,  1.2, 1.0, 1.0, 1.0,  1.0,   { 0, 1, 1,   1.2, 1.2, 1.2, 1,   1.6, 1.6, 1} }
+	{ "JoeB",    35*5, 80, 500,  95,  1.0, 1.0, 1.0, 1.0,  1.0,   { 0, 1, 1,   1,   1,   1,   1,   1,   1,   1} },
+	{ "Rock",    45*5, 90, 400,  95,  1.2, 4.0, 0.6, 1.0,  1.0,   { 0, 1, 1,   1.4, 1,   1,   1.4, 1,   1,   1} },
+	{ "PGuy",    40*5, 70, 600,  100,  0.7, 4.0, 0.4, 1.0,  1.0,   { 0, 1, 1.2, 2,   1,   1,   1.2, 1.6, 1.2, 1} },
+	{ "proBot",  20*5, 80, 600,  90,  0.8, 4.0, 1.0, 1.2,  1.2,   { 0, 1, 1.2, 1.6, 1,   1,   1.2, 1.2, 1.2, 1} },
+	{ "Baas",    30*5, 70, 500,  95,  0.9, 0.1, 0.5, 1.0,  1.0,   { 0, 1, 1,   1.2, 1,   1,   1,   1.2, 1.6, 1} },
+	{ "camB",    25*5, 90, 700,  90,  0.8, 0.1, 1.2, 1.0,  1.0,   { 0, 1, 1,   1.2, 1.2, 1,   1,   1,   1,   1} },
+	{ "Ovot",    35*5, 85, 600,  110,  0.9, 2.5, 0.1, 1.0,  1.0,   { 0, 1, 1,   1,   1,   1,   1,   1,   1,   1} },
+	{ "Bumm",    25*5, 70, 600,  90,  1.1, 1.5, 1.0, 1.0,  1.1,   { 0, 1, 1,   1.2, 1.6, 1.2, 1,   1.2, 1,   1} },
+	{ "Gran",    30*5, 90, 600,  115,  1.3, 1.5, 1.0, 1.0,  1.0,   { 0, 1, 1,   1,   1,   1.6, 1,   1,   1,   1} },
+	{ "Laaz",    20*5, 70, 600,  85,  1.2, 1.5, 0.6, 1.0,  1.0,   { 0, 1, 1,   1,   1.2, 1,   1,   1,   1.6, 1} },
+	{ "Peacy",   40*5, 90, 750, 110, 0.8, 2.0, 1.0, 0.9,  0.9,   { 0, 1, 1,   1.6, 1,   1.2, 1.2, 1.2, 1,   1} },
+	{ "m-sook",  25*5, 70, 500,  95,  0.8, 2.0, 0.7, 1.0,  1.0,   { 0, 1, 1,   1,   1.2, 1.6, 1,   1,   1,   1} },
+	{ "boom",    40*5, 60, 600,  90,  1.2, 1.0, 1.0, 1.0,  1.0,   { 0, 1, 1,   1.2, 1.2, 1.2, 1,   1.6, 1.6, 1} }
 };
 
 #define BOT_NUMCHARACTERS 13
@@ -324,9 +324,15 @@ static void BOT_CreateUserinfo( char *userinfo, size_t userinfo_size, int bot_pe
 	//Info_SetValueForKey( userinfo, "skin", bot_skin );
 	Info_SetValueForKey( userinfo, "skin", "default" ); // JALFIXME
 	Info_SetValueForKey( userinfo, "hand", va( "%i", (int)( random()*2.5 ) ) );
-	Info_SetValueForKey( userinfo, "color", va( "%i %i %i", (qbyte)( random()*255 ), (qbyte)( random()*255 ), (qbyte)( random()*255 ) ) );
+	Info_SetValueForKey( userinfo, "color", va( "%i %i %i", (uint8_t)( random()*255 ), (uint8_t)( random()*255 ), (uint8_t)( random()*255 ) ) );
 }
 
+static void BOT_pain( edict_t *self, edict_t *other, float kick, int damage )
+{
+	if( !self->enemy && other->r.client ) {
+		self->ai->last_attacker = other;
+	}
+}
 
 //==========================================
 // BOT_Respawn
@@ -339,14 +345,17 @@ void BOT_Respawn( edict_t *self )
 
 	self->enemy = NULL;
 	self->movetarget = NULL;
+	self->pain = BOT_pain;
 
 	self->ai->statusUpdateTimeout = 0;
 	self->ai->changeweapon_timeout = 0;
 	self->ai->combatmovepush_timeout = 0;
 	self->ai->state_combat_timeout = 0;
 	self->ai->enemyReactionDelay = 0;
+	self->ai->last_attacker = NULL;
 
 	VectorClear( self->r.client->ps.pmove.delta_angles );
+	self->r.client->level.last_activity = level.time;
 
 	AI_ResetNavigation( self );
 }

@@ -36,8 +36,27 @@ extern "C" {
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
+#ifndef _MSC_VER
+#include <strings.h>
+#endif
 #include <stdlib.h>
 #include <time.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+
+#ifdef __cplusplus
+};
+#endif
+
+#ifdef __cplusplus
+#include <type_traits>
+#endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 
 //==============================================
 
@@ -45,6 +64,8 @@ extern "C" {
 
 // wsw : pb : zlib 1.2.3
 //# define ZLIB_WINAPI
+
+#ifdef _MSC_VER
 
 // unknown pragmas are SUPPOSED to be ignored, but....
 #pragma warning( disable : 4244 )       // MIPS
@@ -70,6 +91,8 @@ extern "C" {
 #pragma warning( disable : 4267 )       // conversion from 'size_t' to whatever, possible loss of data
 #endif
 
+#endif
+
 #if defined(_MSC_VER) && defined(_I64_MAX)
 # define HAVE___STRTOI64
 #endif
@@ -81,6 +104,8 @@ extern "C" {
 #define HAVE__VSNPRINTF
 
 #define HAVE__STRICMP
+
+#define HAVE_STRTOK_S
 
 #ifdef LCC_WIN32
 #ifndef C_ONLY
@@ -94,13 +119,24 @@ extern "C" {
 #endif
 
 #define LIB_DIRECTORY "libs"
+#define LIB_PREFIX ""
 #define LIB_SUFFIX ".dll"
 
 #define VID_INITFIRST
 
 #define MUMBLE_SUPPORT
 #define OPENAL_RUNTIME
-#define VORBISFILE_LIBNAME "libvorbisfile.dll"
+
+// FIXME: move these to CMakeLists.txt
+#define LIBZ_LIBNAME "zlib1.dll"
+#define LIBCURL_LIBNAME "libcurl-4.dll|libcurl-3.dll"
+#define LIBPNG_LIBNAME "libpng16.dll|libpng16-16.dll|libpng15-15.dll|libpng15.dll|libpng14-14.dll|libpng14.dll|libpng12.dll"
+#define LIBJPEG_LIBNAME "libjpeg.dll"
+#define LIBOGG_LIBNAME "libogg-0.dll|libogg.dll"
+#define LIBVORBIS_LIBNAME "libvorbis-0.dll|libvorbis.dll|vorbis.dll"
+#define LIBVORBISFILE_LIBNAME "libvorbisfile-3.dll|libvorbisfile.dll|vorbisfile.dll"
+#define LIBTHEORA_LIBNAME "libtheora-0.dll|libtheora.dll"
+#define LIBFREETYPE_LIBNAME "libfreetype-6.dll|freetype6.dll"
 
 #ifdef NDEBUG
 #define BUILDSTRING "Win32 RELEASE"
@@ -109,6 +145,8 @@ extern "C" {
 #endif
 
 #define OSNAME "Windows"
+
+#define STEAMQUERY_OS 'w'
 
 #ifdef _M_IX86
 #define CPUSTRING "x86"
@@ -138,12 +176,6 @@ extern "C" {
 
 // wsw : aiwa : 64bit integers and integer-pointer types
 #include <basetsd.h>
-#include <stdint.h>
-typedef int64_t qint64;
-typedef uint64_t quint64;
-typedef intptr_t qintptr;
-typedef uintptr_t quintptr;
-
 
 typedef int socklen_t;
 typedef unsigned long ioctl_param_t;
@@ -165,13 +197,24 @@ typedef UINT_PTR socket_handle_t;
 #endif
 
 #define LIB_DIRECTORY "libs"
+#define LIB_PREFIX "lib"
 #define LIB_SUFFIX ".so"
 
 #ifndef __ANDROID__
 #define MUMBLE_SUPPORT
 #define OPENAL_RUNTIME
 #endif
-#define VORBISFILE_LIBNAME "libvorbisfile.so"
+
+// FIXME: move these to CMakeLists.txt
+#define LIBZ_LIBNAME "libz.so.1|libz.so"
+#define LIBCURL_LIBNAME "libcurl.so.4|libcurl.so.3|libcurl.so"
+#define LIBPNG_LIBNAME "libpng16.so.16|libpng15.so.15|libpng14.so.14|libpng12.so.0|libpng.so"
+#define LIBJPEG_LIBNAME "libjpeg.so.8|libjpeg.so"
+#define LIBOGG_LIBNAME "libogg.so.0|libogg.so"
+#define LIBVORBIS_LIBNAME "libvorbis.so.0|libvorbis.so"
+#define LIBVORBISFILE_LIBNAME "libvorbisfile.so.3|libvorbisfile.so"
+#define LIBTHEORA_LIBNAME "libtheora.so.0|libtheora.so"
+#define LIBFREETYPE_LIBNAME "libfreetype.so.6|libfreetype.so"
 
 #if defined ( __FreeBSD__ )
 #define BUILDSTRING "FreeBSD"
@@ -183,6 +226,8 @@ typedef UINT_PTR socket_handle_t;
 #define BUILDSTRING "Linux"
 #define OSNAME "Linux"
 #endif
+
+#define STEAMQUERY_OS 'l'
 
 #ifdef __i386__
 #if defined ( __FreeBSD__ )
@@ -235,12 +280,6 @@ typedef UINT_PTR socket_handle_t;
 #include <alloca.h>
 
 // wsw : aiwa : 64bit integers and integer-pointer types
-#include <stdint.h>
-typedef int64_t qint64;
-typedef uint64_t quint64;
-typedef intptr_t qintptr;
-typedef uintptr_t quintptr;
-
 typedef int ioctl_param_t;
 
 typedef int socket_handle_t;
@@ -265,27 +304,33 @@ typedef int socket_handle_t;
 #endif
 
 #define LIB_DIRECTORY "libs"
+#define LIB_PREFIX "lib"
 #define LIB_SUFFIX ".dylib"
 
 #define MUMBLE_SUPPORT
 #define OPENAL_RUNTIME
-#define VORBISFILE_LIBNAME "libvorbisfile.dylib"
+
+// FIXME: move these to CMakeLists.txt
+#define LIBZ_LIBNAME "libz.dylib"
+#define LIBCURL_LIBNAME "libcurl.4.dylib|libcurl.3.dylib|libcurl.2.dylib"
+#define LIBPNG_LIBNAME "libpng16.16.dylib|libpng15.15.dylib|libpng14.14.dylib|libpng12.0.dylib"
+#define LIBJPEG_LIBNAME "libjpeg.62.dylib"
+#define LIBOGG_LIBNAME "libogg.0.dylib|libogg.dylib"
+#define LIBVORBIS_LIBNAME "libvorbis.dylib"
+#define LIBVORBISFILE_LIBNAME "libvorbisfile.dylib"
+#define LIBTHEORA_LIBNAME "libtheora.0.dylib|libtheora.dylib"
+#define LIBFREETYPE_LIBNAME "libfreetype.6.dylib|libfreetype.dylib"
 
 //Mac OSX has universal binaries, no need for cpu dependency
 #define BUILDSTRING "MacOSX"
 #define OSNAME "MacOSX"
+#define STEAMQUERY_OS 'o'
 #define CPUSTRING "universal"
 #define ARCH "mac"
 
 #define VAR( x ) # x
 
 #include <alloca.h>
-
-#include <stdint.h>
-typedef int64_t qint64;
-typedef uint64_t quint64;
-typedef intptr_t qintptr;
-typedef uintptr_t quintptr;
 
 typedef int ioctl_param_t;
 
@@ -306,6 +351,8 @@ typedef int socket_handle_t;
 
 //==============================================
 
+#if !defined(__cplusplus)
+
 #ifdef HAVE___INLINE
 #ifndef inline
 #define inline __inline
@@ -314,6 +361,8 @@ typedef int socket_handle_t;
 #ifndef inline
 #define inline
 #endif
+#endif
+
 #endif
 
 #ifdef HAVE__SNPRINTF
@@ -344,6 +393,10 @@ typedef int socket_handle_t;
 #ifndef Q_strnicmp
 #define Q_strnicmp( s1, s2, n ) strncasecmp( ( s1 ), ( s2 ), ( n ) )
 #endif
+#endif
+
+#ifdef HAVE_STRTOK_S
+#define strtok_r strtok_s
 #endif
 
 #ifdef HAVE__ALLOCA
@@ -421,10 +474,6 @@ typedef int socket_handle_t;
 #endif
 
 //==============================================
-
-typedef unsigned char qbyte;
-typedef enum { qfalse, qtrue }	  qboolean;
-typedef unsigned int qwchar;	// Unicode character
 
 #ifndef NULL
 #define NULL ( (void *)0 )

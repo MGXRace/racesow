@@ -46,14 +46,14 @@ typedef struct
 	unsigned int speed;              // not needed, because converted on load?
 	unsigned short channels;
 	unsigned short width;
-	qbyte data[1];          // variable sized
+	uint8_t data[1];          // variable sized
 } sfxcache_t;
 
 typedef struct sfx_s
 {
 	char name[MAX_QPATH];
 	int registration_sequence;
-	qboolean isUrl;
+	bool isUrl;
 	sfxcache_t *cache;
 } sfx_t;
 
@@ -86,7 +86,7 @@ typedef struct playsound_s
 	float attenuation;
 	int entnum;
 	int entchannel;
-	qboolean fixed_origin;  // use origin field instead of entnum's origin
+	bool fixed_origin;  // use origin field instead of entnum's origin
 	vec3_t origin;
 	unsigned begin;         // begin on this sample
 } playsound_t;
@@ -100,7 +100,7 @@ typedef struct
 	unsigned int samplebits;
 	unsigned int speed;
 	float msec_per_sample;
-	qbyte *buffer;
+	uint8_t *buffer;
 } dma_t;
 
 typedef struct
@@ -115,8 +115,8 @@ typedef struct
 	vec3_t origin;          // only use if fixed_origin is set
 	vec_t dist_mult;        // distance multiplier (attenuation/clipK)
 	int master_vol;         // 0-255 master volume
-	qboolean fixed_origin;  // use origin instead of fetching entnum's origin
-	qboolean autosound;     // from an entity->sound, cleared each frame
+	bool fixed_origin;  // use origin instead of fetching entnum's origin
+	bool autosound;     // from an entity->sound, cleared each frame
 	int	lpf_lcoeff;			// lowpass filters coefficient (0-0xffff) for both ears
 	int lpf_rcoeff;
 	int lpf_history[4];		// lowpass IIR chain 2-pole, 2-chan = 4 samples
@@ -138,14 +138,15 @@ typedef struct
 typedef struct bgTrack_s
 {
 	char *filename;
-	qboolean ignore;
+	bool ignore;
 	int file;
 	wavinfo_t info;
-	qboolean isUrl;
-	qboolean loop;
+	bool isUrl;
+	bool loop;
+	bool muteOnPause;
 
 	void *vorbisFile;
-	qboolean ( *open )( struct bgTrack_s *track, qboolean *delay );
+	bool ( *open )( struct bgTrack_s *track, bool *delay );
 	int ( *read )( struct bgTrack_s *track, void *ptr, size_t size );
 	int ( *seek )( struct bgTrack_s *track, int pos );
 	void ( *close )( struct bgTrack_s *track );
@@ -163,7 +164,7 @@ typedef struct
 
 int S_API( void );
 void S_Error( const char *format, ... );
-void S_Activate( qboolean active );
+void S_Activate( bool active );
 
 void *S_BackgroundUpdateProc( void *param );
 
@@ -171,16 +172,16 @@ void S_ClearPaintBuffer( void );
 
 // music cinema
 
-void S_StartBackgroundTrack( const char *intro, const char *loop );
+void S_StartBackgroundTrack( const char *intro, const char *loop, int mode );
 void S_StopBackgroundTrack( void );
 void S_PauseBackgroundTrack( void );
-void S_LockBackgroundTrack( qboolean lock );
+void S_LockBackgroundTrack( bool lock );
 void S_PrevBackgroundTrack( void );
 void S_NextBackgroundTrack( void );
 void S_UpdateBackgroundTrack( void );
 
 void S_RawSamples2( unsigned int samples, unsigned int rate, unsigned short width, 
-	unsigned short channels, const qbyte *data, int snd_vol );
+	unsigned short channels, const uint8_t *data, int snd_vol );
 unsigned int S_GetRawSamplesLength( void );
 unsigned int S_GetPositionedRawSamplesLength( int entnum );
 
@@ -193,21 +194,21 @@ SYSTEM SPECIFIC FUNCTIONS
 */
 
 // initializes cycling through a DMA buffer and returns information on it
-qboolean SNDDMA_Init( void *hwnd, qboolean verbose );
+bool SNDDMA_Init( void *hwnd, bool verbose );
 
 // gets the current DMA position
 int	SNDDMA_GetDMAPos( void );
 
 // shutdown the DMA xfer.
-void	SNDDMA_Shutdown( qboolean verbose );
+void	SNDDMA_Shutdown( bool verbose );
 
 void	SNDDMA_BeginPainting( void );
 
 void	SNDDMA_Submit( void );
 
-void	SNDOGG_Init( qboolean verbose );
-void	SNDOGG_Shutdown( qboolean verbose );
-qboolean SNDOGG_OpenTrack( bgTrack_t *track, qboolean *delay );
+void	SNDOGG_Init( bool verbose );
+void	SNDOGG_Shutdown( bool verbose );
+bool SNDOGG_OpenTrack( bgTrack_t *track, bool *delay );
 sfxcache_t *SNDOGG_Load( sfx_t *s );
 
 //====================================================================
@@ -227,7 +228,7 @@ extern volatile unsigned int paintedtime;
 extern dma_t dma;
 extern playsound_t s_pendingplays;
 
-extern qboolean s_active;
+extern bool s_active;
 
 #define	MAX_RAW_SAMPLES	16384
 
@@ -244,9 +245,9 @@ extern cvar_t *s_show;
 extern cvar_t *s_mixahead;
 extern cvar_t *s_testsound;
 extern cvar_t *s_swapstereo;
-extern cvar_t *s_vorbis;
 extern cvar_t *s_pseudoAcoustics;
 extern cvar_t *s_separationDelay;
+extern cvar_t *s_globalfocus;
 
 extern struct mempool_s *soundpool;
 
@@ -259,8 +260,8 @@ extern struct mempool_s *soundpool;
 #define S_Malloc( size ) S_MemAlloc( soundpool, size )
 #define S_Free( data ) S_MemFree( data )
 
-wavinfo_t GetWavinfo( const char *name, qbyte *wav, int wavlength );
-unsigned int ResampleSfx( unsigned int numsamples, unsigned int speed, unsigned short channels, unsigned short width, const qbyte *data, qbyte *outdata, char *name );
+wavinfo_t GetWavinfo( const char *name, uint8_t *wav, int wavlength );
+unsigned int ResampleSfx( unsigned int numsamples, unsigned int speed, unsigned short channels, unsigned short width, const uint8_t *data, uint8_t *outdata, char *name );
 
 void S_InitScaletable( void );
 
@@ -268,26 +269,26 @@ sfxcache_t *S_LoadSound( sfx_t *s );
 
 void S_IssuePlaysound( playsound_t *ps );
 
-int S_PaintChannels( unsigned int endtime, int dumpfile );
+int S_PaintChannels( unsigned int endtime, int dumpfile, float gain );
 
 //====================================================================
 
 /*
 * Exported functions
 */
-qboolean SF_Init( void *hwnd, int maxEntities, qboolean verbose );
-void SF_Shutdown( qboolean verbose );
+bool SF_Init( void *hwnd, int maxEntities, bool verbose );
+void SF_Shutdown( bool verbose );
 void SF_EndRegistration( void );
 void SF_BeginRegistration( void );
 sfx_t *SF_RegisterSound( const char *name );
-void SF_StartBackgroundTrack( const char *intro, const char *loop );
+void SF_StartBackgroundTrack( const char *intro, const char *loop, int mode );
 void SF_StopBackgroundTrack( void );
-void SF_LockBackgroundTrack( qboolean lock );
-void SF_StopAllSounds( void );
+void SF_LockBackgroundTrack( bool lock );
+void SF_StopAllSounds( bool clear, bool stopMusic );
 void SF_PrevBackgroundTrack( void );
 void SF_NextBackgroundTrack( void );
 void SF_PauseBackgroundTrack( void );
-void SF_Activate( qboolean active );
+void SF_Activate( bool active );
 void SF_BeginAviDemo( void );
 void SF_StopAviDemo( void );
 void SF_SetAttenuationModel( int model, float maxdistance, float refdistance );
@@ -299,12 +300,12 @@ void SF_StartGlobalSound( sfx_t *sfx, int channel, float fvol );
 void SF_StartLocalSound( const char *sound );
 void SF_Clear( void );
 void SF_AddLoopSound( sfx_t *sfx, int entnum, float fvol, float attenuation );
-void SF_Update( const vec3_t origin, const vec3_t velocity, const mat3_t axis, qboolean avidump );
+void SF_Update( const vec3_t origin, const vec3_t velocity, const mat3_t axis, bool avidump );
 void SF_RawSamples( unsigned int samples, unsigned int rate, unsigned short width, 
-	unsigned short channels, const qbyte *data, qboolean music );
+	unsigned short channels, const uint8_t *data, bool music );
 void SF_PositionedRawSamples( int entnum, float fvol, float attenuation, 
 	unsigned int samples, unsigned int rate, 
-	unsigned short width, unsigned short channels, const qbyte *data );
+	unsigned short width, unsigned short channels, const uint8_t *data );
 
 //====================================================================
 

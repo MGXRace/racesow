@@ -54,11 +54,11 @@ struct edict_s
 	entity_shared_t	r;
 };
 
-#ifdef TCP_ALLOW_CONNECT
+#ifdef TCP_ALLOW_TVCONNECT
 #define MAX_INCOMING_CONNECTIONS 256
 typedef struct
 {
-	qboolean active;
+	bool active;
 	unsigned int time;      // for timeout
 	socket_t socket;
 	netadr_t address;
@@ -80,7 +80,7 @@ typedef struct
 typedef struct
 {
 	char *name;
-	qbyte *data;            // file being downloaded
+	uint8_t *data;            // file being downloaded
 	int size;               // total bytes (can't use EOF because of paks)
 	unsigned int timeout;   // so we can free the file being downloaded
 	// if client omits sending success or failure message
@@ -88,13 +88,13 @@ typedef struct
 
 typedef struct
 {
-	qboolean allentities;
-	qboolean multipov;
-	qboolean relay;
+	bool allentities;
+	bool multipov;
+	bool relay;
 	int clientarea;
 	int numareas;
 	size_t areabytes;
-	qbyte *areabits;                // portalarea visibility bits
+	uint8_t *areabits;                // portalarea visibility bits
 	int numplayers;
 	int ps_size;
 	player_state_t *ps;                 // [numplayers]
@@ -141,9 +141,9 @@ typedef struct client_s
 
 	relay_t	*relay;
 
-	qboolean reliable;                  // no need for acks, upstream is reliable
-	qboolean mv;                        // send multiview data to the client
-	qboolean individual_socket;         // client has it's own socket that has to be checked separately
+	bool reliable;                  // no need for acks, upstream is reliable
+	bool mv;                        // send multiview data to the client
+	bool individual_socket;         // client has it's own socket that has to be checked separately
 
 	socket_t socket;
 
@@ -168,7 +168,7 @@ typedef struct client_s
 	unsigned lastconnect;
 
 	int lastframe;                  // used for delta compression etc.
-	qboolean nodelta;               // send one non delta compressed frame trough
+	bool nodelta;               // send one non delta compressed frame trough
 	int nodelta_frame;              // when we get confirmation of this frame, the non-delta frame is trough
 	usercmd_t lastcmd;              // for filling in big drops
 	unsigned int lastSentFrameNum;  // for knowing which was last frame we sent
@@ -181,14 +181,14 @@ typedef struct client_s
 	// The sounds datagram is written to by multicasted sound commands
 	// It can be harmlessly overflowed.
 	msg_t soundsmsg;
-	qbyte soundsmsgData[MAX_MSGLEN];
+	uint8_t soundsmsgData[MAX_MSGLEN];
 
 	client_snapshot_t snapShots[UPDATE_BACKUP]; // updates can be delta'd from here
 
 	client_download_t download;
 
 	int challenge;                  // challenge of this user, randomly generated
-	qboolean tv;
+	bool tv;
 	client_flood_t flood;
 
 	netchan_t netchan;
@@ -197,7 +197,7 @@ typedef struct client_s
 typedef struct
 {
 	int spawncount;
-	int last_heartbeat;
+	unsigned int next_heartbeat;
 	unsigned int framenum;
 	unsigned int lastrun;
 	unsigned int snapFrameTime;
@@ -213,7 +213,7 @@ typedef struct
 	netadr_t addressIPv6;
 
 	// downstream
-#ifdef TCP_ALLOW_CONNECT
+#ifdef TCP_ALLOW_TVCONNECT
 	socket_t socket_tcp;
 	socket_t socket_tcp6;
 #endif
@@ -221,7 +221,7 @@ typedef struct
 	socket_t socket_udp6;
 
 	challenge_t challenges[MAX_CHALLENGES];
-#ifdef TCP_ALLOW_CONNECT
+#ifdef TCP_ALLOW_TVCONNECT
 	incoming_t incoming[MAX_INCOMING_CONNECTIONS];
 #endif
 
@@ -256,10 +256,13 @@ extern cvar_t *tv_autorecord;
 extern cvar_t *tv_lobbymusic;
 
 extern cvar_t *tv_masterservers;
+extern cvar_t *tv_masterservers_steam;
 
 extern cvar_t *tv_floodprotection_messages;
 extern cvar_t *tv_floodprotection_seconds;
 extern cvar_t *tv_floodprotection_penalty;
+
+extern cvar_t *tv_port;
 
 extern tv_t tvs;
 

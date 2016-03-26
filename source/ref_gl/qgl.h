@@ -63,6 +63,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define GLX_GLXEXT_LEGACY
 
 #if !defined (__MACOSX__) && !defined (__ANDROID__)
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include <GL/gl.h>
 #endif
 
@@ -119,8 +122,17 @@ QGL_EXTERN	const char				*(*qglGetGLWExtensionsString)( void );
 #define GL_UNSIGNED_SHORT_5_6_5								0x8363
 #endif
 
+#ifndef GL_LOW_FLOAT
+#define GL_LOW_FLOAT										0x8DF0
+#define GL_MEDIUM_FLOAT										0x8DF1
+#define GL_HIGH_FLOAT										0x8DF2
+#define GL_LOW_INT											0x8DF3
+#define GL_MEDIUM_INT										0x8DF4
+#define GL_HIGH_INT											0x8DF5
+#endif
+
 #define GL_TEXTURE0_ARB										0x84C0
-#define GL_MAX_TEXTURE_UNITS_ARB							0x84E2
+#define GL_MAX_TEXTURE_IMAGE_UNITS_ARB						0x8872
 
 /* GL_ARB_texture_compression */
 #ifndef GL_ARB_texture_compression
@@ -445,21 +457,26 @@ typedef unsigned int GLhandleARB;
 
 typedef unsigned short GLhalfARB;
 
-#ifndef GL_HALF_FLOAT
+#ifdef GL_HALF_FLOAT
+#undef GL_HALF_FLOAT
+#endif
+#ifdef GL_ES_VERSION_2_0
+#define GL_HALF_FLOAT										0x8D61
+#else
 #define GL_HALF_FLOAT										0x140B
 #endif
 #endif /* GL_ARB_half_float_vertex */
 
-/* GL_NV_multiview_draw_buffers */
-#ifndef GL_NV_multiview_draw_buffers
-#define GL_NV_multiview_draw_buffers
+/* GL_EXT_multiview_draw_buffers */
+#ifndef GL_EXT_multiview_draw_buffers
+#define GL_EXT_multiview_draw_buffers
 
-#define GL_COLOR_ATTACHMENT_NV								0x90F0
-#define GL_MULTIVIEW_NV										0x90F1
-#define GL_DRAW_BUFFER_NV									0x0C01
-#define GL_READ_BUFFER_NV									0x0C02
-#define GL_MAX_MULTIVIEW_BUFFERS_NV							0x90F2
-#endif /* GL_NV_multiview_draw_buffers */
+#define GL_COLOR_ATTACHMENT_EXT								0x90F0
+#define GL_MULTIVIEW_EXT									0x90F1
+#define GL_DRAW_BUFFER_EXT									0x0C01
+#define GL_READ_BUFFER_EXT									0x0C02
+#define GL_MAX_MULTIVIEW_BUFFERS_EXT						0x90F2
+#endif /* GL_EXT_multiview_draw_buffers */
 
 /* GL_ARB_get_program_binary */
 #ifndef GL_ARB_get_program_binary
@@ -468,6 +485,80 @@ typedef unsigned short GLhalfARB;
 #define GL_NUM_PROGRAM_BINARY_FORMATS						0x87FE
 #define GL_PROGRAM_BINARY_FORMATS							0x87FF
 #endif /* GL_ARB_get_program_binary */
+
+/* GL_ARB_ES3_compatibility */
+#ifndef GL_ARB_ES3_compatibility
+#define GL_ARB_ES3_compatibility
+
+#define GL_COMPRESSED_RGB8_ETC2								0x9274
+#define GL_COMPRESSED_SRGB8_ETC2							0x9275
+#define GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2			0x9276
+#define GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2		0x9277
+#define GL_COMPRESSED_RGBA8_ETC2_EAC						0x9278
+#define GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC					0x9279
+#define GL_COMPRESSED_R11_EAC								0x9270
+#define GL_COMPRESSED_SIGNED_R11_EAC						0x9271
+#define GL_COMPRESSED_RG11_EAC								0x9272
+#define GL_COMPRESSED_SIGNED_RG11_EAC						0x9273
+#define GL_PRIMITIVE_RESTART_FIXED_INDEX					0x8D69
+#define GL_ANY_SAMPLES_PASSED_CONSERVATIVE					0x8D6A
+#define GL_MAX_ELEMENT_INDEX								0x8D6B
+#endif
+
+/* GL_NV_depth_nonlinear */
+#ifndef GL_NV_depth_nonlinear
+#define GL_NV_depth_nonlinear
+
+#define GL_DEPTH_COMPONENT16_NONLINEAR_NV					0x8E2C
+#define EGL_DEPTH_ENCODING_NV								0x30E2
+#define EGL_DEPTH_ENCODING_NONE_NV							0
+#define EGL_DEPTH_ENCODING_NONLINEAR_NV						0x30E3
+#endif
+
+/* GL_EXT_texture3D */
+#ifndef GL_EXT_texture3D
+#define GL_EXT_texture3D
+
+#define GL_TEXTURE_3D_EXT									0x806F
+#define GL_TEXTURE_WRAP_R_EXT								0x8072
+#define GL_MAX_3D_TEXTURE_SIZE_EXT							0x8073
+#define GL_TEXTURE_BINDING_3D_EXT							0x806A
+#endif
+
+/* GL_EXT_texture_array */
+#ifndef GL_EXT_texture_array
+#define GL_EXT_texture_array
+
+#define GL_TEXTURE_2D_ARRAY_EXT								0x8C1A
+#define GL_TEXTURE_BINDING_2D_ARRAY_EXT						0x8C1D
+#define GL_MAX_ARRAY_TEXTURE_LAYERS_EXT						0x88FF
+#endif
+
+/* GL_EXT_packed_depth_stencil */
+#ifndef GL_EXT_packed_depth_stencil
+#define GL_EXT_packed_depth_stencil
+
+#define GL_DEPTH_STENCIL_EXT								0x84F9
+#define GL_UNSIGNED_INT_24_8_EXT							0x84FA
+#define GL_DEPTH24_STENCIL8_EXT								0x88F0
+#endif
+
+/* GL_SGIS_texture_lod */
+#ifndef GL_SGIS_texture_lod
+#define GL_SGIS_texture_lod
+
+#define GL_TEXTURE_MIN_LOD_SGIS								0x813A
+#define GL_TEXTURE_MAX_LOD_SGIS								0x813B
+#define GL_TEXTURE_BASE_LEVEL_SGIS							0x813C
+#define GL_TEXTURE_MAX_LEVEL_SGIS							0x813D
+#endif
+
+/* EGL_EXT_multiview_window */
+#ifndef EGL_EXT_multiview_window
+#define EGL_EXT_multiview_window
+
+#define EGL_MULTIVIEW_VIEW_COUNT_EXT						0x3134
+#endif
 
 #endif // QGL_H
 
@@ -524,7 +615,6 @@ QGL_EGL(EGLBoolean, eglTerminate, (EGLDisplay dpy));
 
 // GL Functions
 QGL_FUNC(void, glBindTexture, (GLenum target, GLuint texture));
-QGL_FUNC(void, glBlendFunc, (GLenum sfactor, GLenum dfactor));
 QGL_FUNC(void, glClear, (GLbitfield mask));
 QGL_FUNC(void, glClearColor, (GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha));
 QGL_FUNC(void, glClearStencil, (GLint s));
@@ -564,6 +654,7 @@ QGL_FUNC(void, glPolygonMode, (GLenum face, GLenum mode));
 #else
 QGL_FUNC(void, glClearDepthf, (GLclampf depth));
 QGL_FUNC(void, glDepthRangef, (GLclampf zNear, GLclampf zFar));
+QGL_FUNC(void, glGetShaderPrecisionFormat, (GLenum shaderType, GLenum precisionType, GLint *range, GLint *precision));
 #ifndef qglClearDepth
 #define qglClearDepth qglClearDepthf
 #define qglDepthRange qglDepthRangef
@@ -829,11 +920,9 @@ QGL_EXT(void, glBlitFramebufferNV, (GLint, GLint, GLint, GLint, GLint, GLint, GL
 #endif
 
 #ifdef GL_ES_VERSION_2_0
-QGL_EXT(void, glReadBufferIndexedNV, (GLenum, GLint));
-QGL_EXT(void, glDrawBuffersIndexedNV, (GLint, const GLenum *, const GLint *));
+QGL_EXT(void, glReadBufferIndexedEXT, (GLenum, GLint));
+QGL_EXT(void, glDrawBuffersIndexedEXT, (GLint, const GLenum *, const GLint *));
 #endif
-
-QGL_EXT(void, glSwapInterval, (int interval));
 
 #ifndef GL_ES_VERSION_2_0
 QGL_EXT(void, glProgramParameteri, (GLuint program, GLenum pname, GLint value));
@@ -847,9 +936,46 @@ QGL_FUNC_OPT(void, glGetProgramBinary, (GLuint program, GLsizei bufSize, GLsizei
 QGL_FUNC_OPT(void, glProgramBinary, (GLuint program, GLenum binaryFormat, const GLvoid *binary, GLsizei length));
 #endif
 
+#ifndef GL_ES_VERSION_2_0
+QGL_EXT(void, glCompressedTexImage2DARB, (GLenum, GLint, GLenum, GLsizei, GLsizei, GLint, GLsizei, const GLvoid *));
+QGL_EXT(void, glCompressedTexSubImage2DARB, (GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLsizei, const GLvoid *));
+#else
+QGL_FUNC(void, glCompressedTexImage2D, (GLenum, GLint, GLenum, GLsizei, GLsizei, GLint, GLsizei, const GLvoid *));
+QGL_FUNC(void, glCompressedTexSubImage2D, (GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLsizei, const GLvoid *));
+#ifndef qglCompressedTexImage2DARB
+#define qglCompressedTexImage2DARB qglCompressedTexImage2D
+#define qglCompressedTexSubImage2DARB qglCompressedTexSubImage2D
+#endif
+#endif
+
+#ifndef GL_ES_VERSION_2_0
+QGL_EXT(void, glBlendFuncSeparateEXT, (GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha));
+#else
+QGL_FUNC(void, glBlendFuncSeparate, (GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha));
+#ifndef qglBlendFuncSeparateEXT
+#define qglBlendFuncSeparateEXT qglBlendFuncSeparate
+#endif
+#endif
+
+#ifndef GL_ES_VERSION_2_0
+QGL_EXT(void, glTexImage3DEXT, (GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLenum format, GLenum type, const GLvoid *pixels));
+QGL_EXT(void, glTexSubImage3DEXT, (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, const GLvoid *pixels));
+#else
+QGL_EXT(void, glTexImage3DOES, (GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLenum format, GLenum type, const GLvoid *pixels));
+QGL_EXT(void, glTexSubImage3DOES, (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, const GLvoid *pixels));
+QGL_FUNC_OPT(void, glTexImage3D, (GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLenum format, GLenum type, const GLvoid *pixels));
+QGL_FUNC_OPT(void, glTexSubImage3D, (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, const GLvoid *pixels));
+#ifndef qglTexImage3DEXT
+#define qglTexImage3DEXT qglTexImage3DOES
+#define qglTexSubImage3DEXT qglTexSubImage3DOES
+#endif
+#endif
+
 // WGL_EXT Functions
 QGL_WGL_EXT(const char *, wglGetExtensionsStringEXT, (void));
 QGL_WGL_EXT(BOOL, wglGetDeviceGammaRamp3DFX, (HDC, WORD *));
 QGL_WGL_EXT(BOOL, wglSetDeviceGammaRamp3DFX, (HDC, WORD *));
+QGL_WGL_EXT(BOOL, wglSwapIntervalEXT, (int interval));
 
 // GLX_EXT Functions
+QGL_GLX_EXT(int, glXSwapIntervalSGI, (int interval));

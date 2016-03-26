@@ -68,7 +68,7 @@ static void G_Z_ClearZone( memzone_t *zone, int size )
 
 	// set the entire zone to one free block
 	zone->blocklist.next = zone->blocklist.prev = block =
-		(memblock_t *)( (qbyte *)zone + sizeof(memzone_t) );
+		(memblock_t *)( (uint8_t *)zone + sizeof(memzone_t) );
 	zone->blocklist.tag = 1;	// in use block
 	zone->blocklist.id = 0;
 	zone->blocklist.size = 0;
@@ -94,14 +94,14 @@ static void G_Z_Free( void *ptr, const char *filename, int fileline )
 	if (!ptr)
 		G_Error( "G_Z_Free: NULL pointer" );
 
-	block = (memblock_t *) ( (qbyte *)ptr - sizeof(memblock_t));
+	block = (memblock_t *) ( (uint8_t *)ptr - sizeof(memblock_t));
 	if( block->id != ZONEID )
 		G_Error( "G_Z_Free: freed a pointer without ZONEID (file %s at line %i)", filename, fileline );
 	if( block->tag == 0 )
 		G_Error( "G_Z_Free: freed a freed pointer (file %s at line %i)", filename, fileline );
 
 	// check the memory trash tester
-	if ( *(int *)((qbyte *)block + block->size - 4 ) != ZONEID )
+	if ( *(int *)((uint8_t *)block + block->size - 4 ) != ZONEID )
 		G_Error( "G_Z_Free: memory block wrote past end" );
 
 	zone = levelzone;
@@ -175,7 +175,7 @@ static void *G_Z_TagMalloc( int size, int tag, const char *filename, int filelin
 	if( extra > MINFRAGMENT )
 	{
 		// there will be a free fragment after the allocated block
-		newb = (memblock_t *) ((qbyte *)base + size );
+		newb = (memblock_t *) ((uint8_t *)base + size );
 		newb->size = extra;
 		newb->tag = 0;			// free block
 		newb->prev = base;
@@ -193,9 +193,9 @@ static void *G_Z_TagMalloc( int size, int tag, const char *filename, int filelin
 	base->id = ZONEID;
 
 	// marker for memory trash testing
-	*(int *)((qbyte *)base + base->size - 4) = ZONEID;
+	*(int *)((uint8_t *)base + base->size - 4) = ZONEID;
 
-	return (void *) ((qbyte *)base + sizeof(memblock_t));
+	return (void *) ((uint8_t *)base + sizeof(memblock_t));
 }
 
 /*
@@ -285,7 +285,7 @@ typedef struct g_poolstring_s
 	struct g_poolstring_s *hash_next;
 } g_poolstring_t;
 
-static qbyte *g_stringpool;
+static uint8_t *g_stringpool;
 static size_t g_stringpool_offset;
 static g_poolstring_t *g_stringpool_hash[STRINGPOOL_HASH_SIZE];
 
@@ -298,7 +298,7 @@ void G_StringPoolInit( void )
 {
 	memset( g_stringpool_hash, 0, sizeof( g_stringpool_hash ) );
 
-	g_stringpool = ( qbyte * )G_LevelMalloc( STRINGPOOL_SIZE );
+	g_stringpool = ( uint8_t * )G_LevelMalloc( STRINGPOOL_SIZE );
 	g_stringpool_offset = 0;
 }
 
@@ -552,7 +552,7 @@ edict_t *G_Find( edict_t *from, size_t fieldofs, const char *match )
 	{
 		if( !from->r.inuse )
 			continue;
-		s = *(char **) ( (qbyte *)from + fieldofs );
+		s = *(char **) ( (uint8_t *)from + fieldofs );
 		if( !s )
 			continue;
 		if( !Q_stricmp( s, match ) )
@@ -662,6 +662,22 @@ void G_UseTargets( edict_t *ent, edict_t *activator )
 			G_Sound( activator, CHAN_AUTO, ent->noise_index, ATTN_NORM );
 		else
 			G_Sound( activator, CHAN_AUTO, trap_SoundIndex( S_WORLD_MESSAGE ), ATTN_NORM );
+	}
+
+	//
+	// set the help message
+	//
+	if( ent->helpmessage && ent->mapmessage_index <= MAX_HELPMESSAGES )
+	{
+		G_SetPlayerHelpMessage( activator, ent->mapmessage_index );
+
+		if( !ent->message )
+		{
+			if( ent->noise_index )
+				G_Sound( activator, CHAN_AUTO, ent->noise_index, ATTN_NORM );
+			else
+				G_Sound( activator, CHAN_AUTO, trap_SoundIndex( S_WORLD_MESSAGE ), ATTN_NORM );
+		}
 	}
 
 	//
@@ -782,7 +798,7 @@ void G_FreeEdict( edict_t *ed )
 	G_asReleaseEntityBehaviors( ed );
 
 	memset( ed, 0, sizeof( *ed ) );
-	ed->r.inuse = qfalse;
+	ed->r.inuse = false;
 	ed->s.number = ENTNUM( ed );
 	ed->r.svflags = SVF_NOCLIENT;
 	ed->scriptSpawned = false;
@@ -796,7 +812,7 @@ void G_FreeEdict( edict_t *ed )
 */
 void G_InitEdict( edict_t *e )
 {
-	e->r.inuse = qtrue;
+	e->r.inuse = true;
 	e->classname = NULL;
 	e->gravity = 1.0;
 	e->s.number = ENTNUM( e );
@@ -805,9 +821,9 @@ void G_InitEdict( edict_t *e )
 	e->deadflag = DEAD_NO;
 	e->s.attenuation = ATTN_NORM;
 
-	e->s.teleported = qfalse;
+	e->s.teleported = false;
 	e->timeStamp = 0;
-	e->s.linearProjectile = qfalse;
+	e->s.linearMovement = false;
 	e->scriptSpawned = false;
 
 	G_asResetEntityBehaviors( e );
@@ -949,7 +965,7 @@ void G_TurnEntityIntoEvent( edict_t *ent, int event, int parm )
 	ent->s.type = ET_EVENT;
 	ent->r.solid = SOLID_NOT;
 	ent->r.svflags &= ~SVF_PROJECTILE; // FIXME: Medar: should be remove all or remove this one elsewhere?
-	ent->s.linearProjectile = qfalse;
+	ent->s.linearMovement = false;
 	G_AddEvent( ent, event, parm, true );
 
 	GClip_LinkEntity( ent );
@@ -1028,12 +1044,21 @@ void G_CallThink( edict_t *ent )
 */
 void G_CallTouch( edict_t *self, edict_t *other, cplane_t *plane, int surfFlags )
 {
-	if( self->touch )
-		self->touch( self, other, plane, surfFlags );
-	else if( self->scriptSpawned && self->asTouchFunc )
-		G_asCallMapEntityTouch( self, other, plane, surfFlags );
+	bool touched = false;
 
-	if( other->ai )
+	if( self == other )
+		return;
+
+	if( self->touch ) {
+		touched = true;
+		self->touch( self, other, plane, surfFlags );
+	}
+	else if( self->scriptSpawned && self->asTouchFunc ) {
+		touched = true;
+		G_asCallMapEntityTouch( self, other, plane, surfFlags );
+	}
+
+	if( touched && other->ai )
 		AI_TouchedEntity( other, self );
 }
 
@@ -1239,6 +1264,82 @@ void G_CenterPrintMsg( edict_t *ent, const char *format, ... )
 }
 
 /*
+* G_CenterPrintFormatMsg
+*
+* MUST be passed NULL as the last variadic argument
+* 
+* NULL sends to all the message to all clients
+*/
+void G_CenterPrintFormatMsg( edict_t *ent, const char *format, ... )
+{
+	char cmd[MAX_STRING_CHARS];
+	char arg_fmt[MAX_TOKEN_CHARS];
+	va_list	argptr;
+	char *p, *arg_p;
+	int num_args;
+	bool overflow = false;
+
+	Q_strncpyz( cmd, "cpf ", sizeof( cmd ) );
+
+	// double quotes are bad
+	Q_strncpyz( arg_fmt, format, sizeof( arg_fmt ) );
+	arg_p = arg_fmt;
+
+	num_args = 0;
+	va_start( argptr, format );
+
+	do {
+		size_t cmd_len;
+		size_t arg_len;
+
+		if( num_args + 1 == MAX_STRING_TOKENS ) {
+			overflow = true;
+			break;
+		}
+
+		// double quotes are bad
+		p = arg_p;
+		while( ( p = strchr( p, '\"' ) ) != NULL )
+			*p = '\'';
+
+		cmd_len = strlen( cmd );
+		arg_len = strlen( arg_p );
+		if( arg_len > MAX_TOKEN_CHARS ) {
+			overflow = true;
+			break;
+		}
+
+		if( cmd_len + arg_len + 3 >= sizeof( cmd ) ) {
+			overflow = true;
+			break;
+		}
+
+		cmd[cmd_len+0] = ' ';
+		cmd[cmd_len+1] = '"';
+		memcpy( &cmd[cmd_len+2], arg_p, arg_len );
+		cmd[cmd_len+2+arg_len] = '"';
+		cmd[cmd_len+3+arg_len] = '\0';
+
+		num_args++;
+	} while( ( arg_p = va_arg( argptr, char * ) ) );
+
+	va_end( argptr );
+	
+	if( overflow ) {
+		// couldn't fit it all into the cmd buffer
+		return;
+	}
+	if( num_args < 2 ) {
+		// can't transmit formatted message with no arguments or 
+		// no strings to replace the placeholders
+		return;
+	}
+
+	trap_GameCmd( ent, cmd );
+}
+
+
+/*
 * G_Obituary
 * 
 * Prints death message to all clients
@@ -1255,7 +1356,7 @@ void G_Obituary( edict_t *victim, edict_t *attacker, int mod )
 * Sends correct match msg to one client
 * Must be called whenever client's team, ready status or chase mode changes
 */
-void G_UpdatePlayerMatchMsg( edict_t *ent )
+void G_UpdatePlayerMatchMsg( edict_t *ent, bool force )
 {
 	matchmessage_t newmm;
 
@@ -1282,7 +1383,7 @@ void G_UpdatePlayerMatchMsg( edict_t *ent )
 			newmm = MATCHMESSAGE_NONE;
 	}
 
-	if( newmm != ent->r.client->level.matchmessage )
+	if( newmm != ent->r.client->level.matchmessage || force )
 	{
 		ent->r.client->level.matchmessage = newmm;
 		trap_GameCmd( ent, va( "mm %i", newmm ) );
@@ -1306,6 +1407,55 @@ void G_UpdatePlayersMatchMsgs( void )
 		if( !cl_ent->r.inuse )
 			continue;
 		G_UpdatePlayerMatchMsg( cl_ent );
+	}
+}
+
+//==================================================
+// MAP MESSAGES
+//==================================================
+
+/*
+* G_RegisterHelpMessage
+*/
+unsigned G_RegisterHelpMessage( const char *str )
+{
+	unsigned i;
+
+	if( !str || !*str ) {
+		return 0;
+	}
+
+	for( i = 0; i < MAX_HELPMESSAGES; i++ ) {
+		const char *cs = trap_GetConfigString( CS_HELPMESSAGES+i );
+		if( !cs[0] ) {
+			break;
+		}
+		if( !strcmp( cs, str ) ) {
+			return i+1;
+		}
+	}
+
+	if( i < MAX_HELPMESSAGES ) {
+		trap_ConfigString( CS_HELPMESSAGES+i, str );
+	}
+	return i+1;
+}
+
+/*
+* G_SetPlayerHelpMessage
+*/
+void G_SetPlayerHelpMessage( edict_t *ent, unsigned index, bool force )
+{
+	if( index > MAX_HELPMESSAGES ) {
+		return;
+	}
+	if( !ent || !ent->r.client ) {
+		return;
+	}
+
+	if( index != ent->r.client->level.helpmessage || force ) {
+		ent->r.client->level.helpmessage = index;
+		trap_GameCmd( ent, va( "mapmsg %i", index ) );
 	}
 }
 
@@ -1337,17 +1487,17 @@ static edict_t *_G_SpawnSound( int channel, int soundindex, float attenuation )
 /*
 * G_Sound
 */
-void G_Sound( edict_t *owner, int channel, int soundindex, float attenuation )
+edict_t *G_Sound( edict_t *owner, int channel, int soundindex, float attenuation )
 {
 	edict_t *ent;
 
 	if( !soundindex )
-		return;
+		return NULL;
 
 	if( owner == NULL || owner == world )
 		attenuation = ATTN_NONE;
 	else if( ISEVENTENTITY( &owner->s ) )
-		return; // event entities can't be owner of sound entities
+		return NULL; // event entities can't be owner of sound entities
 
 	ent = _G_SpawnSound( channel, soundindex, attenuation );
 	if( attenuation != ATTN_NONE )
@@ -1369,17 +1519,18 @@ void G_Sound( edict_t *owner, int channel, int soundindex, float attenuation )
 	}
 
 	GClip_LinkEntity( ent );
+	return ent;
 }
 
 /*
 * G_PositionedSound
 */
-void G_PositionedSound( vec3_t origin, int channel, int soundindex, float attenuation )
+edict_t *G_PositionedSound( vec3_t origin, int channel, int soundindex, float attenuation )
 {
 	edict_t *ent;
 
 	if( !soundindex )
-		return;
+		return NULL;
 
 	if( origin == NULL )
 		attenuation = ATTN_NONE;
@@ -1397,6 +1548,7 @@ void G_PositionedSound( vec3_t origin, int channel, int soundindex, float attenu
 	}
 
 	GClip_LinkEntity( ent );
+	return ent;
 }
 
 /*
@@ -1576,7 +1728,7 @@ bool G_InFront( edict_t *self, edict_t *other )
 	VectorNormalize( vec );
 	dot = DotProduct( vec, forward );
 
-	if( dot > 0.3 )
+	if( dot > 0.7 )
 		return true;
 	return false;
 }
@@ -2075,8 +2227,8 @@ void G_PrecacheWeapondef( int weapon, firedef_t *firedef )
 
 #ifdef WEAPONDEFS_FROM_DISK
 
-#define WEAPONDEF_NUMPARMS 19
-static bool G_ParseFiredefFile( qbyte *buf, int weapon, firedef_t *firedef )
+#define WEAPONDEF_NUMPARMS 20
+static bool G_ParseFiredefFile( uint8_t *buf, int weapon, firedef_t *firedef )
 {
 	char *ptr, *token;
 	int count = 0;
@@ -2162,6 +2314,7 @@ static bool G_ParseFiredefFile( qbyte *buf, int weapon, firedef_t *firedef )
 
 	firedef->ammo_pickup = (int)parm[count++];
 	firedef->ammo_max = (int)parm[count++];
+	firedef->ammo_low = (int)parm[count++];
 
 	if( firedef->weaponup_time < 50 )
 		firedef->weaponup_time = 50;
@@ -2174,7 +2327,7 @@ static bool G_ParseFiredefFile( qbyte *buf, int weapon, firedef_t *firedef )
 static bool G_LoadFiredefFromFile( int weapon, firedef_t *firedef )
 {
 	int length, filenum;
-	qbyte *data;
+	uint8_t *data;
 	char filename[MAX_QPATH];
 
 	if( !firedef )

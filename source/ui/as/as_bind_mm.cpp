@@ -27,40 +27,46 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 namespace ASUI {
 
+// dummy funcdef
+static void ASMatchMaker_EventListenerCallback( Event *event )
+{
+}
+
 class ASMatchMaker
 {
 public:
-	ASMatchMaker() { }
+	ASMatchMaker( ASInterface *asmodule ) : state(0), asmodule(asmodule) { }
+	~ASMatchMaker() { clearEventListeners(); }
 
 	bool login( const asstring_t &user, const asstring_t &password )
 	{
-		return trap::MM_Login( ASSTR( user ), ASSTR( password ) ) == qtrue;
+		return trap::MM_Login( ASSTR( user ), ASSTR( password ) ) == true;
 	}
 
 	bool logout( void )
 	{
-		return trap::MM_Logout( qfalse ) == qtrue;
+		return trap::MM_Logout( false ) == true;
 	}
 
-	int state( void ) const
+	int getState( void ) const
 	{
-		return trap::MM_GetLoginState();
+		return state;
 	}
 
-	asstring_t *user( void ) const
+	asstring_t *getUser( void ) const
 	{
 		return ASSTR( trap::Cvar_String( "cl_mm_user" ) );
 	}
 
-	asstring_t *profileURL( bool rml ) const
+	asstring_t *getProfileURL( bool rml ) const
 	{
 		char buffer[2048];
 
-		trap::MM_GetProfileURL( buffer, sizeof( buffer ), rml ? qtrue : qfalse );
+		trap::MM_GetProfileURL( buffer, sizeof( buffer ), rml ? true : false );
 		return ASSTR( buffer );
 	}
 
-	asstring_t *baseWebURL() const
+	asstring_t *getBaseWebURL() const
 	{
 		char buffer[2048];
 
@@ -68,18 +74,110 @@ public:
 		return ASSTR( buffer );
 	}
 
-	asstring_t *lastError( void ) const
+	asstring_t *getLastError( void ) const
 	{
 		char buffer[2048];
 
 		trap::MM_GetLastErrorMessage( buffer, sizeof( buffer ) );
 		return ASSTR( buffer );
 	}
+
+	void update( void )
+	{
+		const int pstate = state;
+		state = trap::MM_GetLoginState();
+
+		Rocket::Core::Dictionary ev_parms;
+
+		if( pstate != state ) {
+			ev_parms.Set( "state", pstate );
+			ev_parms.Set( "old_state", pstate );
+			dispatchEvent( "stateChange", ev_parms );
+		}
+	}
+
+	void addEventListener( const asstring_t &event, asIScriptFunction *func ) {
+		EventCallback cb;
+		
+		cb = ASBind::CreateFunctionPtr( func, cb );
+
+		Listener l( ASSTR( event ), cb );
+		listeners.push_back( l );
+	}
+
+	void removeEventListener( const asstring_t &event, asIScriptFunction *func ) {
+		Listener l( ASSTR( event ), func );
+
+		for( ListenersList::iterator it = listeners.begin(); it != listeners.end(); ++it ) {
+			if( it->first == l.first && it->second.getPtr() == func ) {
+				listeners.erase(it);
+				it->second.release();
+				break;
+			}
+		}
+
+		func->Release();
+	}
+
+private:
+	int state;
+	ASInterface *asmodule;
+
+	void dispatchEvent( const char *event, const Rocket::Core::Dictionary &parms )
+	{
+		Rocket::Core::Event *ev = Rocket::Core::Factory::InstanceEvent( NULL, event, parms, false );
+
+		ev->SetPhase( Rocket::Core::Event::PHASE_BUBBLE ); // FIXME?
+
+		for( ListenersList::iterator it = listeners.begin(); it != listeners.end(); ) {
+			EventCallback func = it->second;
+
+			if( !func.isValid() || !func.getModule() ) {
+erase:
+				func.release();
+				it = listeners.erase( it );
+				continue;
+			}
+
+			if( it->first == event ) {
+				ev->AddReference();
+				
+				try {
+					func.setContext( asmodule->getContext() );
+					func( ev );
+				} catch( ASBind::Exception & ) {
+					Com_Printf( S_COLOR_RED "ASMatchMaker: Failed to call function %s\n", func.getName() );
+					goto erase;
+				}
+			}
+
+			 ++it;
+		}
+
+		ev->RemoveReference();
+	}
+
+	void clearEventListeners( void )
+	{
+		for( ListenersList::iterator it = listeners.begin(); it != listeners.end(); ++it )
+			it->second.release();
+		listeners.clear();
+	}
+
+	typedef ASBind::FunctionPtr<void( Rocket::Core::Event* )> EventCallback;
+	typedef std::pair<std::string, EventCallback> Listener;
+	typedef std::vector<Listener> ListenersList;
+	ListenersList listeners;
 };
+
+}
+ASBIND_TYPE( ASUI::ASMatchMaker, Matchmaker );
+
+namespace ASUI {
 
 // ====================================================================
 
-static ASMatchMaker asMM;
+static ASMatchMaker *asMM;
 
 /// This makes AS aware of this class so other classes may reference
 /// it in their properties and methods
@@ -90,6 +188,11 @@ void PrebindMatchMaker( ASInterface *as )
 
 void BindMatchMaker( ASInterface *as )
 {
+	ASBind::Global( as->getEngine() )
+		// setTimeout and setInterval callback funcdefs
+		.funcdef( &ASMatchMaker_EventListenerCallback, "MMEventListenerCallback" )
+	;
+
 	ASBind::Enum( as->getEngine(), "eMatchmakerState" )
 		( "MM_LOGIN_STATE_LOGGED_OUT", MM_LOGIN_STATE_LOGGED_OUT )
 		( "MM_LOGIN_STATE_IN_PROGRESS", MM_LOGIN_STATE_IN_PROGRESS )
@@ -99,22 +202,39 @@ void BindMatchMaker( ASInterface *as )
 	ASBind::GetClass<ASMatchMaker>( as->getEngine() )
 		.method( &ASMatchMaker::login, "login" )
 		.method( &ASMatchMaker::logout, "logout" )
-		.method( &ASMatchMaker::state, "get_state" )
-		.method( &ASMatchMaker::lastError, "get_lastError" )
-		.method( &ASMatchMaker::user, "get_user" )
-		.method( &ASMatchMaker::profileURL, "profileURL" )
-		.method( &ASMatchMaker::baseWebURL, "baseWebURL" )
+		.method( &ASMatchMaker::getState, "get_state" )
+		.method( &ASMatchMaker::getLastError, "get_lastError" )
+		.method( &ASMatchMaker::getUser, "get_user" )
+		.method( &ASMatchMaker::getProfileURL, "profileURL" )
+		.method( &ASMatchMaker::getBaseWebURL, "baseWebURL" )
+
+		.method2( &ASMatchMaker::addEventListener, "void addEventListener( const String &event, MMEventListenerCallback @callback )" )
+		.method2( &ASMatchMaker::removeEventListener, "void removeEventListener( const String &event, MMEventListenerCallback @callback )" )
 	;
 }
 
 void BindMatchMakerGlobal( ASInterface *as )
 {
+	assert( asMM == NULL );
+
+	// set the AS module for scheduler
+	asMM = __new__( ASMatchMaker )( as );
+
 	ASBind::Global( as->getEngine() )
 		// global variable
-		.var( &asMM, "matchmaker" )
+		.var( asMM, "matchmaker" )
 	;
 }
 
+void RunMatchMakerFrame( void )
+{
+	asMM->update();
 }
 
-ASBIND_TYPE( ASUI::ASMatchMaker, Matchmaker );
+void UnbindMatchMaker( void )
+{
+	__delete__( asMM );
+	asMM = NULL;
+}
+
+}

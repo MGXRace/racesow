@@ -103,7 +103,7 @@ static void RS_SignQuery( stat_query_t *query )
  * @param success True on any response
  * @param customp rs_authplayer_t player to nick check
  */
-void RS_AuthNick_Done( stat_query_t *query, qboolean success, void *customp )
+void RS_AuthNick_Done( stat_query_t *query, bool success, void *customp )
 {
 	rs_authplayer_t *player = ( rs_authplayer_t* )customp;
 	cJSON *data, *node;
@@ -193,7 +193,7 @@ void RS_AuthNick( rs_authplayer_t *player, char *nick )
 
 	// Issue a query for players with simplified name matching nick
 	b64name = (char*)base64_encode( (unsigned char *)nick, strlen( nick ), NULL );
-	query = rs_sqapi->CreateRootQuery( va( "%s/api/players/", rs_statsUrl->string ), qtrue );
+	query = rs_sqapi->CreateRootQuery( NULL, va( "%s/api/players/", rs_statsUrl->string ), true );
 	rs_sqapi->SetField( query, "simplified", b64name );
 	free( b64name );
 
@@ -214,7 +214,7 @@ void RS_AuthNick( rs_authplayer_t *player, char *nick )
  * @param customp Extra parameters, should be NULL
  * @return void
  */
-void RS_AuthMap_Done( stat_query_t *query, qboolean success, void *customp )
+void RS_AuthMap_Done( stat_query_t *query, bool success, void *customp )
 {
 	cJSON *data, *node;
 	int status;
@@ -265,7 +265,7 @@ void RS_AuthMap( void )
 
 	// Form the query
 	// Must be a PATCH request to create the map if needed
-	query = rs_sqapi->CreateRootQuery( va( "%s/api/maps/%s/?record", rs_statsUrl->string, authmap.b64name ), qfalse );
+	query = rs_sqapi->CreateRootQuery( NULL, va( "%s/api/maps/%s/?record", rs_statsUrl->string, authmap.b64name ), false );
 	rs_sqapi->SetCallback( query, RS_AuthMap_Done, NULL );
 
 	RS_SignQuery( query );
@@ -278,7 +278,7 @@ void RS_AuthMap( void )
  * Callback for report race
  * @return void
  */
-void RS_ReportRace_Done( stat_query_t *query, qboolean success, void *customp )
+void RS_ReportRace_Done( stat_query_t *query, bool success, void *customp )
 {
 	rs_authplayer_t *player = ( rs_authplayer_t* )customp;
 	int status = rs_sqapi->GetStatus( query );
@@ -314,7 +314,7 @@ void RS_ReportRace( rs_authplayer_t *player, int rtime, int *cp, int cpNum, bool
 
 	// Form the query
 	G_Printf( "RS_ReportRace: Reporting %s %d\n", player->login, rtime );
-	query = rs_sqapi->CreateRootQuery( va( "%s/api/races/%d;%d/", rs_statsUrl->string, authmap.id, player->id ), qfalse );
+	query = rs_sqapi->CreateRootQuery( NULL, va( "%s/api/races/%d;%d/", rs_statsUrl->string, authmap.id, player->id ), false );
 
 	data = cJSON_CreateObject();
 	rs_setString( data, "time", va( "%d", rtime ) );
@@ -347,7 +347,7 @@ void RS_ReportRace( rs_authplayer_t *player, int rtime, int *cp, int cpNum, bool
  * Callback for report map
  * @return void
  */
-void RS_ReportMap_Done( stat_query_t *query, qboolean success, void *customp )
+void RS_ReportMap_Done( stat_query_t *query, bool success, void *customp )
 {
 	int status = rs_sqapi->GetStatus( query );
 	if( status < 200 || status > 299 )
@@ -381,7 +381,7 @@ void RS_ReportMap( const char *tags, const char *oneliner, bool force )
 
 	// Form the query
 	G_Printf( "RS_ReportMap: Reporting\n" );
-	query = rs_sqapi->CreateRootQuery( va( "%s/api/maps/%s/", rs_statsUrl->string, authmap.b64name ), qfalse );
+	query = rs_sqapi->CreateRootQuery( NULL, va( "%s/api/maps/%s/", rs_statsUrl->string, authmap.b64name ), false );
 	rs_sqapi->SetField( query, "playtime_add", va( "%d", authmap.playTime ) );
 	rs_sqapi->SetField( query, "races_add", va( "%d", authmap.races ) );
 	if( oneliner )
@@ -411,7 +411,7 @@ void RS_ReportMap( const char *tags, const char *oneliner, bool force )
  * Callback for report player
  * @return void
  */
-void RS_ReportPlayer_Done( stat_query_t *query, qboolean success, void *customp )
+void RS_ReportPlayer_Done( stat_query_t *query, bool success, void *customp )
 {
 	rs_authplayer_t *player = ( rs_authplayer_t* )customp;
 	int status = rs_sqapi->GetStatus( query );
@@ -443,7 +443,7 @@ void RS_ReportPlayer( rs_authplayer_t *player )
 	// Form the query
 	G_Printf( "RS_ReportPlayer: Reporting %s\n", player->login );
 	b64name = (char*)base64_encode( (unsigned char *)player->login, strlen( player->login ), NULL );
-	query = rs_sqapi->CreateRootQuery( va( "%s/api/players/%s/", rs_statsUrl->string, b64name ), qfalse );
+	query = rs_sqapi->CreateRootQuery( NULL, va( "%s/api/players/%s/", rs_statsUrl->string, b64name ), false );
 	free( b64name );
 
 	rs_sqapi->SetField( query, "playtime_add", va( "%lu", player->playTime ) );
@@ -467,7 +467,7 @@ void RS_ReportPlayer( rs_authplayer_t *player )
  * @param success True on any response
  * @param customp Player who updated his nick
  */
-void RS_ReportNick_Done( stat_query_t *query, qboolean success, void *customp )
+void RS_ReportNick_Done( stat_query_t *query, bool success, void *customp )
 {
 	int playerNum, status;
 	rs_authplayer_t *player = ( rs_authplayer_t* )customp;
@@ -511,7 +511,7 @@ void RS_ReportNick( rs_authplayer_t *player, const char *nick )
 	// Form the query
 	G_Printf( "RS_ReportNick: Updating %s's protectednick to %s\n", player->login, nick );
 	b64name = (char*)base64_encode( (unsigned char *)player->login, strlen( player->login ), NULL );
-	query = rs_sqapi->CreateRootQuery( va( "%s/api/players/%s/", rs_statsUrl->string, b64name ), qfalse );
+	query = rs_sqapi->CreateRootQuery( NULL, va( "%s/api/players/%s/", rs_statsUrl->string, b64name ), false );
 	free( b64name );
 
 	rs_sqapi->SetField( query, "simplified", nick );
@@ -529,7 +529,7 @@ void RS_ReportNick( rs_authplayer_t *player, const char *nick )
  * @param success True on any response
  * @param customp rs_authplayer_t of the player being queried
  */
-void RS_QueryPlayer_Done( stat_query_t *query, qboolean success, void *customp )
+void RS_QueryPlayer_Done( stat_query_t *query, bool success, void *customp )
 {
 	rs_authplayer_t *player = ( rs_authplayer_t* )customp;
 	cJSON *data, *node;
@@ -606,7 +606,7 @@ void RS_QueryPlayer( rs_authplayer_t *player )
 	// new model.
 	G_Printf( "RS_QueryPlayer: Querying player %s\n", player->login );
 	b64name = (char*)base64_encode( (unsigned char *)player->login, strlen( player->login ), NULL );
-	query = rs_sqapi->CreateRootQuery( va( "%s/api/players/%s/?mid=%d", rs_statsUrl->string, b64name, authmap.id ), qfalse );
+	query = rs_sqapi->CreateRootQuery( NULL, va( "%s/api/players/%s/?mid=%d", rs_statsUrl->string, b64name, authmap.id ), false );
 	free( b64name );
 
 	RS_SignQuery( query );
@@ -621,12 +621,13 @@ void RS_QueryPlayer( rs_authplayer_t *player )
  * Callback for top
  * @return void
  */
-void RS_QueryTop_Done( stat_query_t *query, qboolean success, void *customp )
+void RS_QueryTop_Done( stat_query_t *query, bool success, void *customp )
 {
 	int count, playerNum, i, status, indent;
 	rs_racetime_t top, racetime, timediff, oldtop, besttop;
 	cJSON *data, *node, *player, *tmp, *oldnode, *curnode;
-	char *mapname, *oneliner, *error_message, *name, *simplified, *oldoneliner;
+	char *mapname, *name, *simplified;
+	const char *oneliner, *error_message, *oldoneliner;
 	bool firstoldtime = true, firstnewtime = true, oldtime = false; // topall
 
 	gclient_t *client = (gclient_t *)customp;
@@ -723,12 +724,12 @@ void RS_QueryTop_Done( stat_query_t *query, qboolean success, void *customp )
 			indent = 16 + (strlen(name) - strlen(simplified));
 
 			// Print the row; oldtime is printed with grey rank and date
-			G_PrintMsg( &game.edicts[ playerNum + 1 ], "%s%2d. %s%-*s %s%02d:%02d.%02d %s+[%02d:%02d.%02d] %s(%s) %s%s%s\n",
+			G_PrintMsg( &game.edicts[ playerNum + 1 ], "%s%2d. %s%-*s %s%02d:%02d.%03d %s+[%02d:%02d.%03d] %s(%s) %s%s%s\n",
 				( oldtime ? S_COLOR_GREY : S_COLOR_WHITE ), i + 1, S_COLOR_WHITE,
 				indent, name,
-				S_COLOR_GREEN, ( racetime.hour * 60 ) + racetime.min, racetime.sec, racetime.milli / 10,
+				S_COLOR_GREEN, ( racetime.hour * 60 ) + racetime.min, racetime.sec, racetime.milli,
 				S_COLOR_YELLOW,
-				( timediff.hour * 60 ) + timediff.min, timediff.sec, timediff.milli / 10,
+				( timediff.hour * 60 ) + timediff.min, timediff.sec, timediff.milli,
 				( oldtime ? S_COLOR_GREY : S_COLOR_WHITE ), cJSON_GetObjectItem( curnode, "created" )->valuestring,
 				S_COLOR_YELLOW, ( oldtime && firstoldtime ? oldoneliner : !oldtime && firstnewtime ? oneliner : "" ), S_COLOR_GREEN );
 
@@ -773,12 +774,12 @@ void RS_QueryTop_Done( stat_query_t *query, qboolean success, void *customp )
 			indent = 16 + (strlen(name) - strlen(simplified));
 
 			// Print the row
-			G_PrintMsg( &game.edicts[ playerNum + 1 ], "%s%2d. %-*s %s%02d:%02d.%02d %s+[%02d:%02d.%02d] %s(%s) %s%s%s\n",
+			G_PrintMsg( &game.edicts[ playerNum + 1 ], "%s%2d. %-*s %s%02d:%02d.%03d %s+[%02d:%02d.%03d] %s(%s) %s%s%s\n",
 				S_COLOR_WHITE, i + 1,
 				indent, name,
-				S_COLOR_GREEN, ( racetime.hour * 60 ) + racetime.min, racetime.sec, racetime.milli / 10,
+				S_COLOR_GREEN, ( racetime.hour * 60 ) + racetime.min, racetime.sec, racetime.milli,
 				S_COLOR_YELLOW,
-				( timediff.hour * 60 ) + timediff.min, timediff.sec, timediff.milli / 10,
+				( timediff.hour * 60 ) + timediff.min, timediff.sec, timediff.milli,
 				S_COLOR_WHITE, cJSON_GetObjectItem( node, "created" )->valuestring,
 				S_COLOR_YELLOW, ( i == 0 ? oneliner : "" ), S_COLOR_GREEN );
 		}
@@ -813,7 +814,7 @@ void RS_QueryTop( gclient_t *client, const char* mapname, int limit, int cmd)
 		return;
 	}
 
-	query = rs_sqapi->CreateRootQuery( url, qtrue );
+	query = rs_sqapi->CreateRootQuery( NULL, url, true );
 	rs_sqapi->SetField( query, "map", b64name );
 	rs_sqapi->SetField( query, "limit", va( "%d", limit ) );
 
@@ -852,7 +853,7 @@ static char *rs_querymap_tagstring( cJSON *tags )
 	return tag_string;
 }
 
-void RS_QueryMaps_Done( stat_query_t *query, qboolean success, void *customp )
+void RS_QueryMaps_Done( stat_query_t *query, bool success, void *customp )
 {
 	edict_t *ent;
 	gclient_t *client;
@@ -929,7 +930,7 @@ void RS_QueryMaps( gclient_t *client, const char *pattern, const char *tags, int
 	cbdata->page = page < 1 ? 1 : page;
 
 	// Form the query
-	query = rs_sqapi->CreateRootQuery( va( "%s/api/maps/", rs_statsUrl->string ), qtrue );
+	query = rs_sqapi->CreateRootQuery( NULL, va( "%s/api/maps/", rs_statsUrl->string ), true );
 	rs_sqapi->SetField( query, "page", va( "%d", cbdata->page ) );
 
 	// Map pattern
@@ -956,7 +957,7 @@ void RS_QueryMaps( gclient_t *client, const char *pattern, const char *tags, int
 	query = NULL;
 }
 
-void RS_QueryRandmap_Done( stat_query_t *query, qboolean success, void *customp )
+void RS_QueryRandmap_Done( stat_query_t *query, bool success, void *customp )
 {
 	cJSON *data, *node;
 	char *mapname;
@@ -1019,7 +1020,7 @@ void RS_QueryRandmap( char* tags[], void *data )
 	stat_query_t *query;
 
 	// Form the query
-	query = rs_sqapi->CreateRootQuery( va( "%s/api/maps/", rs_statsUrl->string ), qtrue );
+	query = rs_sqapi->CreateRootQuery( NULL, va( "%s/api/maps/", rs_statsUrl->string ), true );
 	rs_sqapi->SetField( query, "rand", "" );
 
 	// Map tags

@@ -24,11 +24,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 ALCdevice *alDevice = NULL;
 ALCcontext *alContext = NULL;
 
+#define UPDATE_MSEC 10
+static unsigned s_last_update_time;
+
 int s_attenuation_model = 0;
 float s_attenuation_maxdistance = 0;
 float s_attenuation_refdistance = 0;
 
-static qboolean snd_shutdown_bug = qfalse;
+static bool snd_shutdown_bug = false;
 
 /*
 * Commands
@@ -131,7 +134,7 @@ const char *S_ErrorMessage( ALenum error )
 /*
 * S_Init
 */
-static qboolean S_Init( void *hwnd, int maxEntities, qboolean verbose )
+static bool S_Init( void *hwnd, int maxEntities, bool verbose )
 {
 	int numDevices;
 	int userDeviceNum = -1;
@@ -141,12 +144,14 @@ static qboolean S_Init( void *hwnd, int maxEntities, qboolean verbose )
 	alDevice = NULL;
 	alContext = NULL;
 
+	s_last_update_time = 0;
+
 	// get system default device identifier
 	defaultDevice = ( char * )qalcGetString( NULL, ALC_DEFAULT_DEVICE_SPECIFIER );
 	if( !defaultDevice )
 	{
 		Com_Printf( "Failed to get openAL default device\n" );
-		return qfalse;
+		return false;
 	}
 
 	s_openAL_device = trap_Cvar_Get( "s_openAL_device", ALDEVICE_DEFAULT ? ALDEVICE_DEFAULT : defaultDevice, CVAR_ARCHIVE|CVAR_LATCH_SOUND );
@@ -167,7 +172,7 @@ static qboolean S_Init( void *hwnd, int maxEntities, qboolean verbose )
 	if( !numDevices )
 	{
 		Com_Printf( "Failed to get openAL devices\n" );
-		return qfalse;
+		return false;
 	}
 
 	// the device assigned by the user is not available
@@ -192,7 +197,7 @@ static qboolean S_Init( void *hwnd, int maxEntities, qboolean verbose )
 	if( !alDevice )
 	{
 		Com_Printf( "Failed to open device\n" );
-		return qfalse;
+		return false;
 	}
 
 	// Create context
@@ -200,7 +205,7 @@ static qboolean S_Init( void *hwnd, int maxEntities, qboolean verbose )
 	if( !alContext )
 	{
 		Com_Printf( "Failed to create context\n" );
-		return qfalse;
+		return false;
 	}
 	qalcMakeContextCurrent( alContext );
 
@@ -234,39 +239,40 @@ static qboolean S_Init( void *hwnd, int maxEntities, qboolean verbose )
 
 	// Check for Linux shutdown race condition
 	if( !Q_stricmp( qalGetString( AL_VENDOR ), "J. Valenzuela" ) )
-		snd_shutdown_bug = qtrue;
+		snd_shutdown_bug = true;
 
 	qalDopplerFactor( s_doppler->value );
 	qalDopplerVelocity( s_sound_velocity->value > 0.0f ? s_sound_velocity->value : 0.0f );
 	if( qalSpeedOfSound ) // opelAL 1.1 only. alDopplerVelocity being deprecated
 		qalSpeedOfSound( s_sound_velocity->value > 0.0f ? s_sound_velocity->value : 0.0f );
 
-	s_doppler->modified = qfalse;
+	s_doppler->modified = false;
 
 	S_SetAttenuationModel( S_DEFAULT_ATTENUATION_MODEL, S_DEFAULT_ATTENUATION_MAXDISTANCE, S_DEFAULT_ATTENUATION_REFDISTANCE );
 
-	S_LockBackgroundTrack( qfalse );
+	S_LockBackgroundTrack( false );
 
 	if( !S_InitDecoders( verbose ) )
 	{
 		Com_Printf( "Failed to init decoders\n" );
-		return qfalse;
+		return false;
 	}
 	if( !S_InitSources( maxEntities, verbose ) )
 	{
 		Com_Printf( "Failed to init sources\n" );
-		return qfalse;
+		return false;
 	}
 
-	return qtrue;
+	return true;
 }
 
 /*
 * S_Shutdown
 */
-static void S_Shutdown( qboolean verbose )
+static void S_Shutdown( bool verbose )
 {
 	S_StopStreams();
+	S_LockBackgroundTrack( false );
 	S_StopBackgroundTrack();
 
 	S_ShutdownSources();
@@ -349,9 +355,8 @@ static void S_Update( void )
 	
 	S_UpdateStreams();
 	
-
-	s_volume->modified = qfalse; // Checked by src and stream
-	s_musicvolume->modified = qfalse; // Checked by stream and music
+	s_volume->modified = false; // Checked by src and stream
+	s_musicvolume->modified = false; // Checked by stream and music
 
 	if( s_doppler->modified )
 	{
@@ -359,7 +364,7 @@ static void S_Update( void )
 			qalDopplerFactor( s_doppler->value );
 		else
 			qalDopplerFactor( 0.0f );
-		s_doppler->modified = qfalse;
+		s_doppler->modified = false;
 	}
 
 	if( s_sound_velocity->modified )
@@ -367,24 +372,26 @@ static void S_Update( void )
 		qalDopplerVelocity( s_sound_velocity->value > 0.0f ? s_sound_velocity->value : 0.0f );
 		if( qalSpeedOfSound )
 			qalSpeedOfSound( s_sound_velocity->value > 0.0f ? s_sound_velocity->value : 0.0f );
-		s_sound_velocity->modified = qfalse;
+		s_sound_velocity->modified = false;
 	}
 }
 
 /*
 * S_StopAllSounds
 */
-void S_StopAllSounds( void )
+void S_StopAllSounds( bool stopMusic )
 {
 	S_StopStreams();
 	S_StopAllSources();
-	S_StopBackgroundTrack();
+	if( stopMusic ) {
+		S_StopBackgroundTrack( );
+	}
 }
 
 /*
 * S_Activate
 */
-void S_Activate( qboolean activate )
+void S_Activate( bool activate )
 {
 	S_LockBackgroundTrack( !activate );
 
@@ -447,7 +454,7 @@ static unsigned S_HandleClearCmd( const sndCmdClear_t *cmd )
 static unsigned S_HandleStopCmd( const sndCmdStop_t *cmd )
 {
 	//Com_Printf("S_HandleStopCmd\n");
-	S_StopAllSounds();
+	S_StopAllSounds( cmd->stopMusic );
 	return sizeof( *cmd );
 }
 
@@ -548,7 +555,7 @@ static unsigned S_HandleStartGlobalSoundCmd( const sndCmdStartGlobalSound_t *cmd
 static unsigned S_HandleStartBackgroundTrackCmd( const sndCmdStartBackgroundTrack_t *cmd )
 {
 	//Com_Printf("S_HandleStartBackgroundTrackCmd\n");
-	S_StartBackgroundTrack( cmd->intro, cmd->loop );
+	S_StartBackgroundTrack( cmd->intro, cmd->loop, cmd->mode );
 	return sizeof( *cmd );
 }
 
@@ -615,7 +622,7 @@ static unsigned S_HandleActivateCmd( const sndActivateCmd_t *cmd )
 
 	S_Clear();
 
-	S_Activate( cmd->active ? qtrue : qfalse );
+	S_Activate( cmd->active ? true : false );
 
 	return sizeof( *cmd );
 }
@@ -668,77 +675,101 @@ static unsigned S_HandleStuffCmd( const sndStuffCmd_t *cmd )
 	return sizeof( *cmd );
 }
 
-static queueCmdHandler_t sndCmdHandlers[SND_CMD_NUM_CMDS] =
+/*
+* S_HandleSetMulEntitySpatializationCmd
+*/
+static unsigned S_HandleSetMulEntitySpatializationCmd( const sndCmdSetMulEntitySpatialization_t *cmd )
+{
+	unsigned i;
+	//Com_Printf("S_HandleSetEntitySpatializationCmd\n");
+	for( i = 0; i < cmd->numents; i++ )
+		S_SetEntitySpatialization( cmd->entnum[i], cmd->origin[i], cmd->velocity[i] );
+	return sizeof( *cmd );
+}
+
+static pipeCmdHandler_t sndCmdHandlers[SND_CMD_NUM_CMDS] =
 {
 	/* SND_CMD_INIT */
-	(queueCmdHandler_t)S_HandleInitCmd,
+	(pipeCmdHandler_t)S_HandleInitCmd,
 	/* SND_CMD_SHUTDOWN */
-	(queueCmdHandler_t)S_HandleShutdownCmd,
+	(pipeCmdHandler_t)S_HandleShutdownCmd,
 	/* SND_CMD_CLEAR */
-	(queueCmdHandler_t)S_HandleClearCmd,
+	(pipeCmdHandler_t)S_HandleClearCmd,
 	/* SND_CMD_STOP_ALL_SOUNDS */
-	(queueCmdHandler_t)S_HandleStopCmd,
+	(pipeCmdHandler_t)S_HandleStopCmd,
 	/* SND_CMD_FREE_SFX */
-	(queueCmdHandler_t)S_HandleFreeSfxCmd,
+	(pipeCmdHandler_t)S_HandleFreeSfxCmd,
 	/* SND_CMD_LOAD_SFX */
-	(queueCmdHandler_t)S_HandleLoadSfxCmd,
+	(pipeCmdHandler_t)S_HandleLoadSfxCmd,
 	/* SND_CMD_SET_ATTENUATION_MODEL */
-	(queueCmdHandler_t)S_HandleSetAttenuationModelCmd,
+	(pipeCmdHandler_t)S_HandleSetAttenuationModelCmd,
 	/* SND_CMD_SET_ENTITY_SPATIALIZATION */
-	(queueCmdHandler_t)S_HandleSetEntitySpatializationCmd,
+	(pipeCmdHandler_t)S_HandleSetEntitySpatializationCmd,
 	/* SND_CMD_SET_LISTENER */
-	(queueCmdHandler_t)S_HandleSetListernerCmd,
+	(pipeCmdHandler_t)S_HandleSetListernerCmd,
 	/* SND_CMD_START_LOCAL_SOUND */
-	(queueCmdHandler_t)S_HandleStartLocalSoundCmd,
+	(pipeCmdHandler_t)S_HandleStartLocalSoundCmd,
 	/* SND_CMD_START_FIXED_SOUND */
-	(queueCmdHandler_t)S_HandleStartFixedSoundCmd,
+	(pipeCmdHandler_t)S_HandleStartFixedSoundCmd,
 	/* SND_CMD_START_GLOBAL_SOUND */
-	(queueCmdHandler_t)S_HandleStartGlobalSoundCmd,
+	(pipeCmdHandler_t)S_HandleStartGlobalSoundCmd,
 	/* SND_CMD_START_RELATIVE_SOUND */
-	(queueCmdHandler_t)S_HandleStartRelativeSoundCmd,
+	(pipeCmdHandler_t)S_HandleStartRelativeSoundCmd,
 	/* SND_CMD_START_BACKGROUND_TRACK */
-	(queueCmdHandler_t)S_HandleStartBackgroundTrackCmd,
+	(pipeCmdHandler_t)S_HandleStartBackgroundTrackCmd,
 	/* SND_CMD_STOP_BACKGROUND_TRACK */
-	(queueCmdHandler_t)S_HandleStopBackgroundTrackCmd,
+	(pipeCmdHandler_t)S_HandleStopBackgroundTrackCmd,
 	/* SND_CMD_LOCK_BACKGROUND_TRACK */
-	(queueCmdHandler_t)S_HandleLockBackgroundTrackCmd,
+	(pipeCmdHandler_t)S_HandleLockBackgroundTrackCmd,
 	/* SND_CMD_ADD_LOOP_SOUND */
-	(queueCmdHandler_t)S_HandleAddLoopSoundCmd,
+	(pipeCmdHandler_t)S_HandleAddLoopSoundCmd,
 	/* SND_CMD_ADVANCE_BACKGROUND_TRACK */
-	(queueCmdHandler_t)S_HandleAdvanceBackgroundTrackCmd,
+	(pipeCmdHandler_t)S_HandleAdvanceBackgroundTrackCmd,
 	/* SND_CMD_PAUSE_BACKGROUND_TRACK */
-	(queueCmdHandler_t)S_HandlePauseBackgroundTrackCmd,
+	(pipeCmdHandler_t)S_HandlePauseBackgroundTrackCmd,
 	/* SND_CMD_ACTIVATE */
-	(queueCmdHandler_t)S_HandleActivateCmd,
+	(pipeCmdHandler_t)S_HandleActivateCmd,
 	/* SND_CMD_AVI_DEMO */
-	(queueCmdHandler_t)S_HandleAviDemoCmd,
+	(pipeCmdHandler_t)S_HandleAviDemoCmd,
 	/* SND_CMD_RAW_SAMPLES */
-	(queueCmdHandler_t)S_HandleRawSamplesCmd,
+	(pipeCmdHandler_t)S_HandleRawSamplesCmd,
 	/* SND_CMD_POSITIONED_RAW_SAMPLES */
-	(queueCmdHandler_t)S_HandlePositionedRawSamplesCmd,
+	(pipeCmdHandler_t)S_HandlePositionedRawSamplesCmd,
 	/* SND_CMD_STUFFCMD */
-	(queueCmdHandler_t)S_HandleStuffCmd
+	(pipeCmdHandler_t)S_HandleStuffCmd,
+	/* SND_CMD_SET_MUL_ENTITY_SPATIALIZATION */
+	(pipeCmdHandler_t)S_HandleSetMulEntitySpatializationCmd,
 };
+
+/*
+* S_EnqueuedCmdsWaiter
+*/
+static int S_EnqueuedCmdsWaiter( sndCmdPipe_t *queue, pipeCmdHandler_t *cmdHandlers, bool timeout )
+{
+	int read = S_ReadEnqueuedCmds( queue, cmdHandlers );
+	unsigned now = trap_Milliseconds();
+
+	if( read < 0 ) {
+		// shutdown
+		return read;
+	}
+
+	if( timeout || now >= s_last_update_time + UPDATE_MSEC ) {
+		s_last_update_time = now;
+		S_Update();
+	}
+
+	return read;
+}
 
 /*
 * S_BackgroundUpdateProc
 */
 void *S_BackgroundUpdateProc( void *param )
 {
-	sndQueue_t *s_cmdQueue = param;
+	sndCmdPipe_t *s_cmdQueue = param;
 
-	while ( 1 ){
-		int read = S_ReadEnqueuedCmds( s_cmdQueue, sndCmdHandlers );
-		
-		if( read < 0 ) {
-			// shutdown
-			break;
-		}
+	S_WaitEnqueuedCmds( s_cmdQueue, S_EnqueuedCmdsWaiter, sndCmdHandlers, UPDATE_MSEC );
 
-		S_Update();
-
-		trap_Sleep( 5 );
-	}
- 
 	return NULL;
 }

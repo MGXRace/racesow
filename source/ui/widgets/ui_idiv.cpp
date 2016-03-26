@@ -28,26 +28,27 @@ namespace WSWUI {
 
 using namespace Rocket::Core;
 
-InlineDiv::InlineDiv( const String &tag ) : Element(tag), timeout(WSW_UI_STREAMCACHE_TIMEOUT)
+InlineDiv::InlineDiv( const String &tag ) : Element( tag ), timeout( WSW_UI_STREAMCACHE_TIMEOUT ), onAddLoad( false ), loading( false )
 {
 }
 
 void InlineDiv::ReadFromFile( const char *fileName )
 {
-	int file, length;
-	
-	length = trap::FS_FOpenFile( fileName, &file, FS_READ );
-	if( length < 1 ) {
+	FileHandle handle = GetFileInterface()->Open( fileName );
+
+	if( !handle ) {
 		// missing file
 		SetInnerRML( String( "Failed to load " ) + fileName );
 	}
 	else {
+		size_t length = GetFileInterface()->Length( handle );
+
 		// allocate temporary buffer
 		char *buffer = __newa__( char, length + 1 );
 
 		// read the whole file contents
-		trap::FS_Read( buffer, length, file );
-		trap::FS_FCloseFile( file );
+		GetFileInterface()->Read( buffer, length, handle );
+		GetFileInterface()->Close( handle );
 		buffer[length] = '\0';
 
 		// set elements RML code
@@ -70,16 +71,39 @@ void InlineDiv::CacheRead( const char *fileName, void *privatep )
 	element->RemoveReference();
 }
 
+void InlineDiv::OnChildAdd( Element* element )
+{
+	Element::OnChildAdd( element );
+
+	if( element == this ) {
+		Element *document = GetOwnerDocument();
+		if( document == NULL )
+			return;
+		if( onAddLoad )
+			LoadSource();
+	}
+}
+
 void InlineDiv::LoadSource()
 {
+	if( loading ) {
+		// prevent recursive entries
+		return;
+	}
+
 	// Get the source URL for the image.
 	String source = GetAttribute< String >("src", "");
 	bool nocache = GetAttribute< int >("nocache", 0) != 0;
+	int expires = GetAttribute< int >("expires", WSW_UI_STREAMCACHE_CACHE_TTL);
+
+	onAddLoad = false;
+	loading = true;
 
 	if( source.Empty() ) {
 		SetInnerRML( "" );
 		SetPseudoClass( "loading", false );
 		DispatchEvent( "load", Dictionary(), false );
+		loading = false;
 		return;
 	}
 
@@ -92,13 +116,20 @@ void InlineDiv::LoadSource()
 
 		UI_Main::Get()->getStreamCache()->PerformRequest( 
 			source.CString(), "GET", NULL, 
-			NULL, NULL, &CacheRead, ( void * )this, timeout, nocache ? 0 : WSW_UI_STREAMCACHE_CACHE_TTL
+			NULL, NULL, &CacheRead, ( void * )this, timeout, nocache ? 0 : expires
 		);
 	}
 	else {
 		// get full path to the source.
 		// without the leading "/", path is considered to be relative to the document
 		Rocket::Core::ElementDocument* document = GetOwnerDocument();
+
+		if( !document && source.Substring( 0, 1 ) != "/" ) {
+			onAddLoad = true;
+			loading = false;
+			return;
+		}
+
 		URL source_url( document == NULL ? "" : document->GetSourceURL() );
 		String source_directory = source_url.GetPath();
 
@@ -113,6 +144,8 @@ void InlineDiv::LoadSource()
 
 		SetPseudoClass( "loading", false );
 	}
+
+	loading = false;
 }
 
 // Called when attributes on the element are changed.

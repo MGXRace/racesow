@@ -40,7 +40,7 @@ cvar_t *tv_port;
 cvar_t *tv_udp;
 cvar_t *tv_ip6;
 cvar_t *tv_port6;
-#ifdef TCP_ALLOW_CONNECT
+#ifdef TCP_ALLOW_TVCONNECT
 cvar_t *tv_tcp;
 #endif
 cvar_t *tv_public;
@@ -57,6 +57,7 @@ cvar_t *tv_name;
 cvar_t *tv_reconnectlimit; // minimum seconds between connect messages
 
 cvar_t *tv_masterservers;
+cvar_t *tv_masterservers_steam;
 
 cvar_t *tv_floodprotection_messages;
 cvar_t *tv_floodprotection_seconds;
@@ -84,15 +85,15 @@ void TV_Init( void )
 	tv_port = Cvar_Get( "tv_port", va( "%i", PORT_TV_SERVER ), CVAR_ARCHIVE | CVAR_NOSET );
 	tv_ip6 = Cvar_Get( "tv_ip6", "::", CVAR_ARCHIVE | CVAR_NOSET );
 	tv_port6 = Cvar_Get( "tv_port6", va( "%i", PORT_TV_SERVER ), CVAR_ARCHIVE | CVAR_NOSET );
-#ifdef TCP_ALLOW_CONNECT
+#ifdef TCP_ALLOW_TVCONNECT
 	tv_udp = Cvar_Get( "tv_udp", "1", CVAR_SERVERINFO | CVAR_NOSET );
 	tv_tcp = Cvar_Get( "tv_tcp", "1", CVAR_SERVERINFO | CVAR_NOSET );
 #else
 	tv_udp = Cvar_Get( "tv_udp", "1", CVAR_NOSET );
 #endif
 
-#ifndef TCP_ALLOW_CONNECT
-	Cvar_FullSet( "tv_tcp", "0", CVAR_READONLY, qtrue );
+#ifndef TCP_ALLOW_TVCONNECT
+	Cvar_FullSet( "tv_tcp", "0", CVAR_READONLY, true );
 #endif
 
 	tv_reconnectlimit = Cvar_Get( "tv_reconnectlimit", "3", CVAR_ARCHIVE );
@@ -100,7 +101,7 @@ void TV_Init( void )
 	tv_zombietime = Cvar_Get( "tv_zombietime", "2", 0 );
 	tv_name = Cvar_Get( "tv_name", APPLICATION "[TV]", CVAR_SERVERINFO | CVAR_ARCHIVE );
 	tv_compresspackets = Cvar_Get( "tv_compresspackets", "1", 0 );
-	tv_maxclients = Cvar_Get( "tv_maxclients", "32", CVAR_ARCHIVE | CVAR_SERVERINFO | CVAR_NOSET );
+	tv_maxclients = Cvar_Get( "tv_maxclients", "64", CVAR_ARCHIVE | CVAR_SERVERINFO | CVAR_NOSET );
 	tv_maxmvclients = Cvar_Get( "tv_maxmvclients", "4", CVAR_ARCHIVE | CVAR_SERVERINFO | CVAR_NOSET );
 	tv_public = Cvar_Get( "tv_public", "1", CVAR_ARCHIVE | CVAR_SERVERINFO );
 	tv_rcon_password = Cvar_Get( "tv_rcon_password", "", 0 );
@@ -108,14 +109,15 @@ void TV_Init( void )
 	tv_lobbymusic = Cvar_Get( "tv_lobbymusic", "", CVAR_ARCHIVE );
 
 	tv_masterservers = Cvar_Get( "tv_masterservers", DEFAULT_MASTER_SERVERS_IPS, CVAR_LATCH );
+	tv_masterservers_steam = Cvar_Get( "tv_masterservers_steam", DEFAULT_MASTER_SERVERS_STEAM_IPS, CVAR_LATCH );
 
 	// flood control
 	tv_floodprotection_messages = Cvar_Get( "tv_floodprotection_messages", "10", 0 );
-	tv_floodprotection_messages->modified = qtrue;
+	tv_floodprotection_messages->modified = true;
 	tv_floodprotection_seconds = Cvar_Get( "tv_floodprotection_seconds", "4", 0 );
-	tv_floodprotection_seconds->modified = qtrue;
+	tv_floodprotection_seconds->modified = true;
 	tv_floodprotection_penalty = Cvar_Get( "tv_floodprotection_delay", "20", 0 );
-	tv_floodprotection_penalty->modified = qtrue;
+	tv_floodprotection_penalty->modified = true;
 
 	if( tv_maxclients->integer < 0 )
 		Cvar_ForceSet( "tv_maxclients", "0" );
@@ -138,7 +140,7 @@ void TV_Init( void )
 
 	if( tv_udp->integer )
 	{
-		if( !NET_OpenSocket( &tvs.socket_udp, SOCKET_UDP, &tvs.address, qtrue ) )
+		if( !NET_OpenSocket( &tvs.socket_udp, SOCKET_UDP, &tvs.address, true ) )
 		{
 			Com_Printf( "Error: Couldn't open UDP socket: %s\n", NET_ErrorString() );
 			Cvar_ForceSet( tv_udp->name, "0" );
@@ -152,18 +154,18 @@ void TV_Init( void )
 
 	if( tvs.addressIPv6.type != NA_NOTRANSMIT )
 	{
-		if( !NET_OpenSocket( &tvs.socket_udp6, SOCKET_UDP, &tvs.addressIPv6, qtrue ) )
+		if( !NET_OpenSocket( &tvs.socket_udp6, SOCKET_UDP, &tvs.addressIPv6, true ) )
 		{
 			Com_Printf( "Error: Couldn't open UDP6 socket: %s\n", NET_ErrorString() );
 		}
 	}
 
-#ifdef TCP_ALLOW_CONNECT
+#ifdef TCP_ALLOW_TVCONNECT
 	if( tv_tcp->integer )
 	{
-		qboolean err = qtrue;
+		bool err = true;
 
-		if( !NET_OpenSocket( &tvs.socket_tcp, SOCKET_TCP, &tvs.address, qtrue ) )
+		if( !NET_OpenSocket( &tvs.socket_tcp, SOCKET_TCP, &tvs.address, true ) )
 		{
 			Com_Printf( "Error: Couldn't open TCP socket: %s\n", NET_ErrorString() );
 		}
@@ -176,13 +178,13 @@ void TV_Init( void )
 			}
 			else
 			{
-				err = qfalse;
+				err = false;
 			}
 		}
 
 		if( tvs.addressIPv6.type != NA_NOTRANSMIT )
 		{
-			if( !NET_OpenSocket( &tvs.socket_tcp6, SOCKET_TCP, &tvs.addressIPv6, qtrue ) )
+			if( !NET_OpenSocket( &tvs.socket_tcp6, SOCKET_TCP, &tvs.addressIPv6, true ) )
 			{
 				Com_Printf( "Error: Couldn't open TCP6 socket: %s\n", NET_ErrorString() );
 			}
@@ -195,7 +197,7 @@ void TV_Init( void )
 				}
 				else
 				{
-					err = qfalse;
+					err = false;
 				}
 			}
 		}
@@ -226,11 +228,11 @@ void TV_Frame( int realmsec, int gamemsec )
 			continue;
 
 		if( userinfo_modified )
-			tvs.upstreams[i]->userinfo_modified = qtrue;
+			tvs.upstreams[i]->userinfo_modified = true;
 
 		TV_Upstream_Run( tvs.upstreams[i], realmsec );
 	}
-	userinfo_modified = qfalse;
+	userinfo_modified = false;
 
 	TV_Downstream_ReadPackets();
 	TV_Downstream_SendClientMessages();
@@ -251,6 +253,8 @@ void TV_Shutdown( const char *finalmsg )
 {
 	int i;
 
+	TV_Downstream_MasterSendQuit();
+
 	for( i = 0; i < tvs.numupstreams; i++ )
 	{
 		if( !tvs.upstreams[i] )
@@ -270,7 +274,7 @@ void TV_Shutdown( const char *finalmsg )
 * 
 * ERR_DROP thrown, we will upgrade it to ERR_FATAL
 */
-void TV_ShutdownGame( const char *finalmsg, qboolean reconnect )
+void TV_ShutdownGame( const char *finalmsg, bool reconnect )
 {
 	Com_Error( ERR_FATAL, "%s", finalmsg );
 }
@@ -289,7 +293,7 @@ void SV_Shutdown( const char *finalmsg )
 	TV_Shutdown( finalmsg );
 }
 
-void SV_ShutdownGame( const char *finalmsg, qboolean reconnect )
+void SV_ShutdownGame( const char *finalmsg, bool reconnect )
 {
 }
 

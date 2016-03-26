@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "client.h"
 #include "../qalgo/q_trie.h"
 
+//#define UNSAFE_EXIT
 #define MAX_MASTER_SERVERS					4
 
 #ifdef PUBLIC_BUILD
@@ -40,6 +41,7 @@ typedef struct serverlist_s
 	unsigned int lastValidPing;
 	unsigned int lastUpdatedByMasterServer;
 	unsigned int masterServerUpdateSeq;
+	bool isLocal;
 	struct serverlist_s *pnext;
 } serverlist_t;
 
@@ -48,8 +50,8 @@ serverlist_t *masterList, *favoritesList;
 // cache of resolved master server addresses/names
 static trie_t *serverlist_masters_trie = NULL;
 
-static qboolean filter_allow_full = qfalse;
-static qboolean filter_allow_empty = qfalse;
+static bool filter_allow_full = false;
+static bool filter_allow_empty = false;
 
 static unsigned int masterServerUpdateSeq;
 
@@ -97,16 +99,16 @@ static serverlist_t *CL_ServerFindInList( serverlist_t *serversList, char *adr )
 /*
 * CL_AddServerToList
 */
-static qboolean CL_AddServerToList( serverlist_t **serversList, char *adr, unsigned int days )
+static bool CL_AddServerToList( serverlist_t **serversList, char *adr, unsigned int days )
 {
 	serverlist_t *newserv;
 	netadr_t nadr;
 
 	if( !adr || !strlen( adr ) )
-		return qfalse;
+		return false;
 
 	if( !NET_StringToAddress( adr, &nadr ) )
-		return qfalse;
+		return false;
 
 	newserv = CL_ServerFindInList( *serversList, adr );
 	if( newserv ) {
@@ -117,7 +119,7 @@ static qboolean CL_AddServerToList( serverlist_t **serversList, char *adr, unsig
 			newserv->lastUpdatedByMasterServer = Sys_Milliseconds();
 			newserv->masterServerUpdateSeq = masterServerUpdateSeq;
 		}
-		return qfalse;
+		return false;
 	}
 
 	newserv = (serverlist_t *)Mem_ZoneMalloc( sizeof( serverlist_t ) );
@@ -130,9 +132,10 @@ static qboolean CL_AddServerToList( serverlist_t **serversList, char *adr, unsig
 	newserv->lastUpdatedByMasterServer = Sys_Milliseconds();
 	newserv->masterServerUpdateSeq = masterServerUpdateSeq;
 	newserv->pnext = *serversList;
+	newserv->isLocal = NET_IsLocalAddress( &nadr );
 	*serversList = newserv;
 
-	return qtrue;
+	return true;
 }
 
 #define SERVERSFILE "serverscache.txt"
@@ -159,7 +162,7 @@ void CL_WriteServerCache( void )
 	server = masterList;
 	while( server )
 	{
-		if( server->lastValidPing + 7 > Com_DaysSince1900() )
+		if( !server->isLocal && server->lastValidPing + 7 > Com_DaysSince1900() )
 		{
 			if( NET_StringToAddress( server->address, &adr ) )
 			{
@@ -175,7 +178,7 @@ void CL_WriteServerCache( void )
 	server = favoritesList;
 	while( server )
 	{
-		if( server->lastValidPing + 7 > Com_DaysSince1900() )
+		if( !server->isLocal && server->lastValidPing + 7 > Com_DaysSince1900() )
 		{
 			if( NET_StringToAddress( server->address, &adr ) )
 			{
@@ -196,11 +199,11 @@ void CL_WriteServerCache( void )
 void CL_ReadServerCache( void )
 {
 	int filelen, filehandle;
-	qbyte *buf = NULL;
+	uint8_t *buf = NULL;
 	char *ptr, *token;
 	netadr_t adr;
 	char adrString[64];
-	qboolean favorite = qfalse;
+	bool favorite = false;
 
 	filelen = FS_FOpenFile( SERVERSFILE, &filehandle, FS_READ );
 	if( !filehandle || filelen < 1 )
@@ -220,26 +223,26 @@ void CL_ReadServerCache( void )
 	ptr = ( char * )buf;
 	while( ptr )
 	{
-		token = COM_ParseExt( &ptr, qtrue );
+		token = COM_ParseExt( &ptr, true );
 		if( !token[0] )
 			break;
 
 		if( !Q_stricmp( token, "master" ) )
 		{
-			favorite = qfalse;
+			favorite = false;
 			continue;
 		}
 
 		if( !Q_stricmp( token, "favorites" ) )
 		{
-			favorite = qtrue;
+			favorite = true;
 			continue;
 		}
 
 		if( NET_StringToAddress( token, &adr ) )
 		{
 			Q_strncpyz( adrString, token, sizeof( adrString ) );
-			token = COM_ParseExt( &ptr, qfalse );
+			token = COM_ParseExt( &ptr, false );
 			if( !token[0] )
 				continue;
 
@@ -282,7 +285,6 @@ void CL_ParseGetStatusResponse( const socket_t *socket, const netadr_t *address,
 static void CL_QueryGetInfoMessage( const char *cmdname )
 {
 	netadr_t adr;
-	char *requeststring;
 	char *server;
 
 	//get what master
@@ -293,10 +295,8 @@ static void CL_QueryGetInfoMessage( const char *cmdname )
 		return;
 	}
 
-	requeststring = va( cmdname );
-
 	// send a broadcast packet
-	Com_DPrintf( "quering %s...\n", server );
+	Com_DPrintf( "querying %s...\n", server );
 
 	if( NET_StringToAddress( server, &adr ) )
 	{
@@ -306,7 +306,7 @@ static void CL_QueryGetInfoMessage( const char *cmdname )
 			NET_SetAddressPort( &adr, PORT_SERVER );
 
 		socket = ( adr.type == NA_IP6 ? &cls.socket_udp6 : &cls.socket_udp );
-		Netchan_OutOfBandPrint( socket, &adr, requeststring );
+		Netchan_OutOfBandPrint( socket, &adr, "%s", cmdname );
 	}
 	else
 	{
@@ -368,7 +368,7 @@ void CL_PingServer_f( void )
 		filter_allow_empty ? "empty" : "" );
 
 	socket = ( adr.type == NA_IP6 ? &cls.socket_udp6 : &cls.socket_udp );
-	Netchan_OutOfBandPrint( socket, &adr, requestString );
+	Netchan_OutOfBandPrint( socket, &adr, "%s", requestString );
 }
 
 /*
@@ -414,11 +414,11 @@ void CL_ParseStatusMessage( const socket_t *socket, const netadr_t *address, msg
 * CL_ParseGetServersResponseMessage
 * Handle a reply from getservers message to master server
 */
-static void CL_ParseGetServersResponseMessage( msg_t *msg, qboolean extended )
+static void CL_ParseGetServersResponseMessage( msg_t *msg, bool extended )
 {
 	const char *header;
 	char adrString[64];
-	qbyte addr[16];
+	uint8_t addr[16];
 	unsigned short port;
 	netadr_t adr;
 
@@ -486,7 +486,7 @@ static void CL_ParseGetServersResponseMessage( msg_t *msg, qboolean extended )
 * CL_ParseGetServersResponse
 * Handle a reply from getservers message to master server
 */
-void CL_ParseGetServersResponse( const socket_t *socket, const netadr_t *address, msg_t *msg, qboolean extended )
+void CL_ParseGetServersResponse( const socket_t *socket, const netadr_t *address, msg_t *msg, bool extended )
 {
 	serverlist_t *server;
 	netadr_t adr;
@@ -508,6 +508,7 @@ void CL_ParseGetServersResponse( const socket_t *socket, const netadr_t *address
 	while( server )
 	{
 		if( server->masterServerUpdateSeq == masterServerUpdateSeq 
+			&& !(server->isLocal && Com_ServerState())
 			&& NET_StringToAddress( server->address, &adr ) )
 			CL_UIModule_AddToServerList( server->address, "\\\\EOT" );
 
@@ -621,14 +622,32 @@ static void CL_MasterAddressCache_Shutdown( void )
 	trie_dump_t *dump;
 
 	if( resolverThreads ) {
+		QMutex_Lock( resolveLock );
+
+#if defined(UNSAFE_EXIT) && defined(Q_THREADS_HAVE_CANCEL)
+		for( i = 0; resolverThreads[i]; i++ ) {
+			QThread_Cancel( resolverThreads[i] );
+		}
+
+		QMutex_Unlock( resolveLock );
+
 		for( i = 0; resolverThreads[i]; i++ ) {
 			QThread_Join( resolverThreads[i] );
 		}
 		free( resolverThreads );
-		resolverThreads = NULL;
-	}
 
-	QMutex_Destroy( &resolveLock );
+		QMutex_Destroy( &resolveLock );
+#else
+		// here we leak the mutex and resources allocated for resolving threads,
+		// but at least we're not calling cancel on them, which is possibly dangerous
+		
+		// we're going to kill the main thread anyway, so keep the lock and let the threads die
+#endif
+
+		free( resolverThreads );
+		resolverThreads = NULL;
+		resolveLock = NULL;
+	}
 
 	// free allocated memory
 	if( serverlist_masters_trie ) {
@@ -636,6 +655,7 @@ static void CL_MasterAddressCache_Shutdown( void )
 		for( i = 0; i < dump->size; ++i ) {
 			free( dump->key_value_vector[i].value );
 		}
+		Trie_FreeDump( dump );
 		Trie_Destroy( serverlist_masters_trie );
 		serverlist_masters_trie = NULL;
 	}
@@ -652,15 +672,15 @@ void CL_GetServers_f( void )
 	char *modname, *master;
 	trie_error_t err;
 
-	filter_allow_full = qfalse;
-	filter_allow_empty = qfalse;
+	filter_allow_full = false;
+	filter_allow_empty = false;
 	for( i = 2; i < Cmd_Argc(); i++ )
 	{
 		if( !Q_stricmp( "full", Cmd_Argv( i ) ) )
-			filter_allow_full = qtrue;
+			filter_allow_full = true;
 
 		if( !Q_stricmp( "empty", Cmd_Argv( i ) ) )
-			filter_allow_empty = qtrue;
+			filter_allow_empty = true;
 	}
 
 	if( !Q_stricmp( Cmd_Argv( 1 ), "local" ) )
@@ -684,7 +704,7 @@ void CL_GetServers_f( void )
 		for( i = 0; i < NUM_BROADCAST_PORTS; i++ )
 		{
 			NET_BroadcastAddress( padr, PORT_SERVER + i );
-			Netchan_OutOfBandPrint( &cls.socket_udp, padr, requeststring );
+			Netchan_OutOfBandPrint( &cls.socket_udp, padr, "%s", requeststring );
 		}
 		return;
 	}
@@ -730,7 +750,7 @@ void CL_GetServers_f( void )
 		if( NET_GetAddressPort( padr ) == 0 )
 			NET_SetAddressPort( padr, PORT_MASTER );
 
-		Netchan_OutOfBandPrint( socket, padr, requeststring );
+		Netchan_OutOfBandPrint( socket, padr, "%s", requeststring );
 
 		Com_DPrintf( "quering %s...%s: %s\n", master, NET_AddressToString(padr), requeststring );
 	}

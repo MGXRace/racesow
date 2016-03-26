@@ -28,7 +28,7 @@
 #ifndef ROCKETCOREELEMENTDOCUMENT_H
 #define ROCKETCOREELEMENTDOCUMENT_H
 
-#include <Rocket/Core/Element.h>
+#include "Element.h"
 
 namespace Rocket {
 namespace Core {
@@ -134,6 +134,14 @@ public:
 	/// Increment/Decrement the layout lock
 	void LockLayout(bool lock);
 
+	/// Sets internal pointer to user supplied data, which can be later retrieved by calling GetUserData
+	void SetUserData(void *data) { user_data = data; }
+	/// 
+	void *GetUserData() const { return user_data; }
+
+	// Find the next element to focus, starting at the current element
+	bool FocusFirstTabElement(void) { return FocusNextTabElement(this, true); }
+
 protected:
 	/// Refreshes the document layout if required.
 	virtual void OnUpdate();
@@ -173,6 +181,8 @@ private:
 	// Is the layout dirty?
 	bool layout_dirty;
 	int lock_layout;
+
+	void *user_data;
 
 	friend class Context;
 	friend class Factory;

@@ -37,31 +37,31 @@ static int findhandle = -1;
 /*
 * CompareAttributes
 */
-static qboolean CompareAttributes( unsigned found, unsigned musthave, unsigned canthave )
+static bool CompareAttributes( unsigned found, unsigned musthave, unsigned canthave )
 {
 	if( ( found & _A_RDONLY ) && ( canthave & SFF_RDONLY ) )
-		return qfalse;
+		return false;
 	if( ( found & _A_HIDDEN ) && ( canthave & SFF_HIDDEN ) )
-		return qfalse;
+		return false;
 	if( ( found & _A_SYSTEM ) && ( canthave & SFF_SYSTEM ) )
-		return qfalse;
+		return false;
 	if( ( found & _A_SUBDIR ) && ( canthave & SFF_SUBDIR ) )
-		return qfalse;
+		return false;
 	if( ( found & _A_ARCH ) && ( canthave & SFF_ARCH ) )
-		return qfalse;
+		return false;
 
 	if( ( musthave & SFF_RDONLY ) && !( found & _A_RDONLY ) )
-		return qfalse;
+		return false;
 	if( ( musthave & SFF_HIDDEN ) && !( found & _A_HIDDEN ) )
-		return qfalse;
+		return false;
 	if( ( musthave & SFF_SYSTEM ) && !( found & _A_SYSTEM ) )
-		return qfalse;
+		return false;
 	if( ( musthave & SFF_SUBDIR ) && !( found & _A_SUBDIR ) )
-		return qfalse;
+		return false;
 	if( ( musthave & SFF_ARCH ) && !( found & _A_ARCH ) )
-		return qfalse;
+		return false;
 
-	return qtrue;
+	return true;
 }
 
 /*
@@ -208,6 +208,31 @@ const char *Sys_FS_GetHomeDirectory( void )
 }
 
 /*
+* Sys_FS_GetCacheDirectory
+*/
+const char *Sys_FS_GetCacheDirectory( void )
+{
+	return NULL;
+}
+
+/*
+* Sys_FS_GetSecureDirectory
+*/
+const char *Sys_FS_GetSecureDirectory( void )
+{
+	return NULL;
+}
+
+/*
+* Sys_FS_GetMediaDirectory
+*/
+const char *Sys_FS_GetMediaDirectory( fs_mediatype_t type )
+{
+	// TODO: Libraries / My Pictures?
+	return NULL;
+}
+
+/*
 * Sys_FS_LockFile
 */
 void *Sys_FS_LockFile( const char *path )
@@ -231,7 +256,7 @@ void Sys_FS_UnlockFile( void *handle )
 /*
 * Sys_FS_CreateDirectory
 */
-qboolean Sys_FS_CreateDirectory( const char *path )
+bool Sys_FS_CreateDirectory( const char *path )
 {
 	return ( !_mkdir( path ) );
 }
@@ -239,7 +264,7 @@ qboolean Sys_FS_CreateDirectory( const char *path )
 /*
 * Sys_FS_RemoveDirectory
 */
-qboolean Sys_FS_RemoveDirectory( const char *path )
+bool Sys_FS_RemoveDirectory( const char *path )
 {
 	return ( !_rmdir( path ) );
 }
@@ -274,4 +299,65 @@ time_t Sys_FS_FileMTime( const char *filename )
 	CloseHandle( hFile );
 
 	return time;
+}
+
+/*
+* Sys_FS_FileNo
+*/
+int Sys_FS_FileNo( FILE *fp )
+{
+	return _fileno( fp );
+}
+
+/*
+* Sys_FS_MMapFile
+*/
+void *Sys_FS_MMapFile( int fileno, size_t size, size_t offset, void **mapping, size_t *mapping_offset )
+{
+	HANDLE h;
+	size_t offsetpad;
+	void *data;
+	static DWORD granularitymask = 0;
+
+	assert( mapping != NULL );
+
+	h = CreateFileMapping( (HANDLE) _get_osfhandle( fileno ), 0, PAGE_READONLY, 0, 0, 0 );
+	if( h == 0 )
+		return NULL;
+	
+	if( granularitymask == 0 ) {
+		SYSTEM_INFO sysInfo;
+		GetSystemInfo( &sysInfo );
+		granularitymask = ~(sysInfo.dwAllocationGranularity - 1);
+	}
+
+	offsetpad = offset - (offset & granularitymask);
+
+	data = MapViewOfFile( h, FILE_MAP_READ, 0, offset - offsetpad, size + offsetpad );
+	if( !data ) {
+		CloseHandle( h );
+		return NULL;
+	}
+
+	*mapping = h;
+	*mapping_offset = offsetpad;
+	return (char *)data + offsetpad;
+}
+
+/*
+* Sys_FS_UnMMapFile
+*/
+void Sys_FS_UnMMapFile( void *mapping, void *data, size_t size, size_t mapping_offset )
+{
+	if( data )
+		UnmapViewOfFile( (HANDLE)((char *)data - mapping_offset) );
+	if( mapping )
+		CloseHandle( (HANDLE)mapping );
+}
+
+/*
+* Sys_FS_AddFileToMedia
+*/
+void Sys_FS_AddFileToMedia( const char *filename )
+{
 }

@@ -29,19 +29,19 @@
 
 static void TVM_RemoveClient( edict_t *ent );
 
-//==================
-//TVM_AddEntity
-//==================
+/*
+* TVM_AddEntity
+*/
 static void TVM_AddEntity( edict_t *ent )
 {
 	assert( ent && !ent->r.inuse && !ent->local );
 
-	ent->r.inuse = qtrue;
+	ent->r.inuse = true;
 }
 
-//==================
-//TVM_NewPacketEntityState
-//==================
+/*
+* TVM_NewPacketEntityState
+*/
 static void TVM_NewPacketEntityState( edict_t *ent, entity_state_t *state )
 {
 	assert( ent && ent->r.inuse && !ent->local );
@@ -70,15 +70,17 @@ static void TVM_NewPacketEntityState( edict_t *ent, entity_state_t *state )
 		ent->r.maxs[2] = zu;
 	}
 
-	if( ent->s.linearProjectile )
-		GClip_MoveLinearProjectile( ent->relay, ent );
+	if( ent->s.linearMovement ) {
+		ent->s.linearMovementTimeStamp -= ent->relay->snapFrameTime;
+		GClip_LinearMovement( ent->relay, ent );
+	}
 
 	GClip_LinkEntity( ent->relay, ent );
 }
 
-//==================
-//TVM_RemoveEntity
-//==================
+/*
+* TVM_RemoveEntity
+*/
 static void TVM_RemoveEntity( edict_t *ent )
 {
 	tvm_relay_t *relay;
@@ -100,15 +102,15 @@ static void TVM_RemoveEntity( edict_t *ent )
 	memset( &ent->s, 0, sizeof( ent->s ) );
 	memset( &ent->r, 0, sizeof( ent->r ) );
 
-	ent->local = qfalse;
+	ent->local = false;
 	ent->relay = relay;
 	ent->s.number = ENTNUM( ent );
-	ent->r.inuse = qfalse;
+	ent->r.inuse = false;
 }
 
-//==================
-//TVM_AddClient
-//==================
+/*
+* TVM_AddClient
+*/
 static void TVM_AddClient( edict_t *ent )
 {
 	assert( ent && !ent->local && !ent->r.client );
@@ -121,21 +123,20 @@ static void TVM_AddClient( edict_t *ent )
 	ent->r.client->ps.playerNum = PLAYERNUM( ent );
 }
 
-//==================
-//TVM_NewPlayerState
-//==================
+/*
+* TVM_NewPlayerState
+*/
 static void TVM_NewPlayerState( edict_t *ent, player_state_t *ps )
 {
 	assert( ent && ent->r.inuse && !ent->local && ent->r.client );
 	assert( ps );
-	assert( ( unsigned int )ENTNUM( ent ) == ps->POVnum );
 
 	ent->r.client->ps = *ps;
 }
 
-//==================
-//TVM_RemoveClient
-//==================
+/*
+* TVM_RemoveClient
+*/
 static void TVM_RemoveClient( edict_t *ent )
 {
 	int i;
@@ -154,18 +155,18 @@ static void TVM_RemoveClient( edict_t *ent )
 	ent->r.client = NULL;
 }
 
-//==================
-//TVM_NewMatchState
-//==================
+/*
+* TVM_NewMatchState
+*/
 static void TVM_NewGameState( tvm_relay_t *relay, game_state_t *gameState )
 {
 	relay->gameState = *gameState;
 }
 
-//==================
-//TVM_NewFrameSnap
-// a new frame snap has been received from the server
-//==================
+/*
+* TVM_NewFrameSnap
+* a new frame snap has been received from the server
+*/
 void TVM_NewFrameSnapshot( tvm_relay_t *relay, snapshot_t *frame )
 {
 	int i, j, num, numentities, maxclients;
@@ -192,7 +193,7 @@ void TVM_NewFrameSnapshot( tvm_relay_t *relay, snapshot_t *frame )
 	maxclients = 0;
 	for( i = 0; i < frame->numplayers; i++ )
 	{
-		num = frame->playerStates[i].POVnum;
+		num = frame->playerStates[i].playerNum + 1;
 		if( num < 1 || num >= relay->maxentities || num > MAX_CLIENTS )
 			TVM_RelayError( relay, "Invalid playerstate number" );
 		while( j < num )

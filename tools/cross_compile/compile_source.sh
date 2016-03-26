@@ -10,20 +10,16 @@ set -e
 . `pwd`/inc/common.inc.sh
 . `pwd`/inc/target-${OS}-${ARCH}.inc.sh
 
-TARGET_LIB_DIR="${SOURCE_DIR}/source/$OS/$ARCH/$TLIB_DIR/"
-
 cd "$SOURCE_DIR"
 
 cd "source"
 
-echo "${COMMAND_ENV} CXXFLAGS=${CFLAGS_COMMON} ${PATH}"
-
-CFLAGS="${CFLAGS_COMMON} ${CFLAGS_SOURCE} -I../libsrcs/zlib -I../libsrcs/libcurl/include -I../libsrcs/libjpeg -I../libsrcs/libogg/include -I../libsrcs/libvorbis/include -I../libsrcs/libtheora/include -I../libsrcs/libfreetype/include -I../libsrcs/libpng "
-LDFLAGS="${LDFLAGS} -L${TARGET_LIB_DIR}"
-
-COMMAND_PREF="${COMMAND_ENV} CFLAGS=\"${CFLAGS}\" LDFLAGS=\"${LDFLAGS}\" PATH=\"${PATH}\" "
-COMMAND="${COMMAND}; ${COMMAND_PREF} ${MAKE} clean"
-COMMAND="${COMMAND}; ${COMMAND_PREF} ${MAKE} $3"
+COMMAND="cmake -G \"Unix Makefiles\" -DCMAKE_BUILD_TYPE=Release"
+[ ! -z "${CMAKE_TOOLCHAIN_FILE}" ] && COMMAND="${COMMAND} -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}"
+[ ! -z "${CMAKE_C_FLAGS}" ] && COMMAND="${COMMAND} -DCMAKE_C_FLAGS=${CMAKE_C_FLAGS}"
+[ ! -z "${CMAKE_CXX_FLAGS}" ] && COMMAND="${COMMAND} -DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}"
+[ ! -z "${CMAKE_FIND_ROOT_PATH}" ] && COMMAND="${COMMAND} -DCMAKE_FIND_ROOT_PATH=${CMAKE_FIND_ROOT_PATH}"
+COMMAND="${COMMAND}; ${MAKE} clean; ${MAKE} $3"
 
 echo "$COMMAND"
 eval "$COMMAND"

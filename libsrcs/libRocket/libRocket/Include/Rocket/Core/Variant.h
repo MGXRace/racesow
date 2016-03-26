@@ -28,9 +28,9 @@
 #ifndef ROCKETVARIANT_H
 #define ROCKETVARIANT_H
 
-#include <Rocket/Core/Header.h>
-#include <Rocket/Core/Types.h>
-#include <Rocket/Core/TypeConverter.h>
+#include "Header.h"
+#include "Types.h"
+#include "TypeConverter.h"
 #include <list>
 
 namespace Rocket {
@@ -143,15 +143,15 @@ public:
 private:
 	
 #ifdef ROCKET_ARCH_64
-		static const int LOCAL_DATA_SIZE = 32; // Required for Strings
+		static const int LOCAL_DATA_SIZE = 48; // Required for Strings
 #else
-		static const int LOCAL_DATA_SIZE = 24;
+		static const int LOCAL_DATA_SIZE = 32;
 #endif
 	Type type;
 	char data[LOCAL_DATA_SIZE];
 };
 
-#include <Rocket/Core/Variant.inl>
+#include "Variant.inl"
 
 }
 }

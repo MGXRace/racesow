@@ -26,6 +26,7 @@ typedef struct
 {
 	char *text[CON_MAXLINES];
 	int x;              // offset in current line for next print
+	int linecolor;		// color in current line for next print
 	int linewidth;      // characters across screen (FIXME)
 	int display;        // bottom of console displays this line
 	int totallines;     // total lines in console scrollback
@@ -33,11 +34,13 @@ typedef struct
 
 	float times[NUM_CON_TIMES]; // cls.realtime time the line was generated
 	// for transparent notify lines
+
+	qmutex_t *mutex;
 } console_t;
 
 static console_t con;
 
-qboolean con_initialized;
+volatile bool con_initialized;
 
 static cvar_t *con_notifytime;
 static cvar_t *con_drawNotify;
@@ -62,12 +65,17 @@ static int search_line = 0;
 static char search_text[MAXCMDLINE*2+4];
 
 // messagemode[2]
-static qboolean chat_team;
+static bool chat_team;
 static char chat_buffer[MAXCMDLINE];
 static int chat_prestep = 0;
 static unsigned int chat_linepos = 0;
 static unsigned int chat_bufferlen = 0;
 
+static int touch_x, touch_y;
+
+/*
+* Con_NumPadValue
+*/
 static int Con_NumPadValue( int key )
 {
 	switch( key )
@@ -121,6 +129,9 @@ static int Con_NumPadValue( int key )
 	return key;
 }
 
+/*
+* Con_ClearTyping
+*/
 static void Con_ClearTyping( void )
 {
 	key_lines[edit_line][1] = 0; // clear any typing
@@ -138,7 +149,7 @@ void Con_Close( void )
 
 	Con_ClearTyping();
 	Con_ClearNotify();
-	Key_ClearStates();
+	IN_ClearState();
 }
 
 /*
@@ -164,6 +175,7 @@ void Con_ToggleConsole_f( void )
 		// open console
 		CL_SetOldKeyDest( cls.key_dest );
 		CL_SetKeyDest( key_console );
+		IN_ShowSoftKeyboard( true );
 	}
 }
 
@@ -174,6 +186,8 @@ void Con_Clear_f( void )
 {
 	int i;
 
+	QMutex_Lock( con.mutex );
+
 	for( i = 0; i < CON_MAXLINES; i++ )
 	{
 		Q_free( con.text[i] );
@@ -181,6 +195,10 @@ void Con_Clear_f( void )
 	}
 	con.numlines = 0;
 	con.display = 0;
+	con.x = 0;
+	con.linecolor = COLOR_WHITE;
+
+	QMutex_Unlock( con.mutex );
 }
 
 /*
@@ -204,7 +222,7 @@ static size_t Con_BufferText( char *buffer, const char *delim )
 		line = con.text[l] ? con.text[l] : "";
 		x = strlen( line );
 
-		if( buffer && line )
+		if( buffer )
 		{
 			memcpy( buffer + length, line, x );
 			memcpy( buffer + length + x, delim, delim_len );
@@ -263,10 +281,14 @@ static void Con_Dump_f( void )
 		return;
 	}
 
+	QMutex_Lock( con.mutex );
+
 	buffer_size = Con_BufferText( NULL, newline ) + 1;
 	buffer = Mem_TempMalloc( buffer_size );
 
 	Con_BufferText( buffer, newline );
+
+	QMutex_Unlock( con.mutex );
 
 	FS_Write( buffer, buffer_size - 1, file );
 
@@ -290,16 +312,20 @@ void Con_ClearNotify( void )
 }
 
 /*
-* Con_SetMessageModeCvar
+* Con_SetMessageMode
 * 
 * Called from CL_SetKeyDest
 */
-void Con_SetMessageModeCvar( void )
+void Con_SetMessageMode( void )
 {
-	if( cls.key_dest == key_message )
+	bool message = ( cls.key_dest == key_message );
+
+	if( message )
 		Cvar_ForceSet( "con_messageMode", chat_team ? "2" : "1" );
 	else
 		Cvar_ForceSet( "con_messageMode", "0" );
+
+	IN_IME_Enable( message );
 }
 
 /*
@@ -307,9 +333,12 @@ void Con_SetMessageModeCvar( void )
 */
 static void Con_MessageMode_f( void )
 {
-	chat_team = qfalse;
+	chat_team = false;
 	if( cls.state == CA_ACTIVE )
+	{
 		CL_SetKeyDest( key_message );
+		IN_ShowSoftKeyboard( true );
+	}
 }
 
 /*
@@ -319,7 +348,10 @@ static void Con_MessageMode2_f( void )
 {
 	chat_team = Cmd_Exists( "say_team" ); // if not, make it a normal "say: "
 	if( cls.state == CA_ACTIVE )
+	{
 		CL_SetKeyDest( key_message );
+		IN_ShowSoftKeyboard( true );
+	}
 }
 
 /*
@@ -329,10 +361,16 @@ static void Con_MessageMode2_f( void )
 */
 void Con_CheckResize( void )
 {
-	int width = viddef.width / SMALL_CHAR_WIDTH - 2;
+	int charWidth, width = 0;
 
-	if( width == con.linewidth )
-		return;
+	if( cls.consoleFont )
+	{
+		charWidth = SCR_strWidth( "M", cls.consoleFont, 0, 0 );
+		if( !charWidth )
+			charWidth = 1;
+
+		width = viddef.width / charWidth - 2;
+	}
 
 	if( width < 1 )		// video hasn't been initialized yet
 		con.linewidth = 78;
@@ -341,11 +379,29 @@ void Con_CheckResize( void )
 }
 
 /*
+* Con_ResetFontSize
+*/
+void Con_ResetFontSize()
+{
+	SCR_ResetSystemFontConsoleSize();
+}
+
+/*
 * Con_ChangeFontSize
 */
 void Con_ChangeFontSize( int ch )
 {
-	SCR_ChangeSystemFontSmallSize( ch );
+	SCR_ChangeSystemFontConsoleSize( ch );
+}
+
+/*
+* Con_GetPixelRatio
+*/
+float Con_GetPixelRatio( void )
+{
+	float pixelRatio = VID_GetPixelRatio();
+	clamp_low( pixelRatio, 0.5f );
+	return pixelRatio;
 }
 
 /*
@@ -369,6 +425,10 @@ void Con_Init( void )
 	con.numlines = 0;
 	con.display = 0;
 	con.linewidth = 78;
+	con.linecolor = COLOR_WHITE;
+	con.mutex = QMutex_Create();
+
+	touch_x = touch_y = -1;
 
 	Com_Printf( "Console initialized.\n" );
 
@@ -376,7 +436,7 @@ void Con_Init( void )
 	// register our commands
 	//
 	con_notifytime = Cvar_Get( "con_notifytime", "3", CVAR_ARCHIVE );
-	con_drawNotify = Cvar_Get( "con_drawNotify", "1", CVAR_ARCHIVE );
+	con_drawNotify = Cvar_Get( "con_drawNotify", "0", CVAR_ARCHIVE );
 	con_printText  = Cvar_Get( "con_printText", "1", CVAR_ARCHIVE );
 	con_chatmode = Cvar_Get( "con_chatmode", "3", CVAR_ARCHIVE );
 
@@ -393,7 +453,7 @@ void Con_Init( void )
 	Cmd_AddCommand( "messagemode2", Con_MessageMode2_f );
 	Cmd_AddCommand( "clear", Con_Clear_f );
 	Cmd_AddCommand( "condump", Con_Dump_f );
-	con_initialized = qtrue;
+	con_initialized = true;
 }
 
 /*
@@ -412,13 +472,15 @@ void Con_Shutdown( void )
 	Cmd_RemoveCommand( "clear" );
 	Cmd_RemoveCommand( "condump" );
 
-	con_initialized = qfalse;
+	QMutex_Destroy( &con.mutex );
+
+	con_initialized = false;
 }
 
 /*
 * Con_Linefeed
 */
-static void Con_Linefeed( void )
+static void Con_Linefeed( bool notify )
 {
 	// shift scrollback text up in the buffer to make room for a new line
 	if (con.numlines == con.totallines )
@@ -426,8 +488,11 @@ static void Con_Linefeed( void )
 	memmove( con.text + 1, con.text, sizeof( con.text[0] ) * min( con.numlines, con.totallines - 1 ) );
 	con.text[0] = NULL;
 
-	// shift the timings array
+	// mark time for transparent overlay
 	memmove( con.times + 1, con.times, sizeof( con.times[0] ) * ( NUM_CON_TIMES - 1 ) );
+	con.times[0] = cls.realtime;
+	if( !notify )
+		con.times[0] -= con_notifytime->value*1000 + 1;
 
 	con.x = 0;
 	if( con.display )
@@ -447,18 +512,26 @@ static void Con_Linefeed( void )
 * All console printing must go through this in order to be logged to disk
 * If no console is visible, the text will appear at the top of the game window
 */
-static void addchartostr( char **s, int c ) {
-	int len = *s ? strlen( *s ) : 0;
-	char *newstr = Q_realloc( *s, len + 2 );
-	newstr[len] = c;
-	newstr[len+1] = '\0';
+static void addcharstostr( char **s, const char *c, size_t num ) {
+	size_t len = *s ? strlen( *s ) : 0, addlen = 0;
+	char *newstr;
+
+	while( num && c[addlen] )
+	{
+		addlen = Q_Utf8SyncPos( c, addlen + 1, UTF8SYNC_RIGHT );
+		num--;
+	}
+
+	newstr = Q_realloc( *s, len + addlen + 1 );
+	memcpy( newstr + len, c, addlen );
+	newstr[len + addlen] = '\0';
 	*s = newstr;
 }
-static void Con_Print2( const char *txt, qboolean notify )
+static void Con_Print2( const char *txt, bool notify )
 {
-	int c, l;
-	int color;
-	qboolean colorflag = qfalse;
+	int l;
+	const char *ptxt;
+	char colorchar[] = { Q_COLOR_ESCAPE, COLOR_WHITE, 0 };
 
 	if( !con_initialized )
 		return;
@@ -466,14 +539,51 @@ static void Con_Print2( const char *txt, qboolean notify )
 	if( con_printText && con_printText->integer == 0 )
 		return;
 
-	color = ColorIndex( COLOR_WHITE );
+	QMutex_Lock( con.mutex );
 
-	while( ( c = *txt ) )
+	while( *txt )
 	{
+		ptxt = txt;
+
+		if( txt[0] == Q_COLOR_ESCAPE )
+		{
+			if( txt[1] == Q_COLOR_ESCAPE )
+			{
+				txt++;
+			}
+			else if( ( txt[1] >= '0' ) && ( txt[1] < ( '0' + MAX_S_COLORS ) ) )
+			{
+				con.linecolor = colorchar[1] = txt[1];
+				addcharstostr( &con.text[0], colorchar, 2 );
+				txt += 2;
+				continue;
+			}
+		}
+
 		// count word length
-		for( l = 0; l < con.linewidth; l++ )
-			if( (unsigned char)txt[l] <= ' ' )
+		for( l = 0; l < con.linewidth; )
+		{
+			if( ptxt[0] == Q_COLOR_ESCAPE )
+			{
+				if( ptxt[1] == Q_COLOR_ESCAPE )
+				{
+					l++;
+					ptxt += 2;
+					continue;
+				}
+				if( ( txt[1] >= '0' ) && ( txt[1] < ( '0' + MAX_S_COLORS ) ) )
+				{
+					ptxt += 2;
+					continue;
+				}
+			}
+			else if( ( ( unsigned char )( ptxt[0] ) <= ' ' ) || Q_IsBreakingSpace( ptxt ) )
+			{
 				break;
+			}
+			l++;
+			ptxt += Q_Utf8SyncPos( ptxt, 1, UTF8SYNC_RIGHT );
+		}
 
 		// word wrap
 		if( l != con.linewidth && ( con.x + l > con.linewidth ) )
@@ -481,24 +591,19 @@ static void Con_Print2( const char *txt, qboolean notify )
 
 		if( !con.x )
 		{
-			Con_Linefeed();
-			// mark time for transparent overlay
-			con.times[0] = cls.realtime;
-			if( !notify )
-				con.times[0] -= con_notifytime->value*1000 + 1;
+			Con_Linefeed( notify );
 
-			if( color != ColorIndex( COLOR_WHITE ) )
+			if( con.linecolor != COLOR_WHITE )
 			{
-				addchartostr( &con.text[0], Q_COLOR_ESCAPE );
-				addchartostr( &con.text[0], '0' + color );
-				con.x += 2;
+				colorchar[1] = con.linecolor;
+				addcharstostr( &con.text[0], colorchar, 2 );
 			}
 		}
 
-		switch( c )
+		switch( txt[0] )
 		{
 		case '\n':
-			color = ColorIndex( COLOR_WHITE );
+			con.linecolor = COLOR_WHITE;
 			con.x = 0;
 			break;
 
@@ -506,38 +611,29 @@ static void Con_Print2( const char *txt, qboolean notify )
 			break;
 
 		default: // display character and advance
-			addchartostr( &con.text[0], c );
+			if( txt[0] == Q_COLOR_ESCAPE )
+				addcharstostr( &con.text[0], txt, 1 );
+			addcharstostr( &con.text[0], txt, 1 );
 			con.x++;
 			if( con.x >= con.linewidth )	// haha welcome to 1995 lol
 				con.x = 0;
-
-			if( colorflag )
-			{
-				if( *txt != Q_COLOR_ESCAPE )
-					color = ColorIndex( *txt );
-				colorflag = qfalse;
-			}
-			else if( *txt == Q_COLOR_ESCAPE )
-				colorflag = qtrue;
-
-			//			if( Q_IsColorString( txt ) ) {
-			//				color = ColorIndex( *(txt+1) );
-			//			}
 			break;
 		}
 
-		txt++;
+		txt += Q_Utf8SyncPos( txt, 1, UTF8SYNC_RIGHT );
 	}
+
+	QMutex_Unlock( con.mutex );
 }
 
 void Con_Print( const char *txt )
 {
-	Con_Print2( txt, qtrue );
+	Con_Print2( txt, true );
 }
 
 void Con_PrintSilent( const char *txt )
 {
-	Con_Print2( txt, qfalse );
+	Con_Print2( txt, false );
 }
 
 /*
@@ -548,6 +644,9 @@ DRAWING
 ==============================================================================
 */
 
+/*
+* Q_ColorCharCount
+*/
 int Q_ColorCharCount( const char *s, int byteofs )
 {
 	char c;
@@ -570,6 +669,9 @@ int Q_ColorCharCount( const char *s, int byteofs )
 	return charcount;
 }
 
+/*
+* Q_ColorCharOffset
+*/
 int Q_ColorCharOffset( const char *s, int charcount )
 {
 	const char *start = s;
@@ -591,30 +693,6 @@ int Q_ColorCharOffset( const char *s, int charcount )
 	return s - start;
 }
 
-#if 0
-static int Q_ColorStrLastColor( const char *s, int byteofs )
-{
-	char c;
-	const char *end = s + byteofs;
-	int lastcolor = ColorIndex(COLOR_WHITE), colorindex;
-
-	while( s < end )
-	{
-		int gc = Q_GrabCharFromColorString( &s, &c, &colorindex );
-		if( gc == GRABCHAR_CHAR )
-			;
-		else if( gc == GRABCHAR_COLOR )
-			lastcolor = colorindex;
-		else if( gc == GRABCHAR_END )
-			break;
-		else
-			assert( 0 );
-	}
-
-	return lastcolor;
-}
-#endif
-
 /*
 * Con_DrawInput
 * 
@@ -624,12 +702,14 @@ static void Con_DrawInput( int vislines )
 {
 	char draw_search_text[MAXCMDLINE*2+4];
 	const char *text = key_lines[edit_line];
-	int smallCharHeight = SCR_strHeight( cls.fontSystemSmall );
-	int text_y = vislines - 14 - smallCharHeight;
-	const int left_margin = 8, right_margin = 8;
-	int promptwidth = SCR_strWidth( "]", cls.fontSystemSmall, 1 );
-	int cursorwidth = SCR_strWidth( "_", cls.fontSystemSmall, 1 );
-	int input_width = viddef.width - left_margin - right_margin;
+	float pixelRatio = Con_GetPixelRatio();
+	int smallCharHeight = SCR_FontHeight( cls.consoleFont );
+	int margin = 8 * pixelRatio;
+	int promptwidth = SCR_strWidth( "]", cls.consoleFont, 1, 0 );
+	int input_width = viddef.width - margin * 2 - promptwidth - SCR_strWidth( "_", cls.consoleFont, 1, 0 );
+	int text_x = margin + promptwidth;
+	int text_y = vislines - (int)( 14 * pixelRatio ) - smallCharHeight;
+	int textwidth;
 	int prewidth;	// width of input line before cursor
 
 	if( cls.key_dest != key_console )
@@ -640,20 +720,60 @@ static void Con_DrawInput( int vislines )
 		Q_snprintfz( draw_search_text, sizeof( draw_search_text ), "%s : %s", key_lines[edit_line], search_text );
 	}
 
-	prewidth = SCR_strWidth( text, cls.fontSystemSmall, key_linepos );
+	text++;
 
-	// don't let the cursor go beyond the left screen edge
-	clamp_high( input_prestep, prewidth - promptwidth);
-	// don't let it go beyond the right screen edge
-	clamp_low( input_prestep, prewidth - ( input_width - cursorwidth ) );
+	textwidth = SCR_strWidth( text, cls.consoleFont, 0, 0 );
+	prewidth = ( ( key_linepos > 1 ) ? SCR_strWidth( text, cls.consoleFont, key_linepos - 1, 0 ) : 0 );
 
-	SCR_DrawClampString( left_margin - input_prestep,
-		text_y, text, left_margin, text_y,
-		viddef.width - right_margin, viddef.height, cls.fontSystemSmall, colorWhite );
+	if( textwidth > input_width )
+	{
+		// don't let the cursor go beyond the left screen edge
+		clamp_high( input_prestep, prewidth );
+		// don't let it go beyond the right screen edge
+		clamp_low( input_prestep, prewidth - input_width );
+		// don't leave an empty space after the string when deleting a character
+		if( ( textwidth - input_prestep ) < input_width ) {
+			input_prestep = textwidth - input_width;
+		}
+	}
+	else
+	{
+		input_prestep = 0;
+	}
+
+	SCR_DrawRawChar( text_x - promptwidth, text_y, ']', cls.consoleFont, colorWhite );
+
+	SCR_DrawClampString( text_x - input_prestep, text_y, text, text_x, text_y,
+		text_x + input_width, viddef.height, cls.consoleFont, colorWhite, 0 );
 
 	if( (int)( cls.realtime>>8 )&1 )
-		SCR_DrawRawChar( left_margin + prewidth - input_prestep, text_y, '_',
-		cls.fontSystemSmall, colorWhite );
+	{
+		SCR_DrawRawChar( text_x + prewidth - input_prestep, text_y, '_',
+			cls.consoleFont, colorWhite );
+	}
+}
+
+/*
+* Con_ChatPrompt
+*
+* Returns the prompt for the chat input
+*/
+static const char *Con_ChatPrompt( void )
+{
+	const char *text, *translated;
+
+	if( chat_team )
+		text = "say (to team):";
+	else if( IN_SupportedDevices() & IN_DEVICE_TOUCHSCREEN )
+		text = "say (to all):";
+	else
+		text = "say:";
+
+	translated = L10n_TranslateString( "common", text );
+	if( !translated )
+		return text;
+
+	return translated;
 }
 
 /*
@@ -666,14 +786,18 @@ void Con_DrawNotify( void )
 	int v;
 	char *text;
 	const char *say;
-	const char *translated;
 	int i;
 	int time;
 	char *s;
+	float pixelRatio = Con_GetPixelRatio();
+
+	QMutex_Lock( con.mutex );
 
 	v = 0;
-	if( con_drawNotify->integer )
+	if( con_drawNotify->integer || developer->integer )
 	{
+		int x = 8 * pixelRatio;
+
 		for( i = min( NUM_CON_TIMES, con.numlines ) - 1; i >= 0; i-- )
 		{
 			time = con.times[i];
@@ -684,18 +808,29 @@ void Con_DrawNotify( void )
 				continue;
 			text = con.text[i] ? con.text[i] : "";
 
-			SCR_DrawString( 8, v, ALIGN_LEFT_TOP, text, cls.fontSystemSmall, colorWhite );
+			SCR_DrawString( x, v, ALIGN_LEFT_TOP, text, cls.consoleFont, colorWhite, 0 );
 
-			v += SCR_strHeight( cls.fontSystemSmall );
+			v += SCR_FontHeight( cls.consoleFont );
 		}
 	}
 
 	if( cls.key_dest == key_message )
 	{
-		int x, y;
-		int width, prewidth;
-		int promptwidth, cursorwidth;
+		int x, y, compx = 0;
+		int width, swidth, compwidth = 0, totalwidth, prewidth = 0;
+		int promptwidth, spacewidth;
+		char lang[16], langstr[20];
 		struct qfontface_s *font = NULL;
+		int fontHeight;
+		int underlineThickness, underlinePosition;
+		char comp[MAX_STRING_CHARS];
+		size_t complen, imecursor, convstart, convlen;
+		char oldchar;
+		int precompcolor = ColorIndex( COLOR_WHITE );
+		vec4_t convcolor = { 1.0f, 1.0f, 1.0f, 0.3f };
+		int candwidth, numcands, selectedcand, firstcand, candspercol, candnumwidth;
+		int candx, candy, candsincol = 0, candprewidth;
+		char candbuf[MAX_STRING_CHARS * 10], *cands[10];
 
 		if( con_chatCGame->integer )
 		{
@@ -705,7 +840,7 @@ void Con_DrawNotify( void )
 				font = SCR_RegisterFont( con_chatFontFamily->string, con_chatFontStyle->integer, con_chatFontSize->integer );
 			}
 			if( !font )
-				font = cls.fontSystemSmall;
+				font = cls.consoleFont;
 
 			x = con_chatX->integer;
 			y = con_chatY->integer;
@@ -713,49 +848,230 @@ void Con_DrawNotify( void )
 		else
 		{
 			width = viddef.width;
-			x = 8;
+			x = 8 * pixelRatio;
 			y = v;
-			font = cls.fontSystemSmall;
+			font = cls.consoleFont;
 		}
 
-		// 48 is an arbitrary offset for not overlapping the FPS and clock prints
-		width -= 48;
-		cursorwidth = SCR_strWidth( "_", font, 0 );
+		fontHeight = SCR_FontHeight( font );
 
-		if( chat_team )
+		// 48 is an arbitrary offset for not overlapping the FPS and clock prints
+		width -= 48 * viddef.height / 600;
+
+		say = Con_ChatPrompt();
+		SCR_DrawString( x, y, ALIGN_LEFT_TOP, say, font, colorWhite, 0 );
+		spacewidth = SCR_strWidth( " ", font, 0, 0 );
+		promptwidth = SCR_strWidth( say, font, 0, 0 ) + spacewidth;
+		x += promptwidth;
+		width -= promptwidth;
+		candwidth = width / 3 - spacewidth;
+
+		IN_GetInputLanguage( lang, sizeof( lang ) );
+		if( lang[0] && strcmp( lang, "EN" ) )
 		{
-			say = "say_team:";
+			Q_snprintfz( langstr, sizeof( langstr ), " (%s)", lang );
+			width -= SCR_strWidth( langstr, font, 0, 0 );
+			SCR_DrawString( x + width, y, ALIGN_LEFT_TOP, langstr, font, colorWhite, 0 );
+		}
+
+		underlinePosition = SCR_FontUnderline( font, &underlineThickness );
+		width -= underlineThickness;
+
+
+		s = chat_buffer;
+		swidth = SCR_strWidth( s, font, 0, 0 );
+
+		complen = IN_IME_GetComposition( comp, sizeof( comp ), &imecursor, &convstart, &convlen );		
+
+		if( complen )
+		{
+			compx = ( chat_linepos ? SCR_strWidth( s, font, chat_linepos, 0 ) : 0 );
+			compwidth = SCR_strWidth( comp, font, 0, TEXTDRAWFLAG_NO_COLORS );
+			totalwidth = compx + compwidth + SCR_strWidth( s + chat_linepos, font, 0, 0 );
 		}
 		else
 		{
-			say = "say:";
+			totalwidth = swidth;
 		}
 
-		translated = L10n_TranslateString( "common", say );
-		if( !translated ) {
-			translated = say;
+
+		if( chat_linepos )
+		{
+			if( chat_linepos == chat_bufferlen )
+				prewidth += swidth;
+			else
+				prewidth += SCR_strWidth( s, font, chat_linepos, 0 );
 		}
-		SCR_DrawString( x, y, ALIGN_LEFT_TOP, translated, font, colorWhite );
-		promptwidth = SCR_strWidth( translated, font, 0 ) + SCR_strWidth( " ", font, 0 );
+		if( imecursor )
+		{
+			if( imecursor == complen )
+				prewidth += compwidth;
+			else
+				prewidth += SCR_strWidth( comp, font, imecursor, TEXTDRAWFLAG_NO_COLORS );
+		}
 
-		s = chat_buffer;
-		prewidth = chat_linepos ? SCR_strWidth( s, font, chat_linepos ) : 0;
+		if( totalwidth > width )
+		{
+			// don't let the cursor go beyond the left screen edge
+			clamp_high( chat_prestep, prewidth );
 
-		// don't let the cursor go beyond the left screen edge
-		clamp_high( chat_prestep, prewidth );
+			// don't let it go beyond the right screen edge
+			clamp_low( chat_prestep, prewidth - width );
 
-		// don't let it go beyond the right screen edge
-		clamp_low( chat_prestep, prewidth - ( width - promptwidth - cursorwidth ) );
+			// don't leave an empty space after the string when deleting a character
+			if( ( totalwidth - chat_prestep ) < width ) {
+				chat_prestep = totalwidth - width;
+			}
+		}
+		else
+		{
+			chat_prestep = 0;
+		}
 
-		// FIXME: we double the font height to compensate for alignment issues
-		SCR_DrawClampString( x + promptwidth - chat_prestep,
-			y, s, x + promptwidth, y,
-			x + width, y + SCR_strHeight( font ) * 2, font, colorWhite );
+		if( complen && ( chat_linepos < chat_bufferlen ) )
+		{
+			oldchar = s[chat_linepos];
+			s[chat_linepos] = '\0';
+			SCR_DrawClampString( x - chat_prestep, y, s, x, y,
+				x + width, y + fontHeight, font, colorWhite, 0 );
+			precompcolor = Q_ColorStrLastColor( ColorIndex( COLOR_WHITE ), s, -1 );
+			s[chat_linepos] = oldchar;
+			SCR_DrawClampString( x - chat_prestep + compx + compwidth, y, s + chat_linepos, x, y,
+				x + width, y + fontHeight, font, color_table[precompcolor], 0 );
+		}
+		else
+		{
+			SCR_DrawClampString( x - chat_prestep, y, s, x, y,
+				x + width, y + fontHeight, font, colorWhite, 0 );
+			if( complen )
+				precompcolor = Q_ColorStrLastColor( ColorIndex( COLOR_WHITE ), s, -1 );
+		}
+
+		if( complen )
+		{
+			if( convlen )
+			{
+				SCR_DrawClampFillRect(
+					x - chat_prestep + compx + ( convstart ? SCR_strWidth( comp, font, convstart, TEXTDRAWFLAG_NO_COLORS ) : 0 ), y,
+					SCR_strWidth( comp + convstart, font, convlen, TEXTDRAWFLAG_NO_COLORS ), fontHeight,
+					x, y, x + width, y + fontHeight, convcolor );
+			}
+
+			SCR_DrawClampString( x - chat_prestep + compx, y, comp, x, y,
+				x + width, y + fontHeight, font, color_table[precompcolor], TEXTDRAWFLAG_NO_COLORS );
+
+			SCR_DrawClampFillRect(
+				x - chat_prestep + compx, y + underlinePosition,
+				compwidth, underlineThickness,
+				x, y + underlinePosition, x + width, y + underlinePosition + underlineThickness, colorWhite );
+		}
 
 		if( (int)( cls.realtime>>8 )&1 )
-			SCR_DrawRawChar( x + promptwidth + prewidth - chat_prestep, y, '_',
-			font, colorWhite );
+			SCR_DrawFillRect( x + prewidth - chat_prestep, y, underlineThickness, fontHeight, colorWhite );
+
+
+		// draw IME candidates
+		for( i = 0; i < 10; i++ )
+			cands[i] = candbuf + i * MAX_STRING_CHARS;
+		numcands = IN_IME_GetCandidates( cands, MAX_STRING_CHARS, 10, &selectedcand, &firstcand );
+		if( numcands )
+		{
+			candspercol = ( firstcand ? 3 : 5 ); // 2-column if starts from 0 (5|5), 3-column if starts from 1 (3|3|3)
+			candnumwidth = SCR_strWidth( "0 ", font, 0, 0 );
+			if( selectedcand >= 0 )
+			{
+				candx = x + ( candwidth + spacewidth ) * ( selectedcand / candspercol );
+				candy = y + fontHeight * ( selectedcand % candspercol + 1 );
+				SCR_DrawClampFillRect( candx, candy,
+					candnumwidth + SCR_strWidth( cands[selectedcand], font, 0, TEXTDRAWFLAG_NO_COLORS ), fontHeight,
+					candx, candy, candx + candwidth, candy + fontHeight, convcolor );
+			}
+
+			candx = x;
+			candy = y;
+			for( i = 0; i < numcands; i++ )
+			{
+				candy += fontHeight;
+
+				SCR_DrawRawChar( candx, candy, '0' + firstcand + i, font, colorWhite );
+				candprewidth = SCR_strWidth( cands[i], font, 0, TEXTDRAWFLAG_NO_COLORS ) - ( candwidth - candnumwidth );
+				clamp_low( candprewidth, 0 );
+				SCR_DrawClampString( candnumwidth + candx - candprewidth, candy, cands[i],
+					candx + candnumwidth, candy, candx + candwidth, candy + fontHeight,
+					font, colorWhite, TEXTDRAWFLAG_NO_COLORS );
+
+				candsincol++;
+				if( candsincol >= candspercol )
+				{
+					candx += candwidth + spacewidth;
+					candy = y;
+					candsincol = 0;
+				}
+			}
+		}
 	}
+
+	QMutex_Unlock( con.mutex );
+}
+
+/*
+* Con_GetMessageArea
+*/
+static void Con_GetMessageArea( int *x1, int *y1, int *x2, int *y2, int *promptwidth )
+{
+	int x, y;
+	int width;
+	struct qfontface_s *font = NULL;
+
+	QMutex_Lock( con.mutex );
+
+	if( con_chatCGame->integer )
+	{
+		width = con_chatWidth->integer;
+
+		if( *con_chatFontFamily->string && con_chatFontSize->integer ) {
+			font = SCR_RegisterFont( con_chatFontFamily->string, con_chatFontStyle->integer, con_chatFontSize->integer );
+		}
+		if( !font )
+			font = cls.consoleFont;
+
+		x = con_chatX->integer;
+		y = con_chatY->integer;
+	}
+	else
+	{
+		int i;
+		int time;
+
+		width = viddef.width;
+		x = 8 * Con_GetPixelRatio();
+		y = 0;
+		font = cls.consoleFont;
+
+		for( i = min( NUM_CON_TIMES, con.numlines ) - 1; i >= 0; i-- )
+		{
+			time = con.times[i];
+			if( time == 0 )
+				continue;
+			time = cls.realtime - time;
+			if( time > con_notifytime->value*1000 )
+				continue;
+
+			y += SCR_FontHeight( cls.consoleFont );
+		}
+	}
+
+	// 48 is an arbitrary offset for not overlapping the FPS and clock prints
+	width -= 48 * viddef.height / 600;
+
+	*x1 = x;
+	*y1 = y;
+	*x2 = x + width;
+	*y2 = y + SCR_FontHeight( font );
+	if( promptwidth )
+		*promptwidth = SCR_strWidth( Con_ChatPrompt(), font, 0, 0 );
+
+	QMutex_Unlock( con.mutex );
 }
 
 /*
@@ -763,7 +1079,7 @@ void Con_DrawNotify( void )
 * 
 * Draws the console with the solid background
 */
-void Con_DrawConsole( float frac )
+void Con_DrawConsole( void )
 {
 	int i, x, y;
 	int rows;
@@ -773,20 +1089,25 @@ void Con_DrawConsole( float frac )
 	char version[256];
 	time_t long_time;
 	struct tm *newtime;
-	int smallCharHeight = SCR_strHeight( cls.fontSystemSmall );
+	int smallCharHeight = SCR_FontHeight( cls.consoleFont );
+	float pixelRatio = Con_GetPixelRatio();
+	int scaled;
 
-	lines = viddef.height * frac;
+	lines = viddef.height * scr_con_current;
 	if( lines <= 0 )
 		return;
 	if( !smallCharHeight )
 		return;
+
+	QMutex_Lock( con.mutex );
 
 	if( lines > viddef.height )
 		lines = viddef.height;
 
 	// draw the background
 	re.DrawStretchPic( 0, 0, viddef.width, lines, 0, 0, 1, 1, colorWhite, cls.consoleShader );
-	SCR_DrawFillRect( 0, lines - 2, viddef.width, 2, colorRed );
+	scaled = 2 * pixelRatio;
+	SCR_DrawFillRect( 0, lines - scaled, viddef.width, scaled, colorRed );
 
 	// get date from system
 	time( &long_time );
@@ -800,22 +1121,24 @@ void Con_DrawConsole( float frac )
 		APPLICATION, APP_VERSION, revisioncvar->string );
 #endif
 
-	SCR_DrawString( viddef.width-SCR_strWidth( version, 
-		cls.fontSystemSmall, 0 )-4, lines-SCR_strHeight( cls.fontSystemSmall ) - 4, 
-		ALIGN_LEFT_TOP, version, cls.fontSystemSmall, colorRed );
+	scaled = 4 * pixelRatio;
+	SCR_DrawString( viddef.width-SCR_strWidth( version, cls.consoleFont, 0, 0 ) - scaled,
+		lines - SCR_FontHeight( cls.consoleFont ) - scaled, 
+		ALIGN_LEFT_TOP, version, cls.consoleFont, colorRed, 0 );
 
 	// prepare to draw the text
-	rows = ( lines-smallCharHeight-14 ) / smallCharHeight;  // rows of text to draw
-	y = lines - smallCharHeight-14-smallCharHeight;
+	scaled = 14 * pixelRatio;
+	rows = ( lines - smallCharHeight - scaled ) / smallCharHeight;  // rows of text to draw
+	y = lines - smallCharHeight - scaled - smallCharHeight;
 
 	row = con.display;	// first line to be drawn
 	if( con.display )
 	{
-		int width = SCR_strWidth( "^", cls.fontSystemSmall, 0 );
+		int width = SCR_strWidth( "^", cls.consoleFont, 0, 0 );
 
 		// draw arrows to show the buffer is backscrolled
 		for( x = 0; x < con.linewidth; x += 4 )
-			SCR_DrawRawChar( ( x+1 )*width, y, '^', cls.fontSystemSmall, colorRed );
+			SCR_DrawRawChar( ( x+1 )*width, y, '^', cls.consoleFont, colorRed );
 
 		// the arrows obscure one line of scrollback
 		y -= smallCharHeight;
@@ -831,11 +1154,13 @@ void Con_DrawConsole( float frac )
 
 		text = con.text[row] ? con.text[row] : "";
 
-		SCR_DrawString( 8, y, ALIGN_LEFT_TOP, text, cls.fontSystemSmall, colorWhite );
+		SCR_DrawString( 8 * pixelRatio, y, ALIGN_LEFT_TOP, text, cls.consoleFont, colorWhite, 0 );
 	}
 
 	// draw the input prompt, user text, and cursor if desired
 	Con_DrawInput( lines );
+
+	QMutex_Unlock( con.mutex );
 }
 
 
@@ -1097,10 +1422,14 @@ static void Con_Key_Copy( void )
 		return;
 	}
 
+	QMutex_Lock( con.mutex );
+
 	buffer_size = Con_BufferText( NULL, newline ) + 1;
 	buffer = Mem_TempMalloc( buffer_size );
 
 	Con_BufferText( buffer, newline );
+
+	QMutex_Unlock( con.mutex );
 
 	CL_SetClipboardData( buffer );
 
@@ -1113,27 +1442,33 @@ static void Con_Key_Copy( void )
 * Inserts stuff from clipboard to console
 * Should be Con_Paste prolly
 */
-static void Con_Key_Paste( qboolean primary )
+static void Con_Key_Paste( bool primary )
 {
 	char *cbd;
 	char *tok;
+	size_t linelen, i, next;
 
 	cbd = CL_GetClipboardData( primary );
 	if( cbd )
 	{
-		int i;
-
 		tok = strtok( cbd, "\n\r\b" );
 
 		while( tok != NULL )
 		{
-			i = (int)strlen( tok );
-			if( i + key_linepos >= MAXCMDLINE )
-				i = MAXCMDLINE - key_linepos;
-
-			if( i > 0 )
+			linelen = strlen( key_lines[edit_line] );
+			i = 0;
+			while( tok[i] )
 			{
-				Q_strncatz( key_lines[edit_line], tok, sizeof( key_lines[edit_line] ) );
+				next = Q_Utf8SyncPos( tok, i + 1, UTF8SYNC_RIGHT );
+				if( next + linelen >= MAXCMDLINE )
+					break;
+				i = next;
+			}
+
+			if( i )
+			{
+				memmove( key_lines[edit_line] + key_linepos + i, key_lines[edit_line] + key_linepos, linelen - key_linepos + 1 );
+				memcpy( key_lines[edit_line] + key_linepos, tok, i );
 				key_linepos += i;
 			}
 
@@ -1169,7 +1504,7 @@ static void Con_Key_Paste( qboolean primary )
 * 
 * Interactive line editing and console scrollback only for (Unicode) chars
 */
-void Con_CharEvent( qwchar key )
+void Con_CharEvent( wchar_t key )
 {
 	if( !con_initialized )
 		return;
@@ -1182,7 +1517,7 @@ void Con_CharEvent( qwchar key )
 	switch( key )
 	{
 	case 22: // CTRL - V : paste
-		Con_Key_Paste( qfalse );
+		Con_Key_Paste( false );
 		return;
 
 	case 12: // CTRL - L : clear
@@ -1269,12 +1604,12 @@ void Con_CharEvent( qwchar key )
 		break;
 	}
 
-	if( key < 32 || key > 0x1FFFFF )
+	if( key < 32 || key > 0xFFFF )
 		return; // non-printable
 
 	if( key_linepos < MAXCMDLINE-1 )
 	{
-		char *utf = Q_WCharToUtf8( key );
+		char *utf = Q_WCharToUtf8Char( key );
 		int utflen = strlen( utf );
 
 		if( strlen( key_lines[edit_line] ) + utflen >= MAXCMDLINE )
@@ -1291,10 +1626,13 @@ void Con_CharEvent( qwchar key )
 	}
 }
 
-static void Con_SendChatMessage( const char *text, qboolean team )
+/*
+* Con_SendChatMessage
+*/
+static void Con_SendChatMessage( const char *text, bool team )
 {
 	char *cmd;
-	char buf[MAXCMDLINE], *p;
+	char buf[MAX_CHAT_BYTES], *p;
 
 	// convert double quotes to single quotes
 	Q_strncpyz( buf, text, sizeof(buf) );
@@ -1312,9 +1650,13 @@ static void Con_SendChatMessage( const char *text, qboolean team )
 	Cbuf_AddText( va("%s \"%s\"\n", cmd, buf) );
 }
 
-// handle K_ENTER keypress in console
-// set "ignore_ctrldown" to prevent Ctrl-M/J from sending the message to chat
-static void Con_Key_Enter( qboolean ignore_ctrl )
+/*
+* Con_Key_Enter
+*
+* Handle K_ENTER keypress in console
+* Set "ignore_ctrldown" to prevent Ctrl-M/J from sending the message to chat
+*/
+static void Con_Key_Enter( bool ignore_ctrl )
 {
 	enum {COMMAND, CHAT, TEAMCHAT} type;
 	char *p;
@@ -1383,13 +1725,58 @@ static void Con_Key_Enter( qboolean ignore_ctrl )
 }
 
 /*
+* Con_HistoryUp
+*/
+static void Con_HistoryUp( void )
+{
+	do
+	{
+		history_line = ( history_line - 1 ) & 31;
+	} while( history_line != edit_line && !key_lines[history_line][1] );
+
+	if( history_line == edit_line )
+		history_line = ( edit_line+1 )&31;
+
+	Q_strncpyz( key_lines[edit_line], key_lines[history_line], sizeof( key_lines[edit_line] ) );
+	key_linepos = (unsigned int)strlen( key_lines[edit_line] );
+	input_prestep = 0;
+}
+
+/*
+* Con_HistoryDown
+*/
+static void Con_HistoryDown( void )
+{
+	if( history_line == edit_line )
+		return;
+
+	do
+	{
+		history_line = ( history_line + 1 ) & 31;
+	} while( history_line != edit_line && !key_lines[history_line][1] );
+
+	if( history_line == edit_line )
+	{
+		key_lines[edit_line][0] = ']';
+		key_lines[edit_line][1] = 0;
+		key_linepos = 1;
+	}
+	else
+	{
+		Q_strncpyz( key_lines[edit_line], key_lines[history_line], sizeof( key_lines[edit_line] ) );
+		key_linepos = (unsigned int)strlen( key_lines[edit_line] );
+		input_prestep = 0;
+	}
+}
+
+/*
 * Con_KeyDown
 * 
 * Interactive line editing and console scrollback except for ascii char
 */
 void Con_KeyDown( int key )
 {
-	qboolean ctrl_is_down = Key_IsDown( K_LCTRL ) || Key_IsDown( K_RCTRL );
+	bool ctrl_is_down = Key_IsDown( K_LCTRL ) || Key_IsDown( K_RCTRL );
 
 	if( !con_initialized )
 		return;
@@ -1401,13 +1788,13 @@ void Con_KeyDown( int key )
 
 	if( ( ( key == K_INS ) || ( key == KP_INS ) ) && ( Key_IsDown(K_LSHIFT) || Key_IsDown(K_RSHIFT)) )
 	{
-		Con_Key_Paste( qtrue );
+		Con_Key_Paste( true );
 		return;
 	}
 
-	if( key == K_ENTER || key == KP_ENTER )
+	if( ( key == K_ENTER ) || ( key == KP_ENTER ) || ( key == K_RSHOULDER ) || ( key == K_RTRIGGER ) )
 	{
-		Con_Key_Enter( qfalse );
+		Con_Key_Enter( false );
 		return;
 	}
 
@@ -1436,9 +1823,6 @@ void Con_KeyDown( int key )
 	{
 		if( key_linepos > 1 )
 		{
-			int oldwidth = SCR_strWidth( key_lines[edit_line], cls.fontSystemSmall, key_linepos );
-			int newwidth;
-
 			// skip to the end of color sequence
 			while( 1 )
 			{
@@ -1457,11 +1841,6 @@ void Con_KeyDown( int key )
 				strcpy( key_lines[edit_line] + key_linepos,
 					key_lines[edit_line] + oldpos );	// safe!
 			}
-
-			// keep the cursor in the same on-screen position if possible
-			newwidth = SCR_strWidth( key_lines[edit_line], cls.fontSystemSmall, key_linepos );
-			input_prestep += ( newwidth - oldwidth );
-			clamp_low( input_prestep, 0 );
 		}
 
 		return;
@@ -1501,62 +1880,36 @@ void Con_KeyDown( int key )
 
 	if( ( key == K_UPARROW ) || ( key == KP_UPARROW ) )
 	{
-		do
-		{
-			history_line = ( history_line - 1 ) & 31;
-		} while( history_line != edit_line && !key_lines[history_line][1] );
-
-		if( history_line == edit_line )
-			history_line = ( edit_line+1 )&31;
-
-		Q_strncpyz( key_lines[edit_line], key_lines[history_line], sizeof( key_lines[edit_line] ) );
-		key_linepos = (unsigned int)strlen( key_lines[edit_line] );
-		input_prestep = 0;
+		Con_HistoryUp();
 		return;
 	}
 
 	if( ( key == K_DOWNARROW ) || ( key == KP_DOWNARROW ) )
 	{
-		if( history_line == edit_line )
-			return;
-
-		do
-		{
-			history_line = ( history_line + 1 ) & 31;
-		} while( history_line != edit_line && !key_lines[history_line][1] );
-
-		if( history_line == edit_line )
-		{
-			key_lines[edit_line][0] = ']';
-			key_linepos = 1;
-		}
-		else
-		{
-			Q_strncpyz( key_lines[edit_line], key_lines[history_line], sizeof( key_lines[edit_line] ) );
-			key_linepos = (unsigned int)strlen( key_lines[edit_line] );
-			input_prestep = 0;
-		}
+		Con_HistoryDown();
 		return;
 	}
 	
-	if( key == K_MWHEELUP || key == K_MWHEELDOWN )
+	if( ( key == K_PGUP ) || ( key == KP_PGUP ) || ( key == K_MWHEELUP ) || ( key == K_DPAD_UP ) ) // wsw : pb : support mwheel in console
 	{
-		if( ctrl_is_down ) {
-			Con_ChangeFontSize( key == K_MWHEELUP ? 1 : -1 );
+		if( ( key == K_MWHEELUP ) && ctrl_is_down )
+		{
+			Con_ChangeFontSize( 1 );
 			return;
 		}
-	}
-
-	if( key == K_PGUP || key == KP_PGUP || key == K_MWHEELUP ) // wsw : pb : support mwheel in console
-	{
 		con.display += 2;
 		clamp_high( con.display, con.numlines - 1 );
 		clamp_low( con.display, 0 );	// in case con.numlines is 0
 		return;
 	}
 
-	if( key == K_PGDN || key == KP_PGDN || key == K_MWHEELDOWN ) // wsw : pb : support mwheel in console
+	if( ( key == K_PGDN ) || ( key == KP_PGDN ) || ( key == K_MWHEELDOWN ) || ( key == K_DPAD_DOWN ) ) // wsw : pb : support mwheel in console
 	{
+		if( ( key == K_MWHEELDOWN ) && ctrl_is_down )
+		{
+			Con_ChangeFontSize( -1 );
+			return;
+		}
 		con.display -= 2;
 		clamp_low( con.display, 0 );
 		return;
@@ -1566,9 +1919,9 @@ void Con_KeyDown( int key )
 	{
 		if( ctrl_is_down )
 		{
-			int smallCharHeight = SCR_strHeight( cls.fontSystemSmall );
+			int smallCharHeight = SCR_FontHeight( cls.consoleFont );
 			int vislines = (int)( viddef.height * bound( 0.0, scr_con_current, 1.0 ) );
-			int rows = ( vislines-smallCharHeight-14 ) / smallCharHeight;  // rows of text to draw
+			int rows = ( vislines - smallCharHeight - (int)( 14 * Con_GetPixelRatio() ) ) / smallCharHeight;  // rows of text to draw
 			con.display = con.numlines - rows + 1;
 			clamp_low( con.display, 0 );
 		}
@@ -1586,33 +1939,62 @@ void Con_KeyDown( int key )
 		return;
 	}
 
+	if( key == K_A_BUTTON )
+	{
+		IN_ShowSoftKeyboard( true );
+		return;
+	}
+
+	if( key == '0' )
+	{
+		if( ctrl_is_down )
+		{
+			Con_ResetFontSize();
+			return;
+		}
+	}
+
+	if( key == K_B_BUTTON )
+	{
+		Con_ToggleConsole_f();
+		return;
+	}
+
 	// key is a normal printable key normal which wil be HANDLE later in response to WM_CHAR event
 }
 
 //============================================================================
 
-static void Con_MessageKeyPaste( qboolean primary )
+/*
+* Con_MessageKeyPaste
+*/
+static void Con_MessageKeyPaste( bool primary )
 {
 	char *cbd;
 	char *tok;
+	size_t i, next;
 
 	cbd = CL_GetClipboardData( primary );
 	if( cbd )
 	{
-		int i;
-
 		tok = strtok( cbd, "\n\r\b" );
 
 		// only allow pasting of one line for malicious reasons
 		if( tok != NULL )
 		{
-			i = (int)strlen( tok );
-			if( i + chat_linepos >= MAXCMDLINE )
-				i = MAXCMDLINE - chat_linepos;
-
-			if( i > 0 )
+			i = 0;
+			while( tok[i] )
 			{
-				Q_strncatz( chat_buffer, tok, sizeof( chat_buffer ) );
+				next = Q_Utf8SyncPos( tok, i + 1, UTF8SYNC_RIGHT );
+				if( next + chat_bufferlen >= MAX_CHAT_BYTES )
+					break;
+				i = next;
+			}
+
+			if( i )
+			{
+				memmove( chat_buffer + chat_linepos + i, chat_buffer + chat_linepos, chat_bufferlen - chat_linepos + 1 );
+				memcpy( chat_buffer + chat_linepos, tok, i );
 				chat_linepos += i;
 				chat_bufferlen += i;
 			}
@@ -1633,7 +2015,10 @@ static void Con_MessageKeyPaste( qboolean primary )
 	}
 }
 
-void Con_MessageCharEvent( qwchar key )
+/*
+* Con_MessageCharEvent
+*/
+void Con_MessageCharEvent( wchar_t key )
 {
 	if( !con_initialized )
 		return;
@@ -1646,7 +2031,7 @@ void Con_MessageCharEvent( qwchar key )
 		// CTRL - L : clear
 		chat_bufferlen = 0;
 		chat_linepos = 0;
-		memset( chat_buffer, 0, MAXCMDLINE );
+		chat_buffer[0] = '\0';
 		return;
 	case 1: // CTRL+A: jump to beginning of line (same as HOME)
 		chat_linepos = 0;
@@ -1655,19 +2040,19 @@ void Con_MessageCharEvent( qwchar key )
 		chat_linepos = chat_bufferlen;
 		return;
 	case 22: // CTRL - V : paste
-		Con_MessageKeyPaste( qfalse );
+		Con_MessageKeyPaste( false );
 		return;
 	}
 
-	if( key < 32 || key > 0x1FFFFF )
+	if( key < 32 || key > 0xFFFF )
 		return; // non-printable
 
-	if( chat_linepos < MAXCMDLINE-1 )
+	if( chat_linepos < MAX_CHAT_BYTES-1 )
 	{
-		const char *utf = Q_WCharToUtf8( key );
+		const char *utf = Q_WCharToUtf8Char( key );
 		size_t utflen = strlen( utf );
 
-		if( chat_bufferlen + utflen >= MAXCMDLINE )
+		if( chat_bufferlen + utflen >= MAX_CHAT_BYTES )
 			return;		// won't fit
 
 		// move remainder to the right
@@ -1685,7 +2070,7 @@ void Con_MessageCharEvent( qwchar key )
 /*
 * Con_MessageCompletion
 */
-static void Con_MessageCompletion( const char *partial, qboolean teamonly )
+static void Con_MessageCompletion( const char *partial, bool teamonly )
 {
 	char comp[256];
 	size_t comp_len;
@@ -1743,12 +2128,12 @@ static void Con_MessageCompletion( const char *partial, qboolean teamonly )
 	comp_len = strlen( comp );
 
 	// add ': ' to string if completing at the beginning of the string
-	if( comp[0] && ( chat_linepos == partial_len ) && ( chat_bufferlen + comp_len + 2 < MAXCMDLINE ) ) {
+	if( comp[0] && ( chat_linepos == partial_len ) && ( chat_bufferlen + comp_len + 2 < MAX_CHAT_BYTES-1 ) ) {
 		Q_strncatz( comp, ", ", sizeof( comp ) );
 		comp_len += 2;
 	}
 
-	if( chat_bufferlen + comp_len >= MAXCMDLINE )
+	if( chat_bufferlen + comp_len >= MAX_CHAT_BYTES-1 )
 		return;		// won't fit
 
 	chat_linepos -= partial_len;
@@ -1758,16 +2143,19 @@ static void Con_MessageCompletion( const char *partial, qboolean teamonly )
 	chat_linepos += comp_len;
 }
 
+/*
+* Con_MessageKeyDown
+*/
 void Con_MessageKeyDown( int key )
 {
-	qboolean ctrl_is_down = Key_IsDown( K_LCTRL ) || Key_IsDown( K_RCTRL );
+	bool ctrl_is_down = Key_IsDown( K_LCTRL ) || Key_IsDown( K_RCTRL );
 
 	if( !con_initialized )
 		return;
 
 	key = Con_NumPadValue( key );
 
-	if( key == K_ENTER || key == KP_ENTER )
+	if( ( key == K_ENTER ) || ( key == KP_ENTER ) || ( key == K_RSHOULDER ) || ( key == K_RTRIGGER ) )
 	{
 		if( chat_bufferlen > 0 )
 		{
@@ -1797,7 +2185,7 @@ void Con_MessageKeyDown( int key )
 
 	if( ( ( key == K_INS ) || ( key == KP_INS ) ) && ( Key_IsDown(K_LSHIFT) || Key_IsDown(K_RSHIFT) ) )
 	{
-		Con_MessageKeyPaste( qtrue );
+		Con_MessageKeyPaste( true );
 		return;
 	}
 
@@ -1851,8 +2239,6 @@ void Con_MessageKeyDown( int key )
 	{
 		if( chat_linepos )
 		{
-			int oldpos = chat_linepos;
-
 			// skip to the end of color sequence
 			while( 1 )
 			{
@@ -1863,14 +2249,29 @@ void Con_MessageKeyDown( int key )
 					break;
 			}
 
-			chat_linepos = Q_Utf8SyncPos( chat_buffer, chat_linepos - 1, UTF8SYNC_LEFT );
-			strcpy( chat_buffer + chat_linepos, chat_buffer + oldpos );	// safe!
-			chat_bufferlen -= (oldpos - chat_linepos);
+			{
+				int oldpos = chat_linepos;
+				chat_linepos = Q_Utf8SyncPos( chat_buffer, chat_linepos - 1, UTF8SYNC_LEFT );
+				strcpy( chat_buffer + chat_linepos, chat_buffer + oldpos );	// safe!
+				chat_bufferlen -= (oldpos - chat_linepos);
+			}
 		}
 		return;
 	}
 
-	if( key == K_ESCAPE )
+	if( key == K_A_BUTTON )
+	{
+		IN_ShowSoftKeyboard( true );
+		return;
+	}
+
+	if( key == K_Y_BUTTON )
+	{
+		chat_team = !chat_team && Cmd_Exists( "say_team" );
+		return;
+	}
+
+	if( ( key == K_ESCAPE ) || ( key == K_B_BUTTON ) )
 	{
 		CL_SetKeyDest( key_game );
 		chat_bufferlen = 0;
@@ -1878,6 +2279,107 @@ void Con_MessageKeyDown( int key )
 		chat_buffer[0] = 0;
 		return;
 	}
+}
+
+/*
+* Con_TouchDown
+*/
+static void Con_TouchDown( int x, int y )
+{
+	int smallCharHeight = SCR_FontHeight( cls.consoleFont );
+
+	if( cls.key_dest == key_console )
+	{
+		if( touch_x >= 0 )
+			return;
+
+		if( touch_y >= 0 )
+		{
+			int dist = ( y - touch_y ) / smallCharHeight;
+			con.display += dist;
+			clamp_high( con.display, con.numlines - 1 );
+			clamp_low( con.display, 0 );
+			touch_y += dist * smallCharHeight;
+		}
+		else if( scr_con_current )
+		{
+			if( y < ( ( viddef.height * scr_con_current ) - (int)( 14 * Con_GetPixelRatio() ) - smallCharHeight ) )
+			{
+				touch_x = -1;
+				touch_y = y;
+			}
+			else if( y < ( viddef.height * scr_con_current ) )
+			{
+				touch_x = x;
+				touch_y = y;
+			}
+		}
+	}
+	else if( cls.key_dest == key_message )
+	{
+		touch_x = x;
+		touch_y = y;
+	}
+}
+
+/*
+* Con_TouchUp
+*/
+static void Con_TouchUp( int x, int y )
+{
+	if( ( touch_x < 0 ) && ( touch_y < 0 ) )
+		return;
+
+	if( ( x < 0 ) || ( y < 0 ) )
+	{
+		touch_x = touch_y = -1;
+		return;
+	}
+
+	if( cls.key_dest == key_console )
+	{
+		if( touch_x >= 0 )
+		{
+			int smallCharHeight = SCR_FontHeight( cls.consoleFont );
+
+			if( ( x - touch_x ) >= ( smallCharHeight * 4 ) )
+				Con_CompleteCommandLine();
+			else if( ( y - touch_y ) >= ( smallCharHeight * 2 ) )
+				Con_HistoryUp();
+			else if( ( touch_y - y ) >= ( smallCharHeight * 2 ) )
+				Con_HistoryDown();
+			else
+				IN_ShowSoftKeyboard( true );
+		}
+	}
+	else if( cls.key_dest == key_message )
+	{
+		int x1, y1, x2, y2, promptwidth;
+		Con_GetMessageArea( &x1, &y1, &x2, &y2, &promptwidth );
+		if( ( x >= x1 ) && ( y >= y1 ) && ( x < x2 ) && ( y < y2 ) )
+		{
+			if( x > x1 + promptwidth )
+				IN_ShowSoftKeyboard( true );
+			else
+				chat_team = !chat_team && Cmd_Exists( "say_team" );
+		}
+	}
+
+	touch_x = touch_y = -1;
+}
+
+/*
+* Con_TouchEvent
+*/
+void Con_TouchEvent( bool down, int x, int y )
+{
+	if( !con_initialized )
+		return;
+
+	if( down )
+		Con_TouchDown( x, y );
+	else
+		Con_TouchUp( x, y );
 }
 
 //============================================================================

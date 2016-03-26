@@ -27,7 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 const char *SOUND_EXTENSIONS[] = { ".ogg", ".wav" };
 const size_t NUM_SOUND_EXTENSIONS = sizeof( SOUND_EXTENSIONS ) / sizeof( SOUND_EXTENSIONS[0] );
 
-const char *IMAGE_EXTENSIONS[] = { ".tga", ".jpg", ".png" };
+const char *IMAGE_EXTENSIONS[] = { ".tga", ".jpg", ".png", ".ktx" }; // .ktx must be the last extension
 const size_t NUM_IMAGE_EXTENSIONS = sizeof( IMAGE_EXTENSIONS ) / sizeof( IMAGE_EXTENSIONS[0] );
 
 //============================================================================
@@ -58,35 +58,35 @@ char *COM_SanitizeFilePath( char *path )
 /*
 * COM_ValidateFilename
 */
-qboolean COM_ValidateFilename( const char *filename )
+bool COM_ValidateFilename( const char *filename )
 {
 	assert( filename );
 
 	if( !filename || !filename[0] )
-		return qfalse;
+		return false;
 
 	// we don't allow \ in filenames, all user inputted \ characters are converted to /
 	if( strchr( filename, '\\' ) )
-		return qfalse;
+		return false;
 
-	return qtrue;
+	return true;
 }
 
 /*
 * COM_ValidateRelativeFilename
 */
-qboolean COM_ValidateRelativeFilename( const char *filename )
+bool COM_ValidateRelativeFilename( const char *filename )
 {
 	if( !COM_ValidateFilename( filename ) )
-		return qfalse;
+		return false;
 
 	if( strstr( filename, ".." ) || strstr( filename, "//" ) )
-		return qfalse;
+		return false;
 
 	if( *filename == '/' || *filename == '.' )
-		return qfalse;
+		return false;
 
-	return qtrue;
+	return true;
 }
 
 /*
@@ -108,9 +108,6 @@ void COM_StripExtension( char *filename )
 const char *COM_FileExtension( const char *filename )
 {
 	const char *src, *last;
-
-	if( !*filename )
-		return filename;
 
 	last = strrchr( filename, '/' );
 	src = strrchr( last ? last : filename, '.' );
@@ -219,7 +216,7 @@ int COM_FilePathLength( const char *in )
 
 short ShortSwap( short l )
 {
-	qbyte b1, b2;
+	uint8_t b1, b2;
 
 	b1 = l&255;
 	b2 = ( l>>8 )&255;
@@ -236,7 +233,7 @@ static short ShortNoSwap( short l )
 
 int LongSwap( int l )
 {
-	qbyte b1, b2, b3, b4;
+	uint8_t b1, b2, b3, b4;
 
 	b1 = l&255;
 	b2 = ( l>>8 )&255;
@@ -258,7 +255,7 @@ float FloatSwap( float f )
 	union
 	{
 		float f;
-		qbyte b[4];
+		uint8_t b[4];
 	} dat1, dat2;
 
 
@@ -284,7 +281,7 @@ static float FloatNoSwap( float f )
 */
 static void Swap_Init( void )
 {
-	qbyte swaptest[2] = { 1, 0 };
+	uint8_t swaptest[2] = { 1, 0 };
 
 	// set the byte swapping variables in a portable manner
 	if( *(short *)swaptest == 1 )
@@ -398,7 +395,7 @@ int COM_Compress( char *data_p )
 {
 	char *in, *out;
 	int c;
-	qboolean newline = qfalse, whitespace = qfalse;
+	bool newline = false, whitespace = false;
 
 	in = out = data_p;
 	if( in )
@@ -424,13 +421,13 @@ int COM_Compress( char *data_p )
 			}
 			else if( c == '\n' || c == '\r' )
 			{
-				newline = qtrue;
+				newline = true;
 				in++;
 				// record when we hit whitespace
 			}
 			else if( c == ' ' || c == '\t' )
 			{
-				whitespace = qtrue;
+				whitespace = true;
 				in++;
 				// an actual token
 			}
@@ -440,13 +437,13 @@ int COM_Compress( char *data_p )
 				if( newline )
 				{
 					*out++ = '\n';
-					newline = qfalse;
-					whitespace = qfalse;
+					newline = false;
+					whitespace = false;
 				}
 				if( whitespace )
 				{
 					*out++ = ' ';
-					whitespace = qfalse;
+					whitespace = false;
 				}
 
 				// copy quoted strings unmolested
@@ -493,12 +490,12 @@ static char com_token[MAX_TOKEN_CHARS];
 * 
 * Parse a token out of a string
 */
-char *COM_ParseExt2( const char **data_p, qboolean nl, qboolean sq )
+char *COM_ParseExt2( const char **data_p, bool nl, bool sq )
 {
 	int c;
 	int len;
 	const char *data;
-	qboolean newlines = qfalse;
+	bool newlines = false;
 
 	data = *data_p;
 	len = 0;
@@ -520,7 +517,7 @@ skipwhite:
 			return com_token;
 		}
 		if( c == '\n' )
-			newlines = qtrue;
+			newlines = true;
 		data++;
 	}
 
@@ -666,9 +663,9 @@ int Q_GrabCharFromColorString( const char **pstr, char *c, int *colorindex)
 
 // Like Q_GrabCharFromColorString, but reads whole UTF-8 sequences
 // and returns wide chars
-qwchar Q_GrabWCharFromColorString( const char **pstr, qwchar *wc, int *colorindex )
+int Q_GrabWCharFromColorString( const char **pstr, wchar_t *wc, int *colorindex )
 {
-	qwchar num;
+	wchar_t num;
 
 	num = Q_GrabWCharFromUtf8String( pstr );
 	switch( num )
@@ -709,7 +706,7 @@ qwchar Q_GrabWCharFromColorString( const char **pstr, qwchar *wc, int *colorinde
 * so the result string may end up up to 1.5 times longer
 * (only a final ^ really needs duplicating, it's just easier to do it for all)
 */
-const char *COM_RemoveColorTokensExt( const char *str, qboolean draw )
+const char *COM_RemoveColorTokensExt( const char *str, bool draw )
 {
 	static char cleanString[MAX_STRING_CHARS];
 	char *out = cleanString, *end = cleanString + sizeof( cleanString );
@@ -783,7 +780,7 @@ int COM_SanitizeColorString( const char *str, char *buf, int bufsize, int maxpri
 
 		if( gc == GRABCHAR_CHAR )
 		{
-			qboolean emitcolor = ( newcolor != oldcolor && c != ' ' ) ? qtrue : qfalse;
+			bool emitcolor = ( newcolor != oldcolor && c != ' ' ) ? true : false;
 			int numbytes = ( c == Q_COLOR_ESCAPE ) ? 2 : 1; // ^ will be duplicated
 			if (emitcolor)
 				numbytes += 2;
@@ -875,6 +872,36 @@ const char *Q_ColorStringTerminator( const char *str, int finalcolor )
 	}
 }
 
+/*
+* Q_ColorStrLastColor
+*
+* Returns the last color in a string, or the previous color specified in the argument.
+*/
+int Q_ColorStrLastColor( int previous, const char *s, int maxlen )
+{
+	char c;
+	const char *end = s;
+	int lastcolor = previous, colorindex;
+
+	if( maxlen > 0 )
+		end += maxlen;
+
+	while( ( s < end ) || ( maxlen < 0 ) )
+	{
+		int gc = Q_GrabCharFromColorString( &s, &c, &colorindex );
+		if( gc == GRABCHAR_CHAR )
+			;
+		else if( gc == GRABCHAR_COLOR )
+			lastcolor = colorindex;
+		else if( gc == GRABCHAR_END )
+			break;
+		else
+			assert( 0 );
+	}
+
+	return lastcolor;
+}
+
 
 /*
 * COM_RemoveJunkChars
@@ -933,7 +960,7 @@ const char *COM_RemoveJunkChars( const char *in )
 */
 int COM_ReadColorRGBString( const char *in )
 {
-	static int playerColor[3];
+	int playerColor[3];
 	if( in && in[0] )
 	{
 		if( sscanf( in, "%3i %3i %3i", &playerColor[0], &playerColor[1], &playerColor[2] ) == 3 )
@@ -980,7 +1007,7 @@ void *Q_memset32( void *dest, int c, size_t dwords )
 	assert( ( (size_t)dest & 0x03 ) == 0 );
 
 #if defined ( __GNUC__ ) && defined ( id386 )
-	asm (	"cld\n"
+	__asm__ (	"cld\n"
 			"rep; stosl\n"
 			:	// nada
 			: "c"(dwords), "D"(dest), "a"(c)
@@ -1197,33 +1224,121 @@ char *Q_trim( char *s )
 	return s;
 }
 
-#define MAX_UTF8_STRING			2048	// == MAX_TOKEN_CHARS*2, >= MAX_CMDLINE*2
+/*
+* Q_WCharUtf8Length
+*
+* Returns the length of wchar_t encoded as UTF-8.
+*/
+size_t Q_WCharUtf8Length( wchar_t wc )
+{
+	unsigned int num = wc;
 
-// assumes qwchar is unsigned
-char *Q_WCharToUtf8( qwchar wc )
+	if( !num )
+		return 0;
+	if( num <= 0x7f )
+		return 1;
+	if( num <= 0x7ff )
+		return 2;
+	if( num <= 0xffff )
+		return 3;
+	return 1; // 4-octet sequences are replaced with '?'
+}
+
+/*
+* Q_WCharToUtf8
+*
+* Converts wchar_t to UTF-8 and returns the length of the written sequence.
+*/
+size_t Q_WCharToUtf8( wchar_t wc, char *dest, size_t bufsize )
+{
+	unsigned int num = wc;
+	size_t ret = 0;
+
+	if( num )
+	{
+		if( num <= 0x7f )
+		{
+			if( bufsize > 1 )
+			{
+				*dest++ = num;
+				ret = 1;
+			}
+		}
+		else if( num <= 0x7ff )
+		{
+			if( bufsize > 2 )
+			{
+				*dest++ = 0xC0 | ( num >> 6 );
+				*dest++ = 0x80 | ( num & 0x3f );
+				ret = 2;
+			}
+		}
+		else if( num <= 0xffff )
+		{
+			if( bufsize > 3 )
+			{
+				*dest++ = 0xE0 | ( num >> 12 );
+				*dest++ = 0x80 | ( ( num & 0xfc0 ) >> 6 );
+				*dest++ = 0x80 | ( num & 0x003f );
+				ret = 3;
+			}
+		}
+		else
+		{
+			// sorry, we don't support 4-octet sequences
+			if( bufsize > 1 )
+			{
+				*dest++ = '?';
+				ret = 1;
+			}
+		}
+	}
+
+	if( bufsize > ret )
+		*dest++ = '\0';
+
+	return ret;
+}
+
+/*
+* Q_WCharToUtf8Char
+*
+* Converts wchar_t to UTF-8 using a temporary buffer.
+*/
+char *Q_WCharToUtf8Char( wchar_t wc )
 {
 	static char buf[5];	// longest valid utf-8 sequence is 4 bytes
-	char *out = buf;
-
-	if( wc <= 0x7f )
-		*out++ = wc & 0x7f;
-	else if( wc <= 0x7ff )
-	{
-		*out++ = 0xC0 | ( ( wc & 0x07C0 ) >> 6 );
-		*out++ = 0x80 | ( wc & 0x3f );
-	}
-	else if( wc <= 0xffff )
-	{
-		*out++ = 0xE0 | ( ( wc & 0xF000 ) >> 12 );
-		*out++ = 0x80 | ( ( wc & 0x0FC0 ) >> 6 );
-		*out++ = 0x80 | ( wc & 0x003f );
-	}
-	else
-		*out++ = '?';	// sorry, we don't support 4-octet sequences
-
-	*out = '\0';
-
+	Q_WCharToUtf8( wc, buf, sizeof( buf ) );
 	return buf;
+}
+
+/*
+* Q_WCharToUtf8String
+*
+* Converts a wchar_t string (of the system native wchar size) to UTF-8.
+* Returns the length of the written string.
+*/
+size_t Q_WCharToUtf8String( const wchar_t *ws, char *dest, size_t bufsize )
+{
+	size_t len = 0, utflen;
+
+	if( !bufsize ) 
+		return 0;
+
+	dest[0] = '\0';
+
+	while( ( bufsize > 1 ) && *ws ) {
+		utflen = Q_WCharToUtf8( *ws, dest, bufsize );
+		if( !utflen )
+			break;
+
+		ws++;
+		dest += utflen;
+		bufsize -= utflen;
+		len += utflen;
+	}
+
+	return len;
 }
 
 /*
@@ -1254,11 +1369,10 @@ int Q_Utf8SyncPos( const char *str, int pos, int dir )
 }
 
 // returns a wide char, advances (*pstr) to next char (unless at end of string)
-// only works for 2-octet sequences (latin and cyrillic chars will work)
-qwchar Q_GrabWCharFromUtf8String (const char **pstr)
+wchar_t Q_GrabWCharFromUtf8String (const char **pstr)
 {
 	int part, i;
-	qwchar val;
+	wchar_t val;
 	const char *src = *pstr;
 
 	if( !*src )
@@ -1320,17 +1434,66 @@ qwchar Q_GrabWCharFromUtf8String (const char **pstr)
 }
 
 /*
+* Q_FixTruncatedUtf8
+*
+* Terminates a UTF-8 string correctly if it's cut to a specific buffer length (for instance, when using strncpyz).
+*/
+void Q_FixTruncatedUtf8( char *str )
+{
+	size_t len = strlen( str );
+	const char *temp;
+	if( !len )
+		return;
+
+	len = Q_Utf8SyncPos( str, len - 1, UTF8SYNC_LEFT );
+	temp = str + len;
+	if( ( *temp != '?' ) && ( Q_GrabWCharFromUtf8String( &temp ) == '?' ) )
+		str[len] = '\0';
+}
+
+/*
+* Q_IsBreakingSpace
+*/
+bool Q_IsBreakingSpace( const char *str )
+{
+	const unsigned char *s = ( const unsigned char * )str;
+
+	switch( s[0] )
+	{
+	case ' ':
+	case '\t':
+		return true;
+	case 0xe3:
+		return ( s[1] == 0x80 ) && ( s[2] == 0x80 );
+	case 0xe2:
+		return ( s[1] == 0x80 ) && ( s[2] >= 0x80 ) && ( s[2] <= 0x8b );
+	}
+
+	return false;
+}
+
+/*
+* Q_IsBreakingSpaceChar
+*
+* Same as IsBreakingSpace, but for a single character.
+*/
+bool Q_IsBreakingSpaceChar( wchar_t c )
+{
+	return ( c == ' ' ) || ( c == '\t' ) || ( c == 0x3000 ) || ( ( c >= 0x2000 ) && ( c <= 0x200b ) );
+}
+
+/*
 * Q_isdigit
 */
-qboolean Q_isdigit( const char *str )
+bool Q_isdigit( const char *str )
 {
 	if( str && *str )
 	{
 		while( isdigit( *str ) ) str++;
 		if( !*str )
-			return qtrue;
+			return true;
 	}
-	return qfalse;
+	return false;
 }
 
 /*
@@ -1397,12 +1560,13 @@ void Q_urlencode_unsafechars( const char *src, char *dst, size_t dst_size )
 size_t Q_urldecode( const char *src, char *dst, size_t dst_size )
 {
 	char *dst_start = dst, *dst_end = dst + dst_size - 1;
-	const char *src_end = src + strlen( src );
+	const char *src_end;
 
 	if( !src || !dst || !dst_size ) {
 		return 0;
 	}
 
+	src_end = src + strlen( src );
 	while( src < src_end ) {
 		if( dst == dst_end ) {
 			break;
@@ -1430,14 +1594,14 @@ size_t Q_urldecode( const char *src, char *dst, size_t dst_size )
 /*
 * COM_ValidateConfigstring
 */
-qboolean COM_ValidateConfigstring( const char *string )
+bool COM_ValidateConfigstring( const char *string )
 {
 	const char *p;
-	qboolean opened = qfalse;
+	bool opened = false;
 	int parity = 0;
 
 	if( !string )
-		return qfalse;
+		return false;
 
 	p = string;
 	while( *p )
@@ -1447,74 +1611,74 @@ qboolean COM_ValidateConfigstring( const char *string )
 			if( opened )
 			{
 				parity--;
-				opened = qfalse;
+				opened = false;
 			}
 			else
 			{
 				parity++;
-				opened = qtrue;
+				opened = true;
 			}
 		}
 		p++;
 	}
 
 	if( parity != 0 )
-		return qfalse;
+		return false;
 
-	return qtrue;
+	return true;
 }
 
 /*
 * Info_ValidateValue
 */
-static qboolean Info_ValidateValue( const char *value )
+static bool Info_ValidateValue( const char *value )
 {
 	assert( value );
 
 	if( !value )
-		return qfalse;
+		return false;
 
 	if( strlen( value ) >= MAX_INFO_VALUE )
-		return qfalse;
+		return false;
 
 	if( strchr( value, '\\' ) )
-		return qfalse;
+		return false;
 
 	if( strchr( value, ';' ) )
-		return qfalse;
+		return false;
 
 	if( strchr( value, '"' ) )
-		return qfalse;
+		return false;
 
-	return qtrue;
+	return true;
 }
 
 /*
 * Info_ValidateKey
 */
-static qboolean Info_ValidateKey( const char *key )
+static bool Info_ValidateKey( const char *key )
 {
 	assert( key );
 
 	if( !key )
-		return qfalse;
+		return false;
 
 	if( !key[0] )
-		return qfalse;
+		return false;
 
 	if( strlen( key ) >= MAX_INFO_KEY )
-		return qfalse;
+		return false;
 
 	if( strchr( key, '\\' ) )
-		return qfalse;
+		return false;
 
 	if( strchr( key, ';' ) )
-		return qfalse;
+		return false;
 
 	if( strchr( key, '"' ) )
-		return qfalse;
+		return false;
 
-	return qtrue;
+	return true;
 }
 
 /*
@@ -1523,50 +1687,83 @@ static qboolean Info_ValidateKey( const char *key )
 * Some characters are illegal in info strings because they
 * can mess up the server's parsing
 */
-qboolean Info_Validate( const char *info )
+bool Info_Validate( const char *info )
 {
 	const char *p, *start;
 
 	assert( info );
 
 	if( !info )
-		return qfalse;
+		return false;
 
 	if( strlen( info ) >= MAX_INFO_STRING )
-		return qfalse;
+		return false;
 
 	if( strchr( info, '\"' ) )
-		return qfalse;
+		return false;
 
 	if( strchr( info, ';' ) )
-		return qfalse;
+		return false;
 
 	if( strchr( info, '"' ) )
-		return qfalse;
+		return false;
 
 	p = info;
 
 	while( p && *p )
 	{
 		if( *p++ != '\\' )
-			return qfalse;
+			return false;
 
 		start = p;
 		p = strchr( start, '\\' );
 		if( !p )  // missing key
-			return qfalse;
+			return false;
 		if( p - start >= MAX_INFO_KEY )  // too long
-			return qfalse;
+			return false;
 
 		p++; // skip the \ char
 
 		start = p;
 		p = strchr( start, '\\' );
 		if( ( p && p - start >= MAX_INFO_KEY ) || ( !p && strlen( start ) >= MAX_INFO_KEY ) )  // too long
-			return qfalse;
+			return false;
 	}
 
-	return qtrue;
+	return true;
+}
+
+/*
+* Info_CleanValue
+*
+* Removes invalid characters from a userinfo value.
+* Used internally by steamlib at least.
+*/
+void Info_CleanValue( const char *in, char *out, size_t outsize )
+{
+	size_t len = 0;
+	int c;
+
+	if( !outsize )
+		return;
+
+	clamp_high( outsize, MAX_INFO_VALUE );
+
+	while( ( len + 1 < outsize ) && ( ( ( c = *in ) != '\0' ) ) )
+	{
+		in++;
+
+		if( c == '\\' )
+			continue;
+		if( c == ';' )
+			continue;
+		if( c == '"' )
+			continue;
+
+		out[len++] = c;
+	}
+
+	out[len] = '\0';
 }
 
 /*
@@ -1652,7 +1849,7 @@ char *Info_ValueForKey( const char *info, const char *key )
 
 	if( len >= MAX_INFO_VALUE )
 	{
-		assert( qfalse );
+		assert( false );
 		return NULL;
 	}
 	strncpy( value[valueindex], start, len );
@@ -1704,7 +1901,7 @@ void Info_RemoveKey( char *info, const char *key )
 /*
 * Info_SetValueForKey
 */
-qboolean Info_SetValueForKey( char *info, const char *key, const char *value )
+bool Info_SetValueForKey( char *info, const char *key, const char *value )
 {
 	char pair[MAX_INFO_KEY + MAX_INFO_VALUE + 1];
 
@@ -1713,18 +1910,18 @@ qboolean Info_SetValueForKey( char *info, const char *key, const char *value )
 	assert( value && Info_ValidateValue( value ) );
 
 	if( !Info_Validate( info ) || !Info_ValidateKey( key ) || !Info_ValidateValue( value ) )
-		return qfalse;
+		return false;
 
 	Info_RemoveKey( info, key );
 
 	Q_snprintfz( pair, sizeof( pair ), "\\%s\\%s", key, value );
 
 	if( strlen( pair ) + strlen( info ) > MAX_INFO_STRING )
-		return qfalse;
+		return false;
 
 	Q_strncatz( info, pair, MAX_INFO_STRING );
 
-	return qtrue;
+	return true;
 }
 
 

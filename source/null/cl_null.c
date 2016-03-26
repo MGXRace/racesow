@@ -23,7 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "../qcommon/qcommon.h"
 
-qboolean con_initialized;
+bool con_initialized;
 
 static void Key_Bind_Null_f( void )
 {
@@ -120,11 +120,11 @@ void SCR_DrawClampString( int x, int y, const char *str, int xmin, int ymin, int
 {
 }
 
-void SCR_DrawRawChar( int x, int y, qwchar num, struct qfontface_s *font, vec4_t color )
+void SCR_DrawRawChar( int x, int y, wchar_t num, struct qfontface_s *font, vec4_t color )
 {
 }
 
-size_t SCR_strHeight( struct qfontface_s *font )
+size_t SCR_FontHeight( struct qfontface_s *font )
 {
 	return 0;
 }

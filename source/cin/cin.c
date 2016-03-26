@@ -43,12 +43,13 @@ enum
 typedef struct
 {
 	const char * const extensions;
-	qboolean ( *init )( cinematics_t *cin );
+	bool ( *init )( cinematics_t *cin );
+	bool ( *has_ogg_audio )( cinematics_t *cin );
 	void ( *shutdown )( cinematics_t *cin );
 	void ( *reset )( cinematics_t *cin );
-	qboolean ( *need_next_frame )( cinematics_t *cin );
-	qbyte *( *read_next_frame )( cinematics_t *cin, qboolean *redraw );
-	cin_yuv_t *( *read_next_frame_yuv )( cinematics_t *cin, qboolean *redraw );
+	bool ( *need_next_frame )( cinematics_t *cin );
+	uint8_t *( *read_next_frame )( cinematics_t *cin, bool *redraw );
+	cin_yuv_t *( *read_next_frame_yuv )( cinematics_t *cin, bool *redraw );
 } cin_type_t;
 
 static const cin_type_t cin_types[] = 
@@ -57,6 +58,7 @@ static const cin_type_t cin_types[] =
 	{
 		THEORA_FILE_EXTENSIONS,
 		Theora_Init_CIN,
+		Theora_HasOggAudio_CIN,
 		Theora_Shutdown_CIN,
 		Theora_Reset_CIN,
 		Theora_NeedNextFrame_CIN,
@@ -72,6 +74,7 @@ static const cin_type_t cin_types[] =
 	{
 		ROQ_FILE_EXTENSIONS,
 		RoQ_Init_CIN,
+		RoQ_HasOggAudio_CIN,
 		RoQ_Shutdown_CIN,
 		RoQ_Reset_CIN,
 		RoQ_NeedNextFrame_CIN,
@@ -81,6 +84,7 @@ static const cin_type_t cin_types[] =
 
 	// NULL safe guard
 	{
+		NULL,
 		NULL,
 		NULL,
 		NULL,
@@ -97,16 +101,18 @@ static const cin_type_t cin_types[] =
 * CIN_Open
 */
 cinematics_t *CIN_Open( const char *name, unsigned int start_time, 
-	qboolean loop, qboolean *yuv, float *framerate )
+	int flags, bool *yuv, float *framerate )
 {
 	int i;
 	size_t name_size;
 	const cin_type_t *type;
-	qboolean res;
+	bool res;
 	struct mempool_s *mempool;
 	cinematics_t *cin = NULL;
+	unsigned load_msec;
 
-	name_size = strlen( "video/" ) + strlen( name ) + /*strlen( ".roq" )*/10 + 1;
+	load_msec = trap_Milliseconds();
+	name_size = strlen( name ) + /*strlen( ".roq" )*/10 + 1;
 
 	mempool = CIN_AllocPool( name );
 	cin = CIN_Alloc( mempool, sizeof( *cin ) );
@@ -121,9 +127,7 @@ cinematics_t *CIN_Open( const char *name, unsigned int start_time,
 	cin->aspect_numerator = cin->aspect_denominator = 0; // do not keep aspect ratio
 	cin->start_time = cin->cur_time = start_time;
 	cin->flags = 0;
-	if( loop ) {
-		cin->flags |= CIN_LOOP;
-	}
+	cin->flags = flags;
 
 	if( trap_FS_IsUrl( name ) )
 	{
@@ -134,7 +138,7 @@ cinematics_t *CIN_Open( const char *name, unsigned int start_time,
 	else
 	{
 		cin->type = CIN_TYPE_NONE;
-		Q_snprintfz( cin->name, name_size, "video/%s", name );
+		Q_snprintfz( cin->name, name_size, "%s", name );
 	}
 
 	// loop through the list of supported formats
@@ -179,7 +183,7 @@ cinematics_t *CIN_Open( const char *name, unsigned int start_time,
 		}
 	}
 	else {
-		res = qfalse;
+		res = false;
 	}
 
 	if( !res )
@@ -193,13 +197,39 @@ cinematics_t *CIN_Open( const char *name, unsigned int start_time,
 	if( framerate )
 		*framerate = cin->framerate;
 
+	// update the timers to account for loading
+	load_msec = trap_Milliseconds() - load_msec;
+	cin->start_time = cin->cur_time = start_time + load_msec;
+
 	return cin;
+}
+
+/*
+* CIN_HasOggAudio
+*/
+bool CIN_HasOggAudio( cinematics_t *cin )
+{
+	const cin_type_t *type;
+
+	assert( cin );
+	assert( cin->type > CIN_TYPE_NONE && cin->type < CIN_NUM_TYPES );
+
+	type = &cin_types[cin->type];
+	return type->has_ogg_audio( cin );
+}
+
+/*
+* CIN_Filename
+*/
+const char *CIN_FileName( cinematics_t *cin )
+{
+	return cin->name;
 }
 
 /*
 * CIN_NeedNextFrame
 */
-qboolean CIN_NeedNextFrame( cinematics_t *cin, unsigned int curtime )
+bool CIN_NeedNextFrame( cinematics_t *cin, unsigned int curtime )
 {
 	const cin_type_t *type;
 
@@ -208,15 +238,11 @@ qboolean CIN_NeedNextFrame( cinematics_t *cin, unsigned int curtime )
 
 	type = &cin_types[cin->type];
 
-	if( !cin->frame ) {
-		// update the start time to account for possible loading/init time
-		cin->start_time = cin->cur_time = curtime;
-	}
 	cin->cur_time = curtime;
 	cin->s_samples_length = CIN_GetRawSamplesLengthFromListeners( cin );
 
 	if( cin->cur_time < cin->start_time )
-		return qfalse;
+		return false;
 
 	return type->need_next_frame( cin );
 }
@@ -224,26 +250,26 @@ qboolean CIN_NeedNextFrame( cinematics_t *cin, unsigned int curtime )
 /*
 * CIN_ReadNextFrame_
 */
-static qbyte *CIN_ReadNextFrame_( cinematics_t *cin, int *width, int *height, 
-	int *aspect_numerator, int *aspect_denominator, qboolean *redraw, qboolean yuv )
+static uint8_t *CIN_ReadNextFrame_( cinematics_t *cin, int *width, int *height, 
+	int *aspect_numerator, int *aspect_denominator, bool *redraw, bool yuv )
 {
 	int i;
-	qbyte *frame = NULL;
+	uint8_t *frame = NULL;
 	const cin_type_t *type;
-	qboolean redraw_ = qfalse;
+	bool redraw_ = false;
 
 	assert( cin );
 	assert( cin->type > CIN_TYPE_NONE && cin->type < CIN_NUM_TYPES );
 
 	type = &cin_types[cin->type];
 
-	cin->haveAudio = qfalse;
+	cin->haveAudio = false;
 
 	for( i = 0; i < 2; i++ )
 	{
-		redraw_ = qfalse;
+		redraw_ = false;
 		if( yuv ) {
-			frame = ( qbyte * )type->read_next_frame_yuv( cin, &redraw_ );
+			frame = ( uint8_t * )type->read_next_frame_yuv( cin, &redraw_ );
 		}
 		else {
 			frame = type->read_next_frame( cin, &redraw_ );
@@ -270,7 +296,7 @@ static qbyte *CIN_ReadNextFrame_( cinematics_t *cin, int *width, int *height,
 
 	if( cin->haveAudio ) {
 		CIN_ClearRawSamplesListeners( cin );
-		cin->haveAudio = qfalse;
+		cin->haveAudio = false;
 	}
 
 	return frame;
@@ -279,20 +305,20 @@ static qbyte *CIN_ReadNextFrame_( cinematics_t *cin, int *width, int *height,
 /*
 * CIN_ReadNextFrame
 */
-qbyte *CIN_ReadNextFrame( cinematics_t *cin, int *width, int *height, 
-	int *aspect_numerator, int *aspect_denominator, qboolean *redraw )
+uint8_t *CIN_ReadNextFrame( cinematics_t *cin, int *width, int *height, 
+	int *aspect_numerator, int *aspect_denominator, bool *redraw )
 {
 	return CIN_ReadNextFrame_( cin, width, height, 
-		aspect_numerator, aspect_denominator, redraw, qfalse );
+		aspect_numerator, aspect_denominator, redraw, false );
 }
 
 /*
 * CIN_ReadNextFrameYUV
 */
 cin_yuv_t *CIN_ReadNextFrameYUV( cinematics_t *cin, int *width, int *height, 
-	int *aspect_numerator, int *aspect_denominator, qboolean *redraw )
+	int *aspect_numerator, int *aspect_denominator, bool *redraw )
 {
-	return ( cin_yuv_t * )CIN_ReadNextFrame_( cin, width, height, aspect_numerator, aspect_denominator, redraw, qtrue );
+	return ( cin_yuv_t * )CIN_ReadNextFrame_( cin, width, height, aspect_numerator, aspect_denominator, redraw, true );
 }
 
 /*
@@ -306,26 +332,29 @@ void CIN_ClearRawSamplesListeners( cinematics_t *cin )
 /*
 * CIN_AddRawSamplesListener
 */
-qboolean CIN_AddRawSamplesListener( cinematics_t *cin, void *listener, 
+bool CIN_AddRawSamplesListener( cinematics_t *cin, void *listener, 
 	cin_raw_samples_cb_t raw_samples, cin_get_raw_samples_cb_t get_raw_samples )
 {
 	int i;
 
 	if( !cin ) {
-		return qfalse;
+		return false;
 	}
 	if( !raw_samples ) {
-		return qfalse;
+		return false;
 	}
 
 	if( cin->num_listeners >= CIN_MAX_RAW_SAMPLES_LISTENERS ) {
-		return qfalse;
+		return false;
+	}
+	if( cin->flags & CIN_NOAUDIO ) {
+		return false;
 	}
 
 	for( i = 0; i < cin->num_listeners; i++ ) {
 		if( cin->listeners[i].listener == listener 
 			&& cin->listeners[i].raw_samples == raw_samples )
-			return qtrue;
+			return true;
 	}
 
 	cin->listeners[cin->num_listeners].listener = listener;
@@ -333,22 +362,26 @@ qboolean CIN_AddRawSamplesListener( cinematics_t *cin, void *listener,
 	cin->listeners[cin->num_listeners].get_raw_samples = get_raw_samples;
 	cin->num_listeners++;
 
-	return qtrue;
+	return true;
 }
 
 /*
 * CIN_RawSamplesToListeners
 */
 void CIN_RawSamplesToListeners( cinematics_t *cin, unsigned int samples, unsigned int rate, 
-		unsigned short width, unsigned short channels, const qbyte *data )
+		unsigned short width, unsigned short channels, const uint8_t *data )
 {
 	int i;
+
+	if( cin->flags & CIN_NOAUDIO ) {
+		return;
+	}
 
 	for( i = 0; i < cin->num_listeners; i++ ) {
 		cin->listeners[i].raw_samples( cin->listeners[i].listener, samples, rate, width, channels, data );
 	}
 
-	cin->haveAudio = qtrue;
+	cin->haveAudio = true;
 	cin->s_samples_length = CIN_GetRawSamplesLengthFromListeners( cin );
 }
 

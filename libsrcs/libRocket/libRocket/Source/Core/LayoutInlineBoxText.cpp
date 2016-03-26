@@ -27,13 +27,13 @@
 
 #include "precompiled.h"
 #include "LayoutInlineBoxText.h"
-#include "FontFaceHandle.h"
+#include <Rocket/Core/FontFaceHandle.h>
 #include "LayoutEngine.h"
 #include "LayoutLineBox.h"
-#include <Rocket/Core/ElementText.h>
-#include <Rocket/Core/ElementUtilities.h>
-#include <Rocket/Core/Log.h>
-#include <Rocket/Core/Property.h>
+#include "../../Include/Rocket/Core/ElementText.h"
+#include "../../Include/Rocket/Core/ElementUtilities.h"
+#include "../../Include/Rocket/Core/Log.h"
+#include "../../Include/Rocket/Core/Property.h"
 
 namespace Rocket {
 namespace Core {
@@ -122,8 +122,9 @@ void LayoutInlineBoxText::PositionElement()
 }
 
 // Sizes the inline box's element.
-void LayoutInlineBoxText::SizeElement(bool ROCKET_UNUSED(split))
+void LayoutInlineBoxText::SizeElement(bool ROCKET_UNUSED_PARAMETER(split))
 {
+	ROCKET_UNUSED(split);
 }
 
 void* LayoutInlineBoxText::operator new(size_t size)

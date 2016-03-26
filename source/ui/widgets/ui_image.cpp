@@ -224,9 +224,10 @@ bool ElementImage::LoadCachedTexture()
 		return false;
 	}
 
-	geometry_dirty = true;
+ 	geometry_dirty = true;
 
-	bool res = texture.Load( image_source );
+	URL image_url( image_source );
+	bool res = texture.Load( image_url.GetHost() + "/" + image_url.GetPathedFileName() );
 
 	SetPseudoClass( "loading", false );
 
@@ -237,6 +238,7 @@ bool ElementImage::LoadCachedTexture()
 
 	// Set the texture onto our geometry object.
 	geometry.SetTexture( &texture );
+	DispatchEvent( "imageload", Dictionary(), false );
 
 	DirtyLayout();
 	return true;
@@ -264,6 +266,7 @@ bool ElementImage::LoadDiskTexture()
 
 	// Set the texture onto our geometry object.
 	geometry.SetTexture(&texture);
+	DispatchEvent( "imageload", Dictionary(), false );
 	return true;
 }
 
@@ -277,6 +280,8 @@ bool ElementImage::LoadTexture()
 
 	if( !source.Empty() ) {
 		if( trap::FS_IsUrl( source.CString() ) ) {
+			texture_dirty = false;
+
 			// the stream cache object references this element
 			// (passed as the void * pointer below)
 			AddReference();

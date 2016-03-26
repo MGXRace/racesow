@@ -10,6 +10,8 @@ namespace WSWUI {
 	extern ui_import_t UI_IMPORT;
 }
 
+#define UI_IMPORT_TEXTDRAWFLAGS ( TEXTDRAWFLAG_NO_COLORS | TEXTDRAWFLAG_KERNING )
+
 namespace trap
 {
 		using WSWUI::UI_IMPORT;
@@ -48,6 +50,10 @@ namespace trap
 
 		inline void R_GetScissor( int *x, int *y, int* w, int *h ) {
 			UI_IMPORT.R_GetScissor( x, y, w, h );
+		}
+
+		inline void R_ResetScissor( void ) {
+			UI_IMPORT.R_ResetScissor();
 		}
 
 		inline void R_AddEntityToScene( entity_t *ent ) {
@@ -94,11 +100,11 @@ namespace trap
 			return UI_IMPORT.R_RegisterPic( name );
 		}
 
-		inline struct shader_s *R_RegisterRawPic( const char *name, int width, int height, qbyte *data ) {
-			return UI_IMPORT.R_RegisterRawPic( name, width, height, data );
+		inline struct shader_s *R_RegisterRawPic( const char *name, int width, int height, uint8_t *data, int samples ) {
+			return UI_IMPORT.R_RegisterRawPic( name, width, height, data, samples );
 		}
 
-		inline struct shader_s *R_RegisterLevelshot( const char *name, struct shader_s *defaultPic, qboolean *matchesDefault ) {
+		inline struct shader_s *R_RegisterLevelshot( const char *name, struct shader_s *defaultPic, bool *matchesDefault ) {
 			return UI_IMPORT.R_RegisterLevelshot( name, defaultPic, matchesDefault );
 		}
 
@@ -114,7 +120,7 @@ namespace trap
 			UI_IMPORT.R_GetShaderDimensions( shader, width, height );
 		}
 
-		inline qboolean R_LerpTag( orientation_t *orient, struct model_s *mod, int oldframe, int frame, float lerpfrac, const char *name ) {
+		inline bool R_LerpTag( orientation_t *orient, struct model_s *mod, int oldframe, int frame, float lerpfrac, const char *name ) {
 			return UI_IMPORT.R_LerpTag( orient, mod, oldframe, frame, lerpfrac, name );
 		}
 
@@ -164,8 +170,8 @@ namespace trap
 			UI_IMPORT.S_StartLocalSound( s );
 		}
 
-		inline void S_StartBackgroundTrack( const char *intro, const char *loop ) {
-			UI_IMPORT.S_StartBackgroundTrack( intro, loop );
+		inline void S_StartBackgroundTrack( const char *intro, const char *loop, int mode ) {
+			UI_IMPORT.S_StartBackgroundTrack( intro, loop, mode );
 		}
 
 		inline void S_StopBackgroundTrack( void ) {
@@ -176,28 +182,48 @@ namespace trap
 			return UI_IMPORT.SCR_RegisterFont( name, style, size );
 		}
 
-		inline void SCR_DrawString( int x, int y, int align, const char *str, struct qfontface_s *font, vec4_t color ) {
-			UI_IMPORT.SCR_DrawString( x, y, align, str, font, color );
+		inline int SCR_DrawString( int x, int y, int align, const char *str, struct qfontface_s *font, vec4_t color ) {
+			return UI_IMPORT.SCR_DrawString( x, y, align, str, font, color, UI_IMPORT_TEXTDRAWFLAGS );
 		}
 
 		inline size_t SCR_DrawStringWidth( int x, int y, int align, const char *str, size_t maxwidth, struct qfontface_s *font, vec4_t color ) {
-			return UI_IMPORT.SCR_DrawStringWidth( x, y, align, str, maxwidth, font, color );
+			return UI_IMPORT.SCR_DrawStringWidth( x, y, align, str, maxwidth, font, color, UI_IMPORT_TEXTDRAWFLAGS );
 		}
 
 		inline void SCR_DrawClampString( int x, int y, const char *str, int xmin, int ymin, int xmax, int ymax, struct qfontface_s *font, vec4_t color ) {
-			UI_IMPORT.SCR_DrawClampString( x, y, str, xmin, ymin, xmax, ymax, font, color );
+			UI_IMPORT.SCR_DrawClampString( x, y, str, xmin, ymin, xmax, ymax, font, color, UI_IMPORT_TEXTDRAWFLAGS );
 		}
 
-		inline size_t SCR_strHeight( struct qfontface_s *font ) {
-			return UI_IMPORT.SCR_strHeight( font );
+		inline size_t SCR_FontSize( struct qfontface_s *font ) {
+			return UI_IMPORT.SCR_FontSize( font );
+		}
+
+		inline size_t SCR_FontHeight( struct qfontface_s *font ) {
+			return UI_IMPORT.SCR_FontHeight( font );
+		}
+
+		inline int SCR_FontUnderline( struct qfontface_s *font, int *thickness ) {
+			return UI_IMPORT.SCR_FontUnderline( font, thickness );
+		}
+
+		inline size_t SCR_FontXHeight( struct qfontface_s *font ) {
+			return UI_IMPORT.SCR_FontXHeight( font );
 		}
 
 		inline size_t SCR_strWidth( const char *str, struct qfontface_s *font, size_t maxlen ) {
-			return UI_IMPORT.SCR_strWidth( str, font, maxlen );
+			return UI_IMPORT.SCR_strWidth( str, font, maxlen, UI_IMPORT_TEXTDRAWFLAGS );
 		}
 
 		inline size_t SCR_StrlenForWidth( const char *str, struct qfontface_s *font, size_t maxwidth ) {
-			return UI_IMPORT.SCR_StrlenForWidth( str, font, maxwidth );
+			return UI_IMPORT.SCR_StrlenForWidth( str, font, maxwidth, UI_IMPORT_TEXTDRAWFLAGS );
+		}
+
+		inline size_t SCR_FontAdvance( struct qfontface_s *font ) {
+			return UI_IMPORT.SCR_FontAdvance( font );
+		}
+
+		inline fdrawchar_t SCR_SetDrawCharIntercept( fdrawchar_t intercept ) {
+			return UI_IMPORT.SCR_SetDrawCharIntercept( intercept );
 		}
 
 		inline void CL_Quit( void ) {
@@ -212,12 +238,16 @@ namespace trap
 			UI_IMPORT.CL_ResetServerCount ();
 		}
 
-		inline char *CL_GetClipboardData( qboolean primary ) {
+		inline char *CL_GetClipboardData( bool primary ) {
 			return UI_IMPORT.CL_GetClipboardData( primary );
 		}
 
 		inline void CL_FreeClipboardData( char *data ) {
 			UI_IMPORT.CL_FreeClipboardData( data );
+		}
+
+		inline bool CL_IsBrowserAvailable( void ) {
+			return UI_IMPORT.CL_IsBrowserAvailable();
 		}
 
 		inline void CL_OpenURLInBrowser( const char *url ) {
@@ -236,10 +266,6 @@ namespace trap
 			return UI_IMPORT.Key_GetBindingBuf( binding );
 		}
 
-		inline void Key_ClearStates( void ) {
-			UI_IMPORT.Key_ClearStates ();
-		}
-
 		inline const char *Key_KeynumToString( int keynum ) {
 			return UI_IMPORT.Key_KeynumToString( keynum );
 		}
@@ -252,12 +278,24 @@ namespace trap
 			UI_IMPORT.Key_SetBinding( keynum, binding );
 		}
 
-		inline qboolean Key_IsDown( int keynum ) {
+		inline bool Key_IsDown( int keynum ) {
 			return UI_IMPORT.Key_IsDown( keynum );
 		}
 
-		inline qboolean VID_GetModeInfo( int *width, int *height, qboolean *wideScreen, int mode ) {
-			return UI_IMPORT.VID_GetModeInfo( width, height, wideScreen, mode );
+		inline void IN_GetThumbsticks( vec4_t sticks ) {
+			UI_IMPORT.IN_GetThumbsticks( sticks );
+		}
+
+		inline void IN_ShowSoftKeyboard( bool show ) {
+			UI_IMPORT.IN_ShowSoftKeyboard( show );
+		}
+
+		inline unsigned int IN_SupportedDevices( void ) {
+			return UI_IMPORT.IN_SupportedDevices();
+		}
+
+		inline bool VID_GetModeInfo( int *width, int *height, int mode ) {
+			return UI_IMPORT.VID_GetModeInfo( width, height, mode );
 		}
 
 		inline void VID_FlashWindow( int count ) {
@@ -308,11 +346,11 @@ namespace trap
 			UI_IMPORT.FS_FCloseFile( file );
 		}
 
-		inline qboolean FS_RemoveFile( const char *filename ) {
+		inline bool FS_RemoveFile( const char *filename ) {
 			return UI_IMPORT.FS_RemoveFile( filename );
 		}
 
-		inline qboolean FS_RemoveDirectory( const char *dirname ) {
+		inline bool FS_RemoveDirectory( const char *dirname ) {
 			return UI_IMPORT.FS_RemoveDirectory( dirname );
 		}
 
@@ -328,11 +366,15 @@ namespace trap
 			return UI_IMPORT.FS_FirstExtension( filename, extensions, num_extensions );
 		}
 
-		inline qboolean FS_MoveFile( const char *src, const char *dst ) {
+		inline bool FS_MoveFile( const char *src, const char *dst ) {
 			return UI_IMPORT.FS_MoveFile( src, dst );
 		}
 
-		inline qboolean FS_IsUrl( const char *url ) {
+		inline bool FS_MoveCacheFile( const char *src, const char *dst ) {
+			return UI_IMPORT.FS_MoveCacheFile( src, dst );
+		}
+
+		inline bool FS_IsUrl( const char *url ) {
 			return UI_IMPORT.FS_IsUrl( url );
 		}
 
@@ -369,7 +411,7 @@ namespace trap
 		}
 
 		// dynvars
-		inline dynvar_t *Dynvar_Create( const char *name, qboolean console, dynvar_getter_f getter, dynvar_setter_f setter ) {
+		inline dynvar_t *Dynvar_Create( const char *name, bool console, dynvar_getter_f getter, dynvar_setter_f setter ) {
 			return UI_IMPORT.Dynvar_Create( name, console, getter, setter );
 		}
 
@@ -443,11 +485,11 @@ namespace trap
 			return UI_IMPORT.GetBaseServerURL( buffer, buffer_size );
 		}
 
-		inline qboolean MM_Login( const char *user, const char *password ) {
+		inline bool MM_Login( const char *user, const char *password ) {
 			return UI_IMPORT.MM_Login( user, password );
 		}
 
-		inline qboolean MM_Logout( qboolean force ) {
+		inline bool MM_Logout( bool force ) {
 			return UI_IMPORT.MM_Logout( force );
 		}
 
@@ -459,7 +501,7 @@ namespace trap
 			return UI_IMPORT.MM_GetLastErrorMessage( buffer, buffer_size );
 		}
 
-		inline size_t MM_GetProfileURL( char *buffer, size_t buffer_size, qboolean rml ) {
+		inline size_t MM_GetProfileURL( char *buffer, size_t buffer_size, bool rml ) {
 			return UI_IMPORT.MM_GetProfileURL( buffer, buffer_size, rml );
 		}
 
@@ -503,6 +545,10 @@ namespace trap
 
 		inline void L10n_LoadLangPOFile( const char *filepath ) {
 			UI_IMPORT.L10n_LoadLangPOFile( filepath );
+		}
+
+		inline const char *L10n_GetUserLanguage( void ) {
+			return UI_IMPORT.L10n_GetUserLanguage();
 		}
 }
 

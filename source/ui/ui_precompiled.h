@@ -17,9 +17,11 @@
 // STD
 #include <string>
 #include <new>
+#include <functional>
 #include <algorithm>
 #include <stdexcept>
 #include <utility>
+#include <list>
 #include "kernel/ui_syscalls.h"
 
 #if defined (__APPLE__)

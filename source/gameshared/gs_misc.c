@@ -123,7 +123,7 @@ void GS_BBoxForEntityState( entity_state_t *state, vec3_t mins, vec3_t maxs )
 * When the animation is finished it will return frame -1. Takes looping into account. Looping animations
 * are never finished.
 */
-float GS_FrameForTime( int *frame, unsigned int curTime, unsigned int startTimeStamp, float frametime, int firstframe, int lastframe, int loopingframes, qboolean forceLoop )
+float GS_FrameForTime( int *frame, unsigned int curTime, unsigned int startTimeStamp, float frametime, int firstframe, int lastframe, int loopingframes, bool forceLoop )
 {
 	unsigned int runningtime, framecount;
 	int curframe;
@@ -306,49 +306,7 @@ void GS_Obituary( void *victim, int gender, void *attacker, int mod, char *messa
 		break;
 
 	default:
-		strcpy( message, "was killed by" );
+		strcpy( message, "was fragged by" );
 		break;
 	}
-}
-
-/*
-* GS_MatchMessageString
-*
-* Can be called by either the server or the client
-*/
-const char *GS_MatchMessageString( matchmessage_t mm )
-{
-	switch( mm )
-	{
-	default:
-	case MATCHMESSAGE_NONE:
-		return "";
-
-	case MATCHMESSAGE_CHALLENGERS_QUEUE:
-		return "'ESC' for in-game menu.\n"
-			"You are inside the challengers queue waiting for your turn to play.\n"
-			"Use the in-game menu, or type 'spec' in the console to exit the queue.\n"
-			"--\nUse the mouse buttons for switching spectator modes.";
-
-	case MATCHMESSAGE_ENTER_CHALLENGERS_QUEUE:
-		return "'ESC' for in-game menu.\n"
-			"Use the in-game menu or type 'join' in the console to enter the challengers queue.\n"
-			"Only players in the queue will have a turn to play against the last winner.\n"
-			"--\nUse the mouse buttons for switching spectator modes.";
-
-	case MATCHMESSAGE_SPECTATOR_MODES:
-		return "'ESC' for in-game menu.\n"
-			"Mouse buttons for switching spectator modes.\n"
-			"This message can be hidden by disabling 'help' in player setup menu.";
-
-	case MATCHMESSAGE_GET_READY:
-		return "Set yourself READY to start the match!\n"
-			"You can use the in-game menu or type 'ready' in the console.";
-
-	case MATCHMESSAGE_WAITING_FOR_PLAYERS:
-		return "Waiting for players.\n"
-			"'ESC' for in-game menu.";
-	}
-
-	return "";
 }

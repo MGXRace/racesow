@@ -29,7 +29,7 @@ cvar_t *g_teams_maxplayers;
 cvar_t *g_teams_allow_uneven;
 
 /*
-* G_Teams_InitLevel
+* G_Teams_Init
 */
 void G_Teams_Init( void )
 {
@@ -58,6 +58,7 @@ void G_Teams_Init( void )
 			ent->movetype = MOVETYPE_NOCLIP; // allow freefly
 			ent->r.client->teamstate.timeStamp = level.time;
 			ent->r.client->resp.timeStamp = level.time;
+			trap_GameCmd( ent, va( "qm %s", ent->r.client->level.quickMenuItems ) );
 		}
 	}
 
@@ -76,6 +77,29 @@ static int G_Teams_CompareMembers( const void *a, const void *b )
 		result = ENTNUM( edict_a ) - ENTNUM( edict_b );
 	return result;
 }
+
+// racesow
+/*
+* G_RS_Teams_CompareMembers
+* Modification of G_Teams_CompareMembers because flipping 
+* level.gametype.inverseScore would place 0.000 times on top.
+*/
+static int G_RS_Teams_CompareMembers( const void *a, const void *b )
+{
+	edict_t *edict_a = game.edicts + *(int *)a;
+	edict_t *edict_b = game.edicts + *(int *)b;
+	int score_a = edict_a->r.client->level.stats.score;
+	int score_b = edict_b->r.client->level.stats.score;
+	int result = ( level.gametype.inverseScore ? -1 : 1 ) * ( score_b - score_a );
+	if (!result)
+		result = Q_stricmp( edict_a->r.client->netname, edict_b->r.client->netname );
+	if (!result)
+		result = ENTNUM( edict_a ) - ENTNUM( edict_b );
+	if ( score_a * score_b ) // position lowest non-zero scores on top
+		return -result;
+	return result;
+}
+// !racesow
 
 /*
 * G_Teams_UpdateMembersList
@@ -108,7 +132,7 @@ void G_Teams_UpdateMembersList( void )
 			}
 		}
 
-		qsort( teamlist[team].playerIndices, teamlist[team].numplayers, sizeof( teamlist[team].playerIndices[0] ), G_Teams_CompareMembers );
+		qsort( teamlist[team].playerIndices, teamlist[team].numplayers, sizeof( teamlist[team].playerIndices[0] ), G_RS_Teams_CompareMembers ); // racesow
 
 		if( teamlist[team].numplayers )
 		{
@@ -322,7 +346,7 @@ void G_Teams_SetTeam( edict_t *ent, int team )
 		// trap_MR_SendPartialReport();
 	}
 
-	//clean scores at changing team
+	// clear scores at changing team
 	memset( &ent->r.client->level.stats, 0, sizeof( ent->r.client->level.stats ) );
 
 	memset( &ent->r.client->teamstate, 0, sizeof( ent->r.client->teamstate ) );
@@ -793,7 +817,7 @@ void G_Teams_ExecuteChallengersQueue( void )
 			return;
 		lasttime = time;
 		if( lasttime )
-			G_CenterPrintMsg( NULL, "Waiting... %i", lasttime );
+			G_CenterPrintFormatMsg( NULL, "Waiting... %s", va( "%i", lasttime ), NULL );
 		else
 			G_CenterPrintMsg( NULL, "" );
 		return;
@@ -1296,6 +1320,19 @@ void G_Say_Team( edict_t *who, char *msg, bool checkflood )
 		G_ChatMsg( NULL, who, true, "%s", msg );
 		return;
 	}
+
+#ifdef AUTHED_SAY
+	if( sv_mm_enable->integer && who->r.client && who->r.client->mm_session <= 0 )
+	{
+		// unauthed players are only allowed to chat to public at non play-time
+		// they are allowed to team-chat at any time
+		if( GS_MatchState() == MATCH_STATE_PLAYTIME )
+		{
+			G_PrintMsg( who, "%s", S_COLOR_YELLOW "You must authenticate to be able to chat with other players during the match.\n");
+			return;
+		}
+	}
+#endif
 
 	Q_strncpyz( current_color, S_COLOR_WHITE, sizeof( current_color ) );
 

@@ -66,12 +66,6 @@ private:
 	int mouse_x;
 	int mouse_y;
 
-	// koochi: focus event comes with mousedown event, so
-	// the first mousedown event must be ignored.
-	// Without this control, keyselect will always get
-	// MOUSE1 as first key.
-	bool firstMousedown;
-
 	// instancer contains the list of the keyselect widgets.
 	// This reference is needed to reset binds conflicts when
 	// a new key has been bound.
@@ -87,17 +81,12 @@ private:
 	static int GetKeyboardKey( Event &evt )
 	{
 		int rkey = evt.GetParameter<int>( "key_identifier", 0 );
-		return KeyConverter().fromRocketKey( rkey );
-	}
-	static int GetMouseKey( Event &evt )
-	{
-		int rkey = evt.GetParameter<int>( "button", 0 );
-		return KeyConverter().fromRocketMouse( rkey );
+		return KeyConverter::fromRocketKey( rkey );
 	}
 	static int GetWheelKey( Event &evt )
 	{
 		int rkey = evt.GetParameter<int>( "wheel_delta", 0 );
-		return KeyConverter().fromRocketWheel( rkey );
+		return KeyConverter::fromRocketWheel( rkey );
 	}
 
 	// generic utilization
@@ -107,6 +96,9 @@ private:
 
 	// resolve binds conflicts with the others keyselect using instancer.
 	void ResolveConflictsForKey( int key );
+
+	// Get the name of a keycode that is visible to the user.
+	std::string KeynumToString( int keynum ) const;
 
 	// Initialize the text inside the widget
 	// i.e. if "r" and "b" keys are bound, the text inside the widget

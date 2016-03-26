@@ -145,7 +145,7 @@ static inline void trap_FS_FCloseFile( int file )
 	FTLIB_IMPORT.FS_FCloseFile( file );
 }
 
-static inline qboolean trap_FS_RemoveFile( const char *filename )
+static inline bool trap_FS_RemoveFile( const char *filename )
 {
 	return FTLIB_IMPORT.FS_RemoveFile( filename );
 }
@@ -155,7 +155,7 @@ static inline int trap_FS_GetFileList( const char *dir, const char *extension, c
 	return FTLIB_IMPORT.FS_GetFileList( dir, extension, buf, bufsize, start, end );
 }
 
-static inline qboolean trap_FS_IsUrl( const char *url )
+static inline bool trap_FS_IsUrl( const char *url )
 {
 	return FTLIB_IMPORT.FS_IsUrl( url );
 }
@@ -163,12 +163,12 @@ static inline qboolean trap_FS_IsUrl( const char *url )
 // clock
 static inline unsigned int trap_Milliseconds( void )
 {
-	return FTLIB_IMPORT.Milliseconds();
+	return FTLIB_IMPORT.Sys_Milliseconds();
 }
 
-static inline quint64 trap_Microseconds( void )
+static inline uint64_t trap_Microseconds( void )
 {
-	return FTLIB_IMPORT.Microseconds();
+	return FTLIB_IMPORT.Sys_Microseconds();
 }
 
 // renderer
@@ -177,13 +177,23 @@ static inline struct shader_s *trap_R_RegisterPic( const char *name )
 	return FTLIB_IMPORT.R_RegisterPic( name );
 }
 
-static inline struct shader_s *trap_R_RegisterRawPic( const char *name, int width, int height, qbyte *data )
+static inline struct shader_s *trap_R_RegisterRawPic( const char *name, int width, int height, uint8_t *data, int samples )
 {
-	return FTLIB_IMPORT.R_RegisterRawPic( name, width, height, data );
+	return FTLIB_IMPORT.R_RegisterRawPic( name, width, height, data, samples );
 }
 
-static inline void trap_R_DrawStretchPic( int x, int y, int w, int h, float s1, float t1, float s2, float t2, vec4_t color, struct shader_s *shader ) {
+static inline struct shader_s *trap_R_RegisterRawAlphaMask( const char *name, int width, int height, uint8_t *data )
+{
+	return FTLIB_IMPORT.R_RegisterRawAlphaMask( name, width, height, data );
+}
+
+static inline void trap_R_DrawStretchPic( int x, int y, int w, int h, float s1, float t1, float s2, float t2, const vec4_t color, const struct shader_s *shader ) {
 	FTLIB_IMPORT.R_DrawStretchPic( x, y, w, h, s1, t1, s2, t2, color, shader );
+}
+
+static inline void trap_R_ReplaceRawSubPic( struct shader_s *shader, int x, int y, int width, int height, uint8_t *data )
+{
+	FTLIB_IMPORT.R_ReplaceRawSubPic( shader, x, y, width, height, data );
 }
 
 static inline void trap_R_Scissor( int x, int y, int w, int h )
@@ -196,6 +206,11 @@ static inline void trap_R_GetScissor( int *x, int *y, int *w, int *h )
 	FTLIB_IMPORT.R_GetScissor( x, y, w, h );
 }
 
+static inline void trap_R_ResetScissor( void )
+{
+	FTLIB_IMPORT.R_ResetScissor();
+}
+
 // memory
 static inline struct mempool_s *trap_MemAllocPool( const char *name, const char *filename, int fileline )
 {
@@ -205,6 +220,11 @@ static inline struct mempool_s *trap_MemAllocPool( const char *name, const char 
 static inline void *trap_MemAlloc( struct mempool_s *pool, size_t size, const char *filename, int fileline )
 {
 	return FTLIB_IMPORT.Mem_Alloc( pool, size, filename, fileline );
+}
+
+static inline void *trap_MemRealloc( void *data, size_t size, const char *filename, int fileline )
+{
+	return FTLIB_IMPORT.Mem_Realloc( data, size, filename, fileline );
 }
 
 static inline void trap_MemFree( void *data, const char *filename, int fileline )
@@ -224,10 +244,10 @@ static inline void trap_MemEmptyPool( struct mempool_s *pool, const char *filena
 
 static inline void *trap_LoadLibrary( char *name, dllfunc_t *funcs )
 {
-	return FTLIB_IMPORT.LoadLibrary( name, funcs );
+	return FTLIB_IMPORT.Sys_LoadLibrary( name, funcs );
 }
 
 static inline void trap_UnloadLibrary( void **lib )
 {
-	FTLIB_IMPORT.UnloadLibrary( lib );
+	FTLIB_IMPORT.Sys_UnloadLibrary( lib );
 }

@@ -56,6 +56,16 @@ int CG_VerticalAlignForHeight( const int y, int align, int height )
 	return ny;
 }
 
+int CG_HorizontalMovementForAlign( int align )
+{
+	int m = 1; // move to the right
+
+	if( align % 3 == 0 )  // left
+		m = -1; // move to the left
+
+	return m;
+}
+
 /*
 ===============================================================================
 
@@ -72,6 +82,7 @@ void CG_DrawHUDNumeric( int x, int y, int align, float *color, int charwidth, in
 	char num[16], *ptr;
 	int length;
 	int frame;
+	float u, v;
 
 	// draw number string
 	Q_snprintfz( num, sizeof( num ), "%i", value );
@@ -88,7 +99,9 @@ void CG_DrawHUDNumeric( int x, int y, int align, float *color, int charwidth, in
 			frame = STAT_MINUS;
 		else
 			frame = *ptr - '0';
-		trap_R_DrawStretchPic( x, y, charwidth, charheight, 0, 0, 1, 1, color, CG_MediaShader( cgs.media.sbNums[frame] ) );
+		u = ( frame & 3 ) * 0.25f;
+		v = ( frame >> 2 ) * 0.25f;
+		trap_R_DrawStretchPic( x, y, charwidth, charheight, u, v, u + 0.25f, v + 0.25f, color, CG_MediaShader( cgs.media.shaderSbNums ) );
 		x += charwidth;
 		ptr++;
 		length--;
@@ -103,6 +116,7 @@ void CG_DrawHUDField( int x, int y, int align, float *color, int size, int width
 	char num[16], *ptr;
 	int length, maxwidth, w, h;
 	int frame;
+	float u, v;
 
 	if( width < 0 )
 		return;
@@ -134,7 +148,9 @@ void CG_DrawHUDField( int x, int y, int align, float *color, int size, int width
 			frame = STAT_MINUS;
 		else
 			frame = *ptr -'0';
-		trap_R_DrawStretchPic( x, y, w, h, 0, 0, 1, 1, color, CG_MediaShader( cgs.media.sbNums[frame] ) );
+		u = ( frame & 3 ) * 0.25f;
+		v = ( frame >> 2 ) * 0.25f;
+		trap_R_DrawStretchPic( x, y, w, h, u, v, u + 0.25f, v + 0.25f, color, CG_MediaShader( cgs.media.shaderSbNums ) );
 		x += w;
 		ptr++;
 		length--;
@@ -225,6 +241,7 @@ void CG_DrawMiniMap( int x, int y, int iw, int ih, bool draw_playernames, bool d
 	int x_lefttop, y_lefttop, z_lefttop;	// the negative y coordinate (bottom of the map)
 	float map_div_w, map_div_h;
 	bool isSelf;
+	int nameDir = 1, nameAlign = ALIGN_LEFT_TOP;
 
 	if( !cg_showminimap->integer )
 		return;
@@ -248,6 +265,13 @@ void CG_DrawMiniMap( int x, int y, int iw, int ih, bool draw_playernames, bool d
 
 	x = CG_HorizontalAlignForWidth( x, align, iw );
 	y = CG_VerticalAlignForHeight( y, align, ih );
+
+	// if the minimap is in the right part of the screen, draw the names to the left
+	if( ( x + ( iw >> 1 ) ) > ( cgs.vidWidth >> 1 ) )
+	{
+		nameDir = -1;
+		nameAlign = ALIGN_RIGHT_TOP;
+	}
 
 	Vector4Copy( color, tmp_col );
 	Vector4Copy( colorWhite, tmp_white_alpha );
@@ -286,7 +310,7 @@ void CG_DrawMiniMap( int x, int y, int iw, int ih, bool draw_playernames, bool d
 	//alignment test, to display green dot at 0,0
 	//CG_DrawHUDRect( x + x_lefttop/map_div_w -1, y + y_lefttop/map_div_h -1,ALIGN_LEFT_TOP,3,3,1,1, colorGreen, CG_MediaShader( cgs.media.shaderMiniMap ) );
 
-	for( i = 0; i < cg.frame.numEntities; i++ )
+	for( i = cg.frame.numEntities - 1; i >= 0; i-- ) // draw players above everything
 	{
 		entnum = cg.frame.parsedEntities[i&( MAX_PARSE_ENTITIES-1 )].number;
 
@@ -333,6 +357,9 @@ void CG_DrawMiniMap( int x, int y, int iw, int ih, bool draw_playernames, bool d
 			}
 			else
 			{
+				// players might be SVF_FORCETEAM'ed for teammates, prevent ugly flickering for specs
+				if( cg.predictedPlayerState.stats[STAT_REALTEAM] == TEAM_SPECTATOR && !trap_CM_InPVS( cg.view.origin, cent->ent.origin ) )
+					continue;
 				CG_TeamColor( cent->current.team, tmp_col );
 			}
 
@@ -346,7 +373,7 @@ void CG_DrawMiniMap( int x, int y, int iw, int ih, bool draw_playernames, bool d
 			{
 				int thisX, thisY, thisSize;
 
-				thisSize = max( box_size, 8 );
+				thisSize = max( box_size, 8 ) * cgs.vidHeight / 600;
 				thisX = CG_VerticalAlignForHeight( x + (int)coords[0], ALIGN_CENTER_MIDDLE, thisSize );
 				thisY = CG_VerticalAlignForHeight( y + (int)coords[1] - thisSize, ALIGN_CENTER_MIDDLE, thisSize );
 				trap_R_DrawStretchPic( thisX, thisY, thisSize, thisSize, 0, 0, 1, 1, tmp_yellow_alpha, CG_MediaShader( cgs.media.shaderDownArrow ) );
@@ -354,9 +381,9 @@ void CG_DrawMiniMap( int x, int y, int iw, int ih, bool draw_playernames, bool d
 
 			// do we want names too?
 			if( draw_playernames == true )
-				trap_SCR_DrawString( x + (int)coords[0] + 8,
-				y + (int)coords[1] - 4,	ALIGN_LEFT_TOP,	COM_RemoveColorTokensExt( cgs.clientInfo[cent->current.number-1].name, qtrue ),
-				cgs.fontSystemSmall, tmp_yellow_alpha );
+				trap_SCR_DrawString( x + (int)coords[0] + 8 * nameDir * cgs.vidHeight / 600, y + (int)coords[1] - 4 * cgs.vidHeight / 600,
+					nameAlign, COM_RemoveColorTokensExt( cgs.clientInfo[cent->current.number-1].name, true ),
+					cgs.fontSystemSmall, tmp_yellow_alpha );
 		}
 		else if( cent->current.type == ET_MINIMAP_ICON )
 		{
@@ -368,6 +395,7 @@ void CG_DrawMiniMap( int x, int y, int iw, int ih, bool draw_playernames, bool d
 				thisSize = (float)cent->prev.frame + (float)( cent->current.frame - cent->prev.frame ) * cg.lerpfrac;
 				if( thisSize <= 0 )
 					thisSize = 18;
+				thisSize = thisSize * cgs.vidHeight / 600;
 
 				tmp_this_color[0] = (float)cent->ent.shaderRGBA[0] / 255.0f;
 				tmp_this_color[1] = (float)cent->ent.shaderRGBA[1] / 255.0f;
@@ -381,11 +409,17 @@ void CG_DrawMiniMap( int x, int y, int iw, int ih, bool draw_playernames, bool d
 		}
 		else if( cent->item && cent->item->icon )
 		{
+			int thisOffset = 8 * cgs.vidHeight / 600;
+			int thisSize = 15 * cgs.vidHeight / 600;
 			// if ALIGN_CENTER_MIDDLE or something is used, images are fucked
 			// so thats why they are set manually at the correct pos with -n
-			CG_DrawHUDRect( x+(int)coords[0]-8, y+(int)coords[1]-8, ALIGN_LEFT_TOP, 15, 15, 1, 1, tmp_white_alpha, trap_R_RegisterPic( cent->item->icon ) );
+			CG_DrawHUDRect( x + (int)coords[0] - thisOffset, y + (int)coords[1] - thisOffset,
+				ALIGN_LEFT_TOP, thisSize, thisSize, 1, 1, tmp_white_alpha, trap_R_RegisterPic( cent->item->icon ) );
 			if( draw_itemnames == true )
-				trap_SCR_DrawString( x + (int)coords[0] + 16, y + (int)coords[1] - 8, ALIGN_LEFT_TOP, cent->item->shortname, cgs.fontSystemSmall, tmp_yellow_alpha );
+			{
+				trap_SCR_DrawString( x + (int)coords[0] + 2 * nameDir * thisOffset, y + (int)coords[1] - thisOffset,
+					nameAlign, cent->item->shortname, cgs.fontSystemSmall, tmp_yellow_alpha );
+			}
 		}
 	}
 }

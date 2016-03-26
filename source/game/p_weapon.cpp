@@ -242,7 +242,7 @@ static void G_ProjectileTimePrestep( edict_t *projectile, int timeOffset )
 		return;
 	}
 
-	projectile->s.linearProjectileTimeStamp -= timeOffset;
+	projectile->s.linearMovementTimeStamp -= timeOffset;
 	SV_Physics_LinearProjectile( projectile );
 }
 
@@ -314,7 +314,6 @@ static edict_t *G_Fire_Gunblade_Blast( vec3_t origin, vec3_t angles, firedef_t *
 	int speed, knockback, stun, minDamage, minKnockback, radius, mod;
 	float damage;
 	int timeDelta;
-	float power;
 
 	timeDelta = 0;
 	if( owner && owner->r.client )
@@ -332,32 +331,10 @@ static edict_t *G_Fire_Gunblade_Blast( vec3_t origin, vec3_t angles, firedef_t *
 	minKnockback = firedef->minknockback;
 	radius = firedef->splash_radius;
 
-	// hackish : scale by power fraction
-	if( owner && owner->r.client )
-	{
-		power = (float)owner->r.client->ps.inventory[firedef->ammo_id] /(float)firedef->ammo_max;
-		damage *= power;
-		knockback *= power;
-		radius *= power;
-	}
-
 	if( is_quad )
 	{
 		damage *= QUAD_DAMAGE_SCALE;
 		knockback *= QUAD_KNOCKBACK_SCALE;
-	}
-
-	// scale by power fraction
-	if( damage < firedef->mindamage )
-		damage = firedef->mindamage;
-	if( minDamage < firedef->mindamage )
-		minDamage = firedef->mindamage;
-
-	// hackish : every shot wastes all player power
-	if( owner && owner->r.client && firedef->ammo_id )
-	{
-		owner->r.client->ps.inventory[firedef->ammo_id] = min( firedef->ammo_pickup * 2, firedef->ammo_max );
-		owner->r.client->resp.gunbladeChargeTimeStamp = level.time;
 	}
 
 	return W_Fire_GunbladeBlast( owner, origin, angles, damage, minKnockback, knockback, stun, minDamage,
@@ -834,7 +811,7 @@ void G_FireWeapon( edict_t *ent, int parm )
 
 		timeOffset = -projectile->timeDelta;
 		projectile->timeDelta = 0;
-		if( projectile->s.linearProjectile )
+		if( projectile->s.linearMovement )
 			projectile->s.modelindex2 = 0;
 
 		G_ProjectileTimePrestep( projectile, timeOffset );

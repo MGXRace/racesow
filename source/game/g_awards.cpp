@@ -30,7 +30,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 void G_PlayerAward( edict_t *ent, const char *awardMsg )
 {
-	edict_t *other, *third;
+	edict_t *other;
 	gameaward_t *ga;
 	int i, size;
 	score_stats_t *stats;
@@ -52,7 +52,7 @@ void G_PlayerAward( edict_t *ent, const char *awardMsg )
 		stats->awardAllocator = LinearAllocator( sizeof( gameaward_t ), 0, _G_LevelMalloc, _G_LevelFree );
 
 	// ch : this doesnt work for race right?
-	if( GS_MatchState() == MATCH_STATE_PLAYTIME )
+	if( GS_MatchState() == MATCH_STATE_PLAYTIME || GS_MatchState() == MATCH_STATE_POSTMATCH )
 	{
 		// ch : we store this locally to send to MM
 		// first check if we already have this one on the clients list
@@ -82,19 +82,8 @@ void G_PlayerAward( edict_t *ent, const char *awardMsg )
 		if( !other->r.client || !other->r.inuse || !other->r.client->resp.chase.active )
 			continue;
 
-		if( other->r.client->resp.chase.target == ent->s.number )
-		{
+		if( other->r.client->ps.POVnum == (unsigned)ENTNUM( ent ) ) {
 			trap_GameCmd( other, va( "aw \"%s\"", awardMsg ) );
-
-			// someone could also be chase-caming the guy in the chasecam
-			for( third = game.edicts + 1; PLAYERNUM( third ) < gs.maxclients; third++ )
-			{
-				if( !third->r.client || !third->r.inuse || !third->r.client->resp.chase.active )
-					continue;
-
-				if( third->r.client->resp.chase.target == other->s.number )
-					trap_GameCmd( third, va( "aw \"%s\"", awardMsg ) );
-			}
 		}
 	}
 }
@@ -430,6 +419,21 @@ void G_AwardPlayerKilled( edict_t *self, edict_t *inflictor, edict_t *attacker, 
 		G_PlayerAward( attacker, s );
 	}
 
+	if( teamlist[attacker->s.team].stats.frags == 1 )
+	{
+		int i;
+
+		for( i = TEAM_PLAYERS; i < GS_MAX_TEAMS; i++ ) {
+			if( i == attacker->s.team )
+				continue;
+			if( teamlist[i].stats.frags )
+				break;
+		}
+
+		if( i != GS_MAX_TEAMS )
+			G_PlayerAward( attacker, S_COLOR_YELLOW "First Frag!" );
+	}
+
 	// ch : weapon specific frags
 	if ( G_ModToAmmo( mod ) != AMMO_NONE )
 		attacker->r.client->level.stats.accuracy_frags[G_ModToAmmo( mod )-AMMO_GUNBLADE]++;
@@ -497,4 +501,40 @@ void G_AwardPlayerPickup( edict_t *self, edict_t *item )
 void G_AwardRaceRecord( edict_t *self )
 {
 	G_PlayerAward( self, S_COLOR_CYAN "New Record!" );
+}
+
+void G_AwardFairPlay( edict_t *ent )
+{
+	// only award during postmatch
+	if( GS_MatchState() != MATCH_STATE_POSTMATCH ) {
+		return;
+	}
+	if( level.finalMatchDuration <= SIGNIFICANT_MATCH_DURATION ) {
+		return;
+	}
+
+	gclient_t *client = ent->r.client;
+	// don't try to give the award to the server console
+	if( !client ) {
+		return;
+	}
+
+	// already awarded
+	if( client->resp.awardInfo.fairplay_award ) {
+		return;
+	}
+
+	// the player must not be muted during the match
+	if( client->level.stats.muted_count > 0 ) {
+		return;
+	}
+
+	// has he actually played?
+	if( !client->level.stats.had_playtime ) {
+		return;
+	}
+
+	client->level.stats.fairplay_count++;
+	client->resp.awardInfo.fairplay_award = true;
+	G_PlayerAward( ent, S_COLOR_CYAN "Fair Play!" );
 }

@@ -31,10 +31,10 @@ typedef struct
 	ALuint samples_length;
 } rawsrc_t;
 
-static size_t downmixbuf_size = 0;
-static qbyte *downmixbuf = NULL;
+static size_t splitmixbuf_size = 0;
+static uint8_t *splitmixbuf = NULL;
 
-#define RAW_SOUND_ENTNUM	-2
+#define RAW_SOUND_ENTNUM	-9999
 #define MAX_RAW_SOUNDS		16
 
 static rawsrc_t raw_sounds[MAX_RAW_SOUNDS];
@@ -43,40 +43,40 @@ static rawsrc_t raw_sounds[MAX_RAW_SOUNDS];
 * Local helper functions
 */
 
-static const qbyte *downmix_stereo_to_mono( unsigned samples, int width, const qbyte *data )
+static const uint8_t *split_stereo( unsigned samples, int width, const uint8_t *data )
 {
 	unsigned i;
 	size_t buf_size;
 
-	buf_size = samples * width;
-	if( buf_size > downmixbuf_size ) {
-		if( downmixbuf )
-			S_Free( downmixbuf );
-		downmixbuf = S_Malloc( buf_size );
-		downmixbuf_size = buf_size;
+	buf_size = samples * width * 2;
+	if( buf_size > splitmixbuf_size ) {
+		if( splitmixbuf )
+			S_Free( splitmixbuf );
+		splitmixbuf = S_Malloc( buf_size );
+		splitmixbuf_size = buf_size;
 	}
 
 	if( width == 2 ) {
 		short *in = ( short * )data;
-		short *out = ( short * )downmixbuf;
+		short *out = ( short * )splitmixbuf;
 		for( i = 0; i < samples; i++ ) {
-			int m = (in[0] + in[1]) >> 1;
-			out[0] = (short)bound( -0x8000, m, 0x7fff );
-			in += 2;
+			out[0] = in[0];
+			out[samples] = in[1];
+			in+=2;
 			out++;
 		}
-		return downmixbuf;
+		return splitmixbuf;
 	}
 	else if( width == 1 ) {
-		qbyte *in = ( qbyte * )data;
-		qbyte *out = ( qbyte * )downmixbuf;
+		uint8_t *in = ( uint8_t * )data;
+		uint8_t *out = ( uint8_t * )splitmixbuf;
 		for( i = 0; i < samples; i++ ) {
-			int m = (in[0] + in[1]) >> 1;
-			out[0] = (short)bound( -0xff, m, 0x7f );
-			in += 2;
+			out[0] = in[0];
+			out[samples] = in[1];
+			in+=2;
 			out++;
 		}
-		return downmixbuf;
+		return splitmixbuf;
 	}
 	return data;
 }
@@ -200,7 +200,7 @@ void S_StopRawSamples( void )
 
 static void S_RawSamples_( int entNum, float fvol, float attenuation, 
 	unsigned int samples, unsigned int rate, unsigned short width,
-	unsigned short channels, const qbyte *data, cvar_t *volumeVar )
+	unsigned short channels, const uint8_t *data, cvar_t *volumeVar )
 {
 	ALuint buffer;
 	ALuint format;
@@ -216,7 +216,7 @@ static void S_RawSamples_( int entNum, float fvol, float attenuation,
 	}
 
 	// Create the source if necessary
-	if( !rs->src )
+	if( !rs->src || !rs->src->isActive )
 	{
 		rs->src = S_AllocRawSource( entNum, fvol, attenuation, volumeVar );
 		if( !rs->src )
@@ -228,9 +228,6 @@ static void S_RawSamples_( int entNum, float fvol, float attenuation,
 		rs->source = S_GetALSource( rs->src );
 		rs->entNum = entNum;
 	}
-
-	if( !rs->src->isActive )
-		return;
 
 	qalGenBuffers( 1, &buffer );
 	if( ( error = qalGetError() ) != AL_NO_ERROR )
@@ -262,16 +259,14 @@ static void S_RawSamples_( int entNum, float fvol, float attenuation,
 
 	qalGetSourcei( rs->source, AL_SOURCE_STATE, &state );
 	if( state != AL_PLAYING )
-	{
 		qalSourcePlay( rs->source );
-	}
 }
 
 /*
 * S_RawSamples2
 */
 void S_RawSamples2( unsigned int samples, unsigned int rate, unsigned short width, 
-	unsigned short channels, const qbyte *data, qboolean music, float fvol )
+	unsigned short channels, const uint8_t *data, bool music, float fvol )
 {
 	S_RawSamples_( RAW_SOUND_ENTNUM, fvol, ATTN_NONE, samples, rate, width, 
 		channels, data, music ? s_musicvolume : s_volume );
@@ -281,7 +276,7 @@ void S_RawSamples2( unsigned int samples, unsigned int rate, unsigned short widt
 * Global functions (sound.h)
 */
 void S_RawSamples( unsigned int samples, unsigned int rate, unsigned short width, 
-	unsigned short channels, const qbyte *data, qboolean music )
+	unsigned short channels, const uint8_t *data, bool music )
 {
 	S_RawSamples_( RAW_SOUND_ENTNUM, 1, ATTN_NONE, samples, rate, width, 
 		channels, data, music ? s_musicvolume : s_volume );
@@ -292,20 +287,26 @@ void S_RawSamples( unsigned int samples, unsigned int rate, unsigned short width
 */
 void S_PositionedRawSamples( int entnum, float fvol, float attenuation, 
 		unsigned int samples, unsigned int rate, 
-		unsigned short width, unsigned short channels, const qbyte *data )
+		unsigned short width, unsigned short channels, const uint8_t *data )
 {
 	if( entnum < 0 ) {
 		entnum = 0;
 	}
-
-	// downmix stereo to mono because OpenAL doesn't spatialize stereo sources
-	if( attenuation > 0 && channels == 2 ) {
-		channels = 1;
-		data = downmix_stereo_to_mono( samples, width, data );
+	if( entnum == 0 ) {
+		attenuation = 0;
 	}
 
-	S_RawSamples_( entnum, fvol, attenuation, samples, rate, width, channels, data, 
-		s_volume );
+	// allocate separate sources because OpenAL doesn't spatialize stereo sounds
+	if( attenuation > 0 && channels == 2 ) {
+		const uint8_t *split_data = split_stereo( samples, width, data );
+		const uint8_t *left = split_data, *right = split_data + samples * width;
+
+		S_RawSamples_( entnum, fvol, attenuation, samples, rate, width, 1, left, s_volume );
+		S_RawSamples_( -entnum, fvol, attenuation, samples, rate, width, 1, right, s_volume );
+		return;
+	}
+
+	S_RawSamples_( entnum, fvol, attenuation, samples, rate, width, channels, data, s_volume );
 }
 
 /*
@@ -317,7 +318,6 @@ unsigned int S_GetRawSamplesLength( void )
 
 	rs = find_rawsound( RAW_SOUND_ENTNUM );
 	if( rs && rs->src ) {
-		update_rawsound( rs );
 		return rs->samples_length;
 	}
 	return 0;
@@ -336,7 +336,6 @@ unsigned int S_GetPositionedRawSamplesLength( int entnum )
 
 	rs = find_rawsound( entnum );
 	if( rs && rs->src ) {
-		update_rawsound( rs );
 		return rs->samples_length;
 	}
 	return 0;

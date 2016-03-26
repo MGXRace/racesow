@@ -38,6 +38,7 @@ class ScriptEventListener : public EventListener
 	bool loaded;
 	bool released;
 	int uniqueId;
+	Rocket::Core::Element *target;
 
 	/** DAMN MIXTURE OF Rocket::String, std::string and std::ostringstream!! **/
 
@@ -56,7 +57,7 @@ class ScriptEventListener : public EventListener
 		return String( os.str().c_str() );
 	}
 
-	void fetchFunctionPtr( const String &document_name )
+	void fetchFunctionPtr( asIScriptModule *module )
 	{
 		if( loaded ) {
 			return;
@@ -64,12 +65,9 @@ class ScriptEventListener : public EventListener
 
 		loaded = true;
 
-		asIScriptModule *module = asmodule->getModule( document_name.CString() );
-
 		assert( module != NULL );
 		if( module == NULL ) {
-			Com_Printf( S_COLOR_YELLOW "WARNING: ScriptEventListener unable to find module %s\n", 
-				document_name.CString() );
+			return;
 		}
 
 		// check direct function-name
@@ -106,36 +104,47 @@ class ScriptEventListener : public EventListener
 
 public:
 
-	ScriptEventListener( const String &s, int uniqueId ) : script( s ), 
-		loaded( false ), released( false ),  uniqueId( uniqueId )
+	ScriptEventListener( const String &s, int uniqueId, Element *target ) : script( s ), 
+		loaded( false ), released( false ),  uniqueId( uniqueId ), target( target )
 	{
 		asmodule = UI_Main::Get()->getAS();
+		if( target ) {
+			target->AddReference();
+		}
 	}
 
 	virtual ~ScriptEventListener() {
 		releaseFunctionPtr();
 	}
 
+	virtual void OnDetach( Element *element ) {
+		releaseFunctionPtr();
+	}
+
 	virtual void ProcessEvent( Event &event )
 	{
+		if( !target ) {
+			return;
+		}
 		if( released ) {
 			// the function pointer has been released, but
 			// we're hanging around, waiting for shutdown or GC
 			return;
 		}
 
-		// onloads cant be called within building process
-		if( /* event.GetType() == "load" && */ asmodule->isBuilding() )
-		{
-			// TODO: we should eliminate chain to DocumentLoader like this, so move
-			// event postponing somewhere else
-			UI_Main::Get()->getDocumentLoader()->postponeOnload( this, event );
+		Element *elem = event.GetTargetElement();
+
+		if( elem->GetOwnerDocument() != target->GetOwnerDocument() ) {
+			// make sure the event originated from the same document as the original target
 			return;
 		}
 
-		Element *elem = event.GetTargetElement();
+		UI_ScriptDocument *document = dynamic_cast<UI_ScriptDocument *>(elem->GetOwnerDocument());
+		if( !document || document->IsLoading() ) {
+			return;
+		}
 
-		fetchFunctionPtr( elem->GetOwnerDocument()->GetSourceURL() );
+		fetchFunctionPtr( document->GetModule() );
 
 		// push elem and event as parameters to the internal function
 		// and call it
@@ -148,7 +157,7 @@ public:
 		}
 
 		if( funcPtr.isValid() ) {
-			elem->AddReference();
+			target->AddReference();
 			event.AddReference();
 			try {
 				asIScriptContext *context = asmodule->getContext();
@@ -156,7 +165,7 @@ public:
 				// the context may actually be NULL after AS shutdown
 				if( context ) {
 					funcPtr.setContext( context );
-					funcPtr( elem, &event );
+					funcPtr( target, &event );
 				}
 			} catch( ASBind::Exception & ) {
 				Com_Printf( S_COLOR_RED "ScriptEventListener: Failed to call function %s %s\n", funcName.CString(), script.CString() );
@@ -169,8 +178,25 @@ public:
 
 	void releaseFunctionPtr()
 	{
+		if( released ) {
+			return;
+		}
+
 		released = true;
 		funcPtr.release();
+
+		if( target ) {
+			target->RemoveReference();
+			target = NULL;
+		}
+	}
+
+	bool isValid()
+	{
+		if( released ) {
+			return false;
+		}
+		return true;
 	}
 };
 
@@ -183,12 +209,12 @@ public:
 // TODO: make it possible to input inline scripts as event callbacks!
 class ScriptEventCaller : public EventListener
 {
-	ASInterface *asmodule;
+	ASInterface *as;
 	// We have to make Event const, cause we cant use &inout with value-types
 	ASBind::FunctionPtr<void( Element*, Event* )> funcPtr;
 
 public:
-	ScriptEventCaller( ASInterface *as, asIScriptFunction *func ) : asmodule( as )
+	ScriptEventCaller( ASInterface *as, asIScriptFunction *func ) : as( as )
 	{
 		funcPtr = ASBind::CreateFunctionPtr( func, funcPtr );
 		if( !funcPtr.isValid() ) {
@@ -210,14 +236,12 @@ public:
 
 	virtual void ProcessEvent( Event &event )
 	{
-		// onloads cant be called within building process
-		if( /* event.GetType() == "load" && */ asmodule->isBuilding() )
-		{
-			UI_Main::Get()->getDocumentLoader()->postponeOnload( this, event );
+		Element *elem = event.GetTargetElement();
+
+		UI_ScriptDocument *document = dynamic_cast<UI_ScriptDocument *>(elem->GetOwnerDocument());
+		if( !document || document->IsLoading() ) {
 			return;
 		}
-
-		Element *elem = event.GetTargetElement();
 
 		if( UI_Main::Get()->debugOn() ) {
 			Com_Printf( "ScriptEventCaller: Event %s, target %s, func %s\n",
@@ -227,15 +251,14 @@ public:
 		}
 
 		if( funcPtr.isValid() ) {
-			elem->AddReference();
 			event.AddReference();
 			try {
-				asIScriptContext *context = asmodule->getContext();
+				asIScriptContext *context = as->getContext();
 
 				// the context may actually be NULL after AS shutdown
 				if( context ) {
 					funcPtr.setContext( context );
-					funcPtr( elem, &event );
+					funcPtr( NULL, &event );
 				}
 			} catch( ASBind::Exception & ) {
 				Com_Printf( S_COLOR_RED "ScriptEventListener: Failed to call function %s\n", funcPtr.getName() );
@@ -278,25 +301,23 @@ public:
 		if( !value.Length() )
 			return 0;
 
-		ScriptEventListener *listener = __new__( ScriptEventListener )( value, idCounter++ );
+		ScriptEventListener *listener = __new__( ScriptEventListener )( value, idCounter++, elem );
 		listeners.push_back( listener );
 		return listener;
 	}
 
 	/// Releases pointers to AS functions held by allocated listeners
-	void ReleaseListnersFunctions()
+	void ReleaseListenersFunctions()
 	{
-		listenerList::iterator it;
-		for( it = listeners.begin(); it != listeners.end(); ++it ) {
+		for( listenerList::iterator it = listeners.begin(); it != listeners.end(); ++it ) {
 			(*it)->releaseFunctionPtr();
 		}
 	}
 
 	/// Releases all allocated listeners
-	void ReleaseListners()
+	void ReleaseListeners()
 	{
-		listenerList::iterator it;
-		for( it = listeners.begin(); it != listeners.end(); ++it ) {
+		for( listenerList::iterator it = listeners.begin(); it != listeners.end(); ++it ) {
 			__delete__( *it );
 		}
 		listeners.clear();
@@ -304,8 +325,21 @@ public:
 
 	void Release()
 	{
-		ReleaseListners();
+		ReleaseListeners();
 		__delete__( this );
+	}
+
+	void GarbageCollect( void )
+	{
+		for( listenerList::iterator it = listeners.begin(); it != listeners.end(); ) {
+			ScriptEventListener *listener = *it;
+			if( !listener->isValid() ) {
+				it = listeners.erase( it );
+				__delete__( listener );
+				continue;
+			}
+			 ++it;
+		}
 	}
 };
 
@@ -320,7 +354,15 @@ void ReleaseScriptEventListenersFunctions( EventListenerInstancer *instancer )
 {
 	ScriptEventListenerInstancer *scriptInstancer = static_cast<ScriptEventListenerInstancer *>( instancer );
 	if( scriptInstancer ) {
-		scriptInstancer->ReleaseListnersFunctions();
+		scriptInstancer->ReleaseListenersFunctions();
+	}
+}
+
+void GarbageCollectEventListenersFunctions( EventListenerInstancer *instancer )
+{
+	ScriptEventListenerInstancer *scriptInstancer = static_cast<ScriptEventListenerInstancer *>( instancer );
+	if( scriptInstancer ) {
+		scriptInstancer->GarbageCollect();
 	}
 }
 

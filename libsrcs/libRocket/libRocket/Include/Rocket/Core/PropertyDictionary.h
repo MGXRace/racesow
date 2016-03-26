@@ -28,13 +28,13 @@
 #ifndef ROCKETCOREPROPERTYDICTIONARY_H
 #define ROCKETCOREPROPERTYDICTIONARY_H
 
-#include <Rocket/Core/Header.h>
-#include <Rocket/Core/Property.h>
+#include "Header.h"
+#include "Property.h"
 
 namespace Rocket {
 namespace Core {
 
-typedef std::map< String, Property > PropertyMap;
+typedef std::unordered_map< String, Property, StringHash > PropertyMap;
 
 /**
 	A dictionary to property names to values.

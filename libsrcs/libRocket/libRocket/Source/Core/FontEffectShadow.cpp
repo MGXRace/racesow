@@ -48,18 +48,5 @@ bool FontEffectShadow::Initialise(const Vector2i& _offset)
 	return true;
 }
 
-// Returns true.
-bool FontEffectShadow::HasUniqueTexture() const
-{
-	return false;
-}
-
-// Resizes and repositions the glyph to fit the outline.
-bool FontEffectShadow::GetGlyphMetrics(Vector2i& origin, Vector2i& ROCKET_UNUSED(dimensions), const FontGlyph& ROCKET_UNUSED(glyph)) const
-{
-	origin += offset;
-	return true;
-}
-
 }
 }

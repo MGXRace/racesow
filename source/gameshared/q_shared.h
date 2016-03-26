@@ -87,7 +87,9 @@ extern float ( *LittleFloat )(float l);
 
 #define DEFAULT_SCOREBOARD_FONT_FAMILY		"Droid Sans"
 #define DEFAULT_SCOREBOARD_MONO_FONT_FAMILY	"Droid Sans Mono"
-#define DEFAULT_SCOREBOARD_FONT_SIZE		14
+#define DEFAULT_SCOREBOARD_TITLE_FONT_FAMILY "Hemi Head"
+#define DEFAULT_SCOREBOARD_FONT_SIZE		12
+#define DEFAULT_SCOREBOARD_TITLE_FONT_SIZE	24
 #define DEFAULT_SCOREBOARD_FONT_STYLE		0
 
 #define ALIGN_LEFT_TOP				0
@@ -107,8 +109,8 @@ extern float ( *LittleFloat )(float l);
 //==============================================================
 
 char *COM_SanitizeFilePath( char *filename );
-qboolean COM_ValidateFilename( const char *filename );
-qboolean COM_ValidateRelativeFilename( const char *filename );
+bool COM_ValidateFilename( const char *filename );
+bool COM_ValidateRelativeFilename( const char *filename );
 void COM_StripExtension( char *filename );
 const char *COM_FileExtension( const char *in );
 void COM_DefaultExtension( char *path, const char *extension, size_t size );
@@ -118,15 +120,15 @@ void COM_StripFilename( char *filename );
 int COM_FilePathLength( const char *in );
 
 // data is an in/out parm, returns a parsed out token
-char *COM_ParseExt2( const char **data_p, qboolean nl, qboolean sq );
-#define COM_ParseExt( data_p, nl ) COM_ParseExt2( (const char **)data_p, nl, qtrue )
-#define COM_Parse( data_p )   COM_ParseExt( data_p, qtrue )
+char *COM_ParseExt2( const char **data_p, bool nl, bool sq );
+#define COM_ParseExt( data_p, nl ) COM_ParseExt2( (const char **)data_p, nl, true )
+#define COM_Parse( data_p )   COM_ParseExt( data_p, true )
 
 int COM_Compress( char *data_p );
 const char *COM_RemoveJunkChars( const char *in );
 int COM_ReadColorRGBString( const char *in );
 int COM_ValidatePlayerColor( int rgbcolor );
-qboolean COM_ValidateConfigstring( const char *string );
+bool COM_ValidateConfigstring( const char *string );
 
 //==============================================================
 //
@@ -143,6 +145,8 @@ qboolean COM_ValidateConfigstring( const char *string );
 
 #define MAX_NAME_BYTES				32			// max length of a player name, including trailing \0
 #define MAX_NAME_CHARS				15			// max visible characters in a name (color tokens and \0 not counted)
+
+#define MAX_CHAT_BYTES				151			// max length of a chat message, including color tokens and trailing \0
 
 #ifndef STR_HELPER
 #define STR_HELPER( s )					# s
@@ -199,7 +203,7 @@ char *Q_strlwr( char *s );
 const char *Q_strlocate( const char *s, const char *substr, int skip );
 size_t Q_strcount( const char *s, const char *substr );
 const char *Q_strrstr( const char *s, const char *substr );
-qboolean Q_isdigit( const char *str );
+bool Q_isdigit( const char *str );
 char *Q_trim( char *s );
 char *Q_chrreplace( char *s, const char subj, const char repl );
 
@@ -221,17 +225,24 @@ void *Q_memset32( void *dest, int c, size_t dwords );
 #define GRABCHAR_CHAR	1
 #define GRABCHAR_COLOR	2
 int Q_GrabCharFromColorString( const char **pstr, char *c, int *colorindex );
-const char *COM_RemoveColorTokensExt( const char *str, qboolean draw );
-#define COM_RemoveColorTokens(in) COM_RemoveColorTokensExt(in,qfalse)
+const char *COM_RemoveColorTokensExt( const char *str, bool draw );
+#define COM_RemoveColorTokens(in) COM_RemoveColorTokensExt(in,false)
 int COM_SanitizeColorString (const char *str, char *buf, int bufsize, int maxprintablechars, int startcolor);
 const char *Q_ColorStringTerminator( const char *str, int finalcolor );
+int Q_ColorStrLastColor( int previous, const char *s, int maxlen );
 
-char *Q_WCharToUtf8( qwchar wc );
-qwchar Q_GrabWCharFromUtf8String (const char **pstr);
-qwchar Q_GrabWCharFromColorString( const char **pstr, qwchar *wc, int *colorindex );
+size_t Q_WCharUtf8Length( wchar_t wc );
+size_t Q_WCharToUtf8( wchar_t wc, char *dest, size_t bufsize );
+char *Q_WCharToUtf8Char( wchar_t wc );
+size_t Q_WCharToUtf8String( const wchar_t *ws, char *dest, size_t bufsize );
+wchar_t Q_GrabWCharFromUtf8String (const char **pstr);
+int Q_GrabWCharFromColorString( const char **pstr, wchar_t *wc, int *colorindex );
 #define UTF8SYNC_LEFT 0
 #define UTF8SYNC_RIGHT 1
 int Q_Utf8SyncPos( const char *str, int pos, int dir );
+void Q_FixTruncatedUtf8( char *str );
+bool Q_IsBreakingSpace( const char *str );
+bool Q_IsBreakingSpaceChar( wchar_t c );
 
 float *tv( float x, float y, float z );
 char *vtos( float v[3] );
@@ -246,8 +257,9 @@ char *va( const char *format, ... );
 
 char *Info_ValueForKey( const char *s, const char *key );
 void Info_RemoveKey( char *s, const char *key );
-qboolean Info_SetValueForKey( char *s, const char *key, const char *value );
-qboolean Info_Validate( const char *s );
+bool Info_SetValueForKey( char *s, const char *key, const char *value );
+bool Info_Validate( const char *s );
+void Info_CleanValue( const char *in, char *out, size_t outsize );
 
 //==============================================
 
@@ -343,12 +355,30 @@ void Com_Error( com_error_code_t code, const char *format, ... );
 #define FS_GZ				0x100	// compress on write and decompress on read automatically
 									// doesn't work for pk3 files
 #define FS_UPDATE			0x200
+#define FS_SECURE			0x400
+#define FS_CACHE			0x800
 
 #define FS_RWA_MASK			(FS_READ|FS_WRITE|FS_APPEND)
 
 #define FS_SEEK_CUR			0
 #define FS_SEEK_SET			1
 #define FS_SEEK_END			2
+
+typedef enum
+{
+	FS_MEDIA_IMAGES,
+
+	FS_MEDIA_NUM_TYPES
+} fs_mediatype_t;
+
+//==============================================================
+//
+//THREADS
+//
+//==============================================================
+
+// equals to INFINITE on Windows and SDL_MUTEX_MAXWAIT
+#define Q_THREADS_WAIT_INFINITE 0xFFFFFFFF
 
 //==============================================================
 
@@ -402,6 +432,28 @@ typedef enum {
 
 	QFONT_STYLE_MASK			= (1<<2)-1
 } qfontstyle_t;
+
+// font drawing flags
+typedef enum {
+	TEXTDRAWFLAG_NO_COLORS	= 1 << 0,	// draw color codes instead of applying them
+	TEXTDRAWFLAG_KERNING	= 1 << 1
+} textdrawflag_t;
+
+typedef enum
+{
+	TOUCH_DOWN,
+	TOUCH_UP,
+	TOUCH_MOVE
+} touchevent_t;
+
+typedef enum
+{
+	IN_DEVICE_KEYBOARD		= 1 << 0,
+	IN_DEVICE_MOUSE			= 1 << 1,
+	IN_DEVICE_JOYSTICK		= 1 << 2,
+	IN_DEVICE_TOUCHSCREEN	= 1 << 3,
+	IN_DEVICE_SOFTKEYBOARD	= 1 << 4
+} in_devicemask_t;
 
 #ifdef __cplusplus
 };

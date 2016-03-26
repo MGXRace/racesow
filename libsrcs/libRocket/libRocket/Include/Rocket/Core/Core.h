@@ -28,53 +28,53 @@
 #ifndef ROCKETCORECORE_H
 #define ROCKETCORECORE_H
 
-#include <Rocket/Core/Types.h>
-#include <Rocket/Core/Math.h>
-#include <Rocket/Core/Header.h>
-#include <Rocket/Core/Box.h>
-#include <Rocket/Core/Context.h>
-#include <Rocket/Core/ContextInstancer.h>
-#include <Rocket/Core/Decorator.h>
-#include <Rocket/Core/DecoratorInstancer.h>
-#include <Rocket/Core/Element.h>
-#include <Rocket/Core/ElementDocument.h>
-#include <Rocket/Core/ElementInstancer.h>
-#include <Rocket/Core/ElementInstancerGeneric.h>
-#include <Rocket/Core/ElementReference.h>
-#include <Rocket/Core/ElementScroll.h>
-#include <Rocket/Core/ElementText.h>
-#include <Rocket/Core/ElementUtilities.h>
-#include <Rocket/Core/Event.h>
-#include <Rocket/Core/EventInstancer.h>
-#include <Rocket/Core/EventListener.h>
-#include <Rocket/Core/EventListenerInstancer.h>
-#include <Rocket/Core/Factory.h>
-#include <Rocket/Core/FileInterface.h>
-#include <Rocket/Core/Font.h>
-#include <Rocket/Core/FontDatabase.h>
-#include <Rocket/Core/FontEffect.h>
-#include <Rocket/Core/FontGlyph.h>
-#include <Rocket/Core/Geometry.h>
-#include <Rocket/Core/GeometryUtilities.h>
-#include <Rocket/Core/Input.h>
-#include <Rocket/Core/Log.h>
-#include <Rocket/Core/Plugin.h>
-#include <Rocket/Core/Property.h>
-#include <Rocket/Core/PropertyDefinition.h>
-#include <Rocket/Core/PropertyDictionary.h>
-#include <Rocket/Core/PropertyParser.h>
-#include <Rocket/Core/PropertySpecification.h>
-#include <Rocket/Core/RenderInterface.h>
-#include <Rocket/Core/String.h>
-#include <Rocket/Core/StyleSheet.h>
-#include <Rocket/Core/StyleSheetKeywords.h>
-#include <Rocket/Core/StyleSheetSpecification.h>
-#include <Rocket/Core/SystemInterface.h>
-#include <Rocket/Core/Texture.h>
-#include <Rocket/Core/Types.h>
-#include <Rocket/Core/Vertex.h>
-#include <Rocket/Core/XMLNodeHandler.h>
-#include <Rocket/Core/XMLParser.h>
+#include "Types.h"
+#include "Math.h"
+#include "Header.h"
+#include "Box.h"
+#include "Context.h"
+#include "ContextInstancer.h"
+#include "Decorator.h"
+#include "DecoratorInstancer.h"
+#include "Element.h"
+#include "ElementDocument.h"
+#include "ElementInstancer.h"
+#include "ElementInstancerGeneric.h"
+#include "ElementReference.h"
+#include "ElementScroll.h"
+#include "ElementText.h"
+#include "ElementUtilities.h"
+#include "Event.h"
+#include "EventInstancer.h"
+#include "EventListener.h"
+#include "EventListenerInstancer.h"
+#include "Factory.h"
+#include "FileInterface.h"
+#include "Font.h"
+#include "FontDatabase.h"
+#include "FontEffect.h"
+#include "FontProviderInterface.h"
+#include "Geometry.h"
+#include "GeometryUtilities.h"
+#include "Input.h"
+#include "Log.h"
+#include "Plugin.h"
+#include "Property.h"
+#include "PropertyDefinition.h"
+#include "PropertyDictionary.h"
+#include "PropertyParser.h"
+#include "PropertySpecification.h"
+#include "RenderInterface.h"
+#include "String.h"
+#include "StyleSheet.h"
+#include "StyleSheetKeywords.h"
+#include "StyleSheetSpecification.h"
+#include "SystemInterface.h"
+#include "Texture.h"
+#include "Types.h"
+#include "Vertex.h"
+#include "XMLNodeHandler.h"
+#include "XMLParser.h"
 
 namespace Rocket {
 namespace Core {
@@ -97,11 +97,18 @@ ROCKETCORE_API void Shutdown();
 ROCKETCORE_API String GetVersion();
 
 /// Sets the interface through which all system requests are made. This must be called before Initialise().
-/// @param[in] system_interface The application-specified logging interface.
+/// @param[in] system_interface The application-specified system interface.
 ROCKETCORE_API void SetSystemInterface(SystemInterface* system_interface);
 /// Returns Rocket's system interface.
 /// @return Rocket's system interface.
 ROCKETCORE_API SystemInterface* GetSystemInterface();
+
+/// Sets the interface through which all font subsystem requests are made. This must be called before Initialise().
+/// @param[in] fontprovider_interface The application-specified font provider.
+ROCKETCORE_API void SetFontProviderInterface(FontProviderInterface* fontprovider_interface);
+/// Returns Rocket's system interface.
+/// @return Rocket's system interface.
+ROCKETCORE_API FontProviderInterface* GetFontProviderInterface();
 
 /// Sets the interface through which all rendering requests are made. This is not required to be called, but if it is
 /// it must be called before Initialise(). If no render interface is specified, then all contexts must have a custom

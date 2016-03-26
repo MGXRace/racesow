@@ -20,7 +20,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // Z_zone.c
 
 #include "qcommon.h"
-#include "sys_threads.h"
 
 //#define MEMTRASH
 
@@ -114,8 +113,8 @@ mempool_t *zoneMemPool;
 
 static qmutex_t *memMutex;
 
-static qboolean memory_initialized = qfalse;
-static qboolean commands_initialized = qfalse;
+static bool memory_initialized = false;
+static bool commands_initialized = false;
 
 static void _Mem_Error( const char *format, ... )
 {
@@ -176,7 +175,7 @@ void *_Mem_AllocExt( mempool_t *pool, size_t size, size_t alignment, int z, int 
 	mem->sentinel1 = MEMHEADER_SENTINEL1;
 
 	// we have to use only a single byte for this sentinel, because it may not be aligned, and some platforms can't use unaligned accesses
-	*( (qbyte *) mem + sizeof( memheader_t ) + mem->size ) = MEMHEADER_SENTINEL2;
+	*( (uint8_t *) mem + sizeof( memheader_t ) + mem->size ) = MEMHEADER_SENTINEL2;
 
 	// append to head of list
 	mem->next = pool->chain;
@@ -188,9 +187,9 @@ void *_Mem_AllocExt( mempool_t *pool, size_t size, size_t alignment, int z, int 
 	QMutex_Unlock( memMutex );
 
 	if( z )
-		memset( (void *)( (qbyte *) mem + sizeof( memheader_t ) ), 0, mem->size );
+		memset( (void *)( (uint8_t *) mem + sizeof( memheader_t ) ), 0, mem->size );
 
-	return (void *)( (qbyte *) mem + sizeof( memheader_t ) );
+	return (void *)( (uint8_t *) mem + sizeof( memheader_t ) );
 }
 
 void *_Mem_Alloc( mempool_t *pool, size_t size, int musthave, int canthave, const char *filename, int fileline )
@@ -212,12 +211,13 @@ void *_Mem_Realloc( void *data, size_t size, const char *filename, int fileline 
 		return NULL;
 	}
 
-	mem = ( memheader_t * )( (qbyte *) data - sizeof( memheader_t ) );
+	mem = ( memheader_t * )( (uint8_t *) data - sizeof( memheader_t ) );
 	if( size <= mem->size )
 		return data;
 
 	newdata = Mem_AllocExt( mem->pool, size, 0 );
 	memcpy( newdata, data, mem->size );
+	memset( (uint8_t *)newdata + mem->size, 0, size - mem->size );
 	Mem_Free( data );
 
 	return newdata;
@@ -245,14 +245,14 @@ void _Mem_Free( void *data, int musthave, int canthave, const char *filename, in
 		//_Mem_Error( "Mem_Free: data == NULL (called at %s:%i)", filename, fileline );
 		return;
 
-	mem = ( memheader_t * )( (qbyte *) data - sizeof( memheader_t ) );
+	mem = ( memheader_t * )( (uint8_t *) data - sizeof( memheader_t ) );
 
 	assert( mem->sentinel1 == MEMHEADER_SENTINEL1 );
-	assert( *( (qbyte *) mem + sizeof( memheader_t ) + mem->size ) == MEMHEADER_SENTINEL2 );
+	assert( *( (uint8_t *) mem + sizeof( memheader_t ) + mem->size ) == MEMHEADER_SENTINEL2 );
 
 	if( mem->sentinel1 != MEMHEADER_SENTINEL1 )
 		_Mem_Error( "Mem_Free: trashed header sentinel 1 (alloc at %s:%i, free at %s:%i)", mem->filename, mem->fileline, filename, fileline );
-	if( *( (qbyte *)mem + sizeof( memheader_t ) + mem->size ) != MEMHEADER_SENTINEL2 )
+	if( *( (uint8_t *)mem + sizeof( memheader_t ) + mem->size ) != MEMHEADER_SENTINEL2 )
 		_Mem_Error( "Mem_Free: trashed header sentinel 2 (alloc at %s:%i, free at %s:%i)", mem->filename, mem->fileline, filename, fileline );
 
 	pool = mem->pool;
@@ -391,7 +391,7 @@ void _Mem_FreePool( mempool_t **pool, int musthave, int canthave, const char *fi
 		_Mem_Error( "Mem_FreePool: pool already free (freepool at %s:%i)", filename, fileline );
 
 	while( ( *pool )->chain )  // free memory owned by the pool
-		Mem_Free( (void *)( (qbyte *)( *pool )->chain + sizeof( memheader_t ) ) );
+		Mem_Free( (void *)( (uint8_t *)( *pool )->chain + sizeof( memheader_t ) ) );
 
 	*chainAddress = ( *pool )->next;
 
@@ -444,7 +444,7 @@ void _Mem_EmptyPool( mempool_t *pool, int musthave, int canthave, const char *fi
 	}
 #endif
 	while( pool->chain )        // free memory owned by the pool
-		Mem_Free( (void *)( (qbyte *) pool->chain + sizeof( memheader_t ) ) );
+		Mem_Free( (void *)( (uint8_t *) pool->chain + sizeof( memheader_t ) ) );
 }
 
 size_t Mem_PoolTotalSize( mempool_t *pool )
@@ -461,14 +461,14 @@ void _Mem_CheckSentinels( void *data, const char *filename, int fileline )
 	if( data == NULL )
 		_Mem_Error( "Mem_CheckSentinels: data == NULL (sentinel check at %s:%i)", filename, fileline );
 
-	mem = (memheader_t *)( (qbyte *) data - sizeof( memheader_t ) );
+	mem = (memheader_t *)( (uint8_t *) data - sizeof( memheader_t ) );
 
 	assert( mem->sentinel1 == MEMHEADER_SENTINEL1 );
-	assert( *( (qbyte *) mem + sizeof( memheader_t ) + mem->size ) == MEMHEADER_SENTINEL2 );
+	assert( *( (uint8_t *) mem + sizeof( memheader_t ) + mem->size ) == MEMHEADER_SENTINEL2 );
 
 	if( mem->sentinel1 != MEMHEADER_SENTINEL1 )
 		_Mem_Error( "Mem_CheckSentinels: trashed header sentinel 1 (block allocated at %s:%i, sentinel check at %s:%i)", mem->filename, mem->fileline, filename, fileline );
-	if( *( (qbyte *) mem + sizeof( memheader_t ) + mem->size ) != MEMHEADER_SENTINEL2 )
+	if( *( (uint8_t *) mem + sizeof( memheader_t ) + mem->size ) != MEMHEADER_SENTINEL2 )
 		_Mem_Error( "Mem_CheckSentinels: trashed header sentinel 2 (block allocated at %s:%i, sentinel check at %s:%i)", mem->filename, mem->fileline, filename, fileline );
 }
 
@@ -493,7 +493,7 @@ static void _Mem_CheckSentinelsPool( mempool_t *pool, const char *filename, int 
 		_Mem_Error( "_Mem_CheckSentinelsPool: trashed pool sentinel 2 (allocpool at %s:%i, sentinel check at %s:%i)", pool->filename, pool->fileline, filename, fileline );
 
 	for( mem = pool->chain; mem; mem = mem->next )
-		_Mem_CheckSentinels( (void *)( (qbyte *) mem + sizeof( memheader_t ) ), filename, fileline );
+		_Mem_CheckSentinels( (void *)( (uint8_t *) mem + sizeof( memheader_t ) ), filename, fileline );
 }
 
 void _Mem_CheckSentinelsGlobal( const char *filename, int fileline )
@@ -618,13 +618,13 @@ static void MemList_f( void )
 	switch( Cmd_Argc() )
 	{
 	case 1:
-		Mem_PrintList( qtrue, qfalse );
+		Mem_PrintList( true, false );
 		Mem_PrintStats();
 		return;
 	case 2:
 		if( !Q_stricmp( Cmd_Argv( 1 ), "all" ) )
 		{
-			Mem_PrintList( qtrue, qtrue );
+			Mem_PrintList( true, true );
 			Mem_PrintStats();
 			break;
 		}
@@ -640,7 +640,7 @@ static void MemList_f( void )
 		if( !Q_stricmp( pool->name, name ) )
 		{
 			Com_Printf( "memory pool list:\n" "size    name\n" );
-			Mem_PrintPoolStats( pool, qtrue, qtrue );
+			Mem_PrintPoolStats( pool, true, true );
 			return;
 		}
 	}
@@ -667,7 +667,7 @@ void Memory_Init( void )
 	zoneMemPool = Mem_AllocPool( NULL, "Zone" );
 	tempMemPool = Mem_AllocTempPool( "Temporary Memory" );
 
-	memory_initialized = qtrue;
+	memory_initialized = true;
 }
 
 /*
@@ -677,13 +677,12 @@ void Memory_InitCommands( void )
 {
 	assert( !commands_initialized );
 
-	
 	developerMemory = Cvar_Get( "developerMemory", "0", 0 );
 
 	Cmd_AddCommand( "memlist", MemList_f );
 	Cmd_AddCommand( "memstats", MemStats_f );
 
-	commands_initialized = qtrue;
+	commands_initialized = true;
 }
 
 /*
@@ -719,7 +718,7 @@ void Memory_Shutdown( void )
 
 	QMutex_Destroy( &memMutex );
 
-	memory_initialized = qfalse;
+	memory_initialized = false;
 }
 
 /*
