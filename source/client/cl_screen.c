@@ -54,6 +54,7 @@ static cvar_t *scr_graphshift;
 
 static cvar_t *con_fontSystemFamily;
 static cvar_t *con_fontSystemFallbackFamily;
+static cvar_t *con_fontSystemMonoFamily;
 static cvar_t *con_fontSystemConsoleSize;
 
 //
@@ -91,7 +92,7 @@ static void SCR_RegisterConsoleFont( void )
 	float pixelRatio = Con_GetPixelRatio();
 
 	// register system fonts
-	con_fontSystemFamilyName = con_fontSystemFamily->string;
+	con_fontSystemFamilyName = con_fontSystemMonoFamily->string;
 	if( !con_fontSystemConsoleSize->integer ) {
 		Cvar_SetValue( con_fontSystemConsoleSize->name, DEFAULT_SYSTEM_FONT_SMALL_SIZE );
 	} else if( con_fontSystemConsoleSize->integer > DEFAULT_SYSTEM_FONT_SMALL_SIZE * 2 ) {
@@ -104,13 +105,13 @@ static void SCR_RegisterConsoleFont( void )
 	cls.consoleFont = SCR_RegisterFont( con_fontSystemFamilyName, con_fontSystemStyle, size );
 	if( !cls.consoleFont )
 	{
-		Cvar_ForceSet( con_fontSystemFamily->name, con_fontSystemFamily->dvalue );
-		con_fontSystemFamilyName = con_fontSystemFamily->dvalue;
+		Cvar_ForceSet( con_fontSystemMonoFamily->name, con_fontSystemMonoFamily->dvalue );
+		con_fontSystemFamilyName = con_fontSystemMonoFamily->dvalue;
 
 		size = DEFAULT_SYSTEM_FONT_SMALL_SIZE;
 		cls.consoleFont = SCR_RegisterFont( con_fontSystemFamilyName, con_fontSystemStyle, size );
 		if( !cls.consoleFont )
-			Com_Error( ERR_FATAL, "Couldn't load default font \"%s\"", con_fontSystemFamily->dvalue );
+			Com_Error( ERR_FATAL, "Couldn't load default font \"%s\"", con_fontSystemMonoFamily->dvalue );
 
 		Con_CheckResize();
 	}
@@ -123,6 +124,7 @@ static void SCR_RegisterConsoleFont( void )
 static void SCR_InitFonts( void )
 {
 	con_fontSystemFamily = Cvar_Get( "con_fontSystemFamily", DEFAULT_SYSTEM_FONT_FAMILY, CVAR_ARCHIVE );
+	con_fontSystemMonoFamily = Cvar_Get( "con_fontSystemMonoFamily", DEFAULT_SYSTEM_FONT_FAMILY_MONO, CVAR_ARCHIVE );
 	con_fontSystemFallbackFamily = Cvar_Get( "con_fontSystemFallbackFamily", DEFAULT_SYSTEM_FONT_FAMILY_FALLBACK, CVAR_ARCHIVE|CVAR_LATCH_VIDEO );
 	con_fontSystemConsoleSize = Cvar_Get( "con_fontSystemConsoleSize", STR_TOSTR( DEFAULT_SYSTEM_FONT_SMALL_SIZE ), CVAR_ARCHIVE );
 
@@ -147,14 +149,15 @@ static void SCR_ShutdownFonts( void )
 */
 static void SCR_CheckSystemFontsModified( void )
 {
-	if( !con_fontSystemFamily ) {
+	if( !con_fontSystemMonoFamily ) {
 		return;
 	}
 
-	if( con_fontSystemFamily->modified 
+	if( con_fontSystemMonoFamily->modified
 		|| con_fontSystemConsoleSize->modified 
 		) {
 		SCR_RegisterConsoleFont();
+		con_fontSystemMonoFamily->modified = false;
 		con_fontSystemConsoleSize->modified = false;
 	}
 }
@@ -458,7 +461,7 @@ void SCR_DebugGraph( float value, float r, float g, float b )
 */
 static void SCR_DrawDebugGraph( void )
 {
-	int a, x, y, w, i, h;
+	int a, x, y, w, i, h, s;
 	float v;
 
 	//
@@ -470,6 +473,8 @@ static void SCR_DrawDebugGraph( void )
 	SCR_DrawFillRect( x, y-scr_graphheight->integer,
 		w, scr_graphheight->integer, colorBlack );
 
+	s = ( w + 1024 - 1 ) / 1024; //scale for resolutions with width >1024
+
 	for( a = 0; a < w; a++ )
 	{
 		i = ( current-1-a+1024 ) & 1023;
@@ -479,7 +484,7 @@ static void SCR_DrawDebugGraph( void )
 		if( v < 0 )
 			v += scr_graphheight->integer * ( 1+(int)( -v/scr_graphheight->integer ) );
 		h = (int)v % scr_graphheight->integer;
-		SCR_DrawFillRect( x+w-1-a, y - h, 1, h, values[i].color );
+		SCR_DrawFillRect( x+w-1-a*s, y - h, s, h, values[i].color );
 	}
 }
 
@@ -543,6 +548,14 @@ bool SCR_IsQuickMenuShown( void )
 	return cls.quickmenu && CL_UIModule_HaveQuickMenu();
 }
 
+/*
+* SCR_DrawConsole
+*/
+void SCR_DrawChat( int x, int y, int width, struct qfontface_s *font )
+{
+	Con_DrawChat( x, y, width, font );
+}
+
 //=============================================================================
 
 /*
@@ -584,11 +597,14 @@ static void SCR_DrawConsole( void )
 		Con_DrawConsole();
 		return;
 	}
+}
 
-	if( cls.state == CA_ACTIVE && ( cls.key_dest == key_game || cls.key_dest == key_message ) )
-	{
-		Con_DrawNotify(); // only draw notify in game
-	}
+/*
+* SCR_DrawNotify
+*/
+static void SCR_DrawNotify( void )
+{
+	Con_DrawNotify();
 }
 
 /*
@@ -596,12 +612,15 @@ static void SCR_DrawConsole( void )
 */
 void SCR_BeginLoadingPlaque( void )
 {
+	CL_UIModule_ForceMenuOff();
+
 	CL_SoundModule_StopAllSounds( true, true );
 
 	memset( cl.configstrings, 0, sizeof( cl.configstrings ) );
 
 	scr_conlines = 0;       // none visible
 	scr_draw_loading = 2;   // clear to black first
+
 	SCR_UpdateScreen();
 }
 
@@ -690,7 +709,7 @@ void SCR_UpdateScreen( void )
 		return;
 	}
 
-	if( !scr_initialized || !con_initialized || !cls.mediaInitialized || !re.ScreenEnabled() )
+	if( !scr_initialized || !con_initialized || !cls.mediaInitialized || !re.RenderingEnabled() )
 		return;     // not ready yet
 
 	Con_CheckResize();
@@ -774,6 +793,7 @@ void SCR_UpdateScreen( void )
 				SCR_DrawDebugGraph();
 
 			SCR_DrawConsole();
+			SCR_DrawNotify();
 		}
 
 		// wsw : aiwa : call any listeners so they can draw their stuff

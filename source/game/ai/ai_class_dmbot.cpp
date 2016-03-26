@@ -939,10 +939,13 @@ void BOT_DMclass_FindEnemy( edict_t *self )
 		if( G_ISGHOSTING( goalEnt->ent ) )
 			continue;
 
-		if( self->ai->status.entityWeights[i] <= 0 || goalEnt->ent->flags & (FL_NOTARGET|FL_BUSY) )
+		if( self->ai->status.entityWeights[i] <= 0 || (goalEnt->ent->flags & FL_NOTARGET) )
 			continue;
 
 		if( GS_TeamBasedGametype() && goalEnt->ent->s.team == self->s.team )
+			continue;
+
+		if( ( goalEnt->ent->flags & FL_BUSY ) && ( level.gametype.forceTeamHumans == level.gametype.forceTeamBots ) )
 			continue;
 
 		dist = DistanceFast( self->s.origin, goalEnt->ent->s.origin );
@@ -1302,7 +1305,9 @@ float BOT_DMclass_PlayerWeight( edict_t *self, edict_t *enemy )
 	if( !enemy || enemy == self )
 		return 0;
 
-	if( G_ISGHOSTING( enemy ) || enemy->flags & (FL_NOTARGET|FL_BUSY) )
+	if( G_ISGHOSTING( enemy ) || ( enemy->flags & FL_NOTARGET) )
+		return 0;
+	if( ( enemy->flags & FL_BUSY ) && ( level.gametype.forceTeamHumans == level.gametype.forceTeamBots ) )
 		return 0;
 
 	if( self->r.client->ps.inventory[POWERUP_QUAD] || self->r.client->ps.inventory[POWERUP_SHELL] )
@@ -1605,16 +1610,23 @@ static void BOT_DMclass_GhostingFrame( edict_t *self )
 	self->ai->blocked_timeout = level.time + 15000;
 	self->nextThink = level.time + 100;
 
-	// wait 4 seconds after entering the level
-	if( self->r.client->level.timeStamp + 4000 > level.time || !level.canSpawnEntities )
+	// wait 1 second after entering the level
+	if( self->r.client->level.timeStamp + 1000 > level.time || !level.canSpawnEntities )
 		return;
 
 	if( self->r.client->team == TEAM_SPECTATOR )
 	{
-		// try to join a team
-		// note that G_Teams_JoinAnyTeam is quite slow so only call it per frame
-		if( !self->r.client->queueTimeStamp && self == level.think_client_entity )
-			G_Teams_JoinAnyTeam( self, false );
+		if( level.gametype.forceTeamBots != TEAM_SPECTATOR && level.gametype.numBots != 0 )
+		{
+			G_Teams_SetTeam( self, level.gametype.forceTeamBots );
+		}
+		else
+		{
+			// try to join a team
+			// note that G_Teams_JoinAnyTeam is quite slow so only call it per frame
+			if( !self->r.client->queueTimeStamp && self == level.think_client_entity )
+				G_Teams_JoinAnyTeam( self, false );
+		}
 
 		if( self->r.client->team == TEAM_SPECTATOR ) // couldn't join, delay the next think
 			self->nextThink = level.time + 2000 + (int)( 4000 * random() );

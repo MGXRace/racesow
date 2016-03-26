@@ -80,6 +80,7 @@ extern float ( *LittleFloat )(float l);
 
 #define DEFAULT_SYSTEM_FONT_FAMILY			"Droid Sans"
 #define DEFAULT_SYSTEM_FONT_FAMILY_FALLBACK	"Droid Sans Fallback"
+#define DEFAULT_SYSTEM_FONT_FAMILY_MONO		"Droid Sans Mono"
 #define DEFAULT_SYSTEM_FONT_SMALL_SIZE		14
 #define DEFAULT_SYSTEM_FONT_MEDIUM_SIZE		16
 #define DEFAULT_SYSTEM_FONT_BIG_SIZE		24
@@ -120,6 +121,10 @@ void COM_StripFilename( char *filename );
 int COM_FilePathLength( const char *in );
 
 // data is an in/out parm, returns a parsed out token
+char *COM_ParseExt2_r( char *token, size_t token_size, const char **data_p, bool nl, bool sq );
+#define COM_ParseExt_r( token, token_size, data_p, nl ) COM_ParseExt2_r( token, token_size, (const char **)data_p, nl, true )
+#define COM_Parse_r( token, token_size, data_p )   COM_ParseExt_r( token, token_size, data_p, true )
+
 char *COM_ParseExt2( const char **data_p, bool nl, bool sq );
 #define COM_ParseExt( data_p, nl ) COM_ParseExt2( (const char **)data_p, nl, true )
 #define COM_Parse( data_p )   COM_ParseExt( data_p, true )
@@ -247,6 +252,7 @@ bool Q_IsBreakingSpaceChar( wchar_t c );
 float *tv( float x, float y, float z );
 char *vtos( float v[3] );
 char *va( const char *format, ... );
+char *va_r( char *dst, size_t size, const char *format, ... );
 
 //
 // key / value info strings
@@ -274,7 +280,8 @@ void Info_CleanValue( const char *in, char *out, size_t outsize );
 #define	MAX_IMAGES					256
 #define MAX_SKINFILES				256
 #define MAX_ITEMS					64			// 16x4
-#define MAX_GENERAL					( MAX_CLIENTS )	// general config strings
+#define MAX_GENERAL					128			// general config strings
+#define MAX_MMPLAYERINFOS 			128
 
 //============================================
 // HTTP

@@ -73,6 +73,8 @@ cvar_t *cg_showTeamMates;
 
 cvar_t *cg_showPressedKeys;
 
+cvar_t *cg_showChasers;
+
 cvar_t *cg_scoreboardFontFamily;
 cvar_t *cg_scoreboardMonoFontFamily;
 cvar_t *cg_scoreboardTitleFontFamily;
@@ -118,33 +120,10 @@ int scr_erase_center;
 */
 void CG_CenterPrint( const char *str )
 {
-	char c, *s;
-	int colorindex = -1;
-	const char *tmp;
+	char *s;
 	char l10n_buffer[sizeof(scr_centerstring)];
-	const char *l10n = NULL;
 
-	tmp = str;
-	if( Q_GrabCharFromColorString( &tmp, &c, &colorindex ) == GRABCHAR_COLOR ) {
-		// attempt to translate the remaining string
-		l10n = trap_L10n_TranslateString( tmp );
-	} else {
-		l10n = trap_L10n_TranslateString( str );
-	}
-
-	if( l10n ) {
-		if( colorindex > 0 ) {
-			l10n_buffer[0] = '^';
-			l10n_buffer[1] = '0' + colorindex;
-			Q_strncpyz( &l10n_buffer[2], l10n, sizeof( l10n_buffer ) - 2 );
-		}
-		else {
-			Q_strncpyz( l10n_buffer, l10n, sizeof( l10n_buffer ) );
-		}
-		str = l10n_buffer;
-	}
-
-	Q_strncpyz( scr_centerstring, str, sizeof( scr_centerstring ) );
+	Q_strncpyz( scr_centerstring, CG_TranslateColoredString( str, l10n_buffer, sizeof( l10n_buffer ) ), sizeof( scr_centerstring ) );
 	scr_centertime_off = cg_centerTime->value;
 	scr_centertime_start = cg.time;
 
@@ -351,6 +330,7 @@ void CG_ScreenInit( void )
 	cg_showTeamMates =	    trap_Cvar_Get( "cg_showTeamMates", "1", CVAR_ARCHIVE );
 
 	cg_showPressedKeys = trap_Cvar_Get( "cg_showPressedKeys", "2", CVAR_ARCHIVE ); // racesow - default to showing only in spec
+	cg_showChasers = trap_Cvar_Get( "cg_showChasers", "1", CVAR_ARCHIVE );
 
 	cg_scoreboardFontFamily = trap_Cvar_Get( "cg_scoreboardFontFamily", DEFAULT_SCOREBOARD_FONT_FAMILY, CVAR_ARCHIVE );
 	cg_scoreboardMonoFontFamily = trap_Cvar_Get( "cg_scoreboardMonoFontFamily", DEFAULT_SCOREBOARD_MONO_FONT_FAMILY, CVAR_ARCHIVE );
@@ -365,12 +345,12 @@ void CG_ScreenInit( void )
 	// wsw : hud debug prints
 	cg_debugHUD =		    trap_Cvar_Get( "cg_debugHUD", "0", 0 );
 
-	cg_touch_moveThres = trap_Cvar_Get( "cg_touch_moveThres", "15", CVAR_ARCHIVE );
-	cg_touch_strafeThres = trap_Cvar_Get( "cg_touch_strafeThres", "25", CVAR_ARCHIVE );
-	cg_touch_lookThres = trap_Cvar_Get( "cg_touch_lookThres", "8", CVAR_ARCHIVE );
-	cg_touch_lookSens = trap_Cvar_Get( "cg_touch_lookSens", "5.5", CVAR_ARCHIVE );
+	cg_touch_moveThres = trap_Cvar_Get( "cg_touch_moveThres", "24", CVAR_ARCHIVE );
+	cg_touch_strafeThres = trap_Cvar_Get( "cg_touch_strafeThres", "32", CVAR_ARCHIVE );
+	cg_touch_lookThres = trap_Cvar_Get( "cg_touch_lookThres", "5", CVAR_ARCHIVE );
+	cg_touch_lookSens = trap_Cvar_Get( "cg_touch_lookSens", "9", CVAR_ARCHIVE );
 	cg_touch_lookInvert = trap_Cvar_Get( "cg_touch_lookInvert", "0", CVAR_ARCHIVE );
-	cg_touch_lookDecel = trap_Cvar_Get( "cg_touch_lookDecel", "0.8", CVAR_ARCHIVE );
+	cg_touch_lookDecel = trap_Cvar_Get( "cg_touch_lookDecel", "8.5", CVAR_ARCHIVE );
 
 	//
 	// register our commands
@@ -1141,7 +1121,7 @@ void CG_DrawRSpeeds( int x, int y, int align, struct qfontface_s *font, vec4_t c
 {
 	char msg[1024];
 
-	trap_R_SpeedsMessage( msg, sizeof( msg ) );
+	trap_R_GetSpeedsMessage( msg, sizeof( msg ) );
 
 	if( msg[0] )
 	{
@@ -1475,8 +1455,9 @@ void CG_Draw2DView( void )
 	if( cg.predictedPlayerState.stats[STAT_LAYOUTS] & STAT_LAYOUT_SPECDEAD )
 	{
 		int barheight = cgs.vidHeight * 0.08;
-		trap_R_DrawStretchPic( 0, 0, cgs.vidWidth, barheight, 0, 0, 1, 1, colorBlack, cgs.shaderWhite );
-		trap_R_DrawStretchPic( 0, cgs.vidHeight - barheight, cgs.vidWidth, barheight, 0, 0, 1, 1, colorBlack, cgs.shaderWhite );
+		const vec4_t barcolor = { 0.0f, 0.0f, 0.0f, 0.6f };
+		trap_R_DrawStretchPic( 0, 0, cgs.vidWidth, barheight, 0, 0, 1, 1, barcolor, cgs.shaderWhite );
+		trap_R_DrawStretchPic( 0, cgs.vidHeight - barheight, cgs.vidWidth, barheight, 0, 0, 1, 1, barcolor, cgs.shaderWhite );
 	}
 
 	if( cg.motd && ( cg.time > cg.motd_time ) )
@@ -1532,7 +1513,7 @@ cg_touch_t cg_touches[CG_MAX_TOUCHES];
 
 typedef struct {
 	int touch;
-	int x, y;
+	float x, y;
 } cg_touchpad_t;
 
 static cg_touchpad_t cg_touchpads[TOUCHPAD_COUNT];
@@ -1654,9 +1635,16 @@ void CG_TouchFrame( float frametime )
 
 		cg_touch_t &touch = cg_touches[viewpad.touch];
 
-		float decel = cg_touch_lookDecel->value * ( float )frametime * 10.0f;
-		viewpad.x += ( ( float )touch.x - viewpad.x ) * decel;
-		viewpad.y += ( ( float )touch.y - viewpad.y ) * decel;
+		float decel = cg_touch_lookDecel->value * ( float )frametime;
+		float xdist = ( float )touch.x - viewpad.x;
+		float ydist = ( float )touch.y - viewpad.y;
+		viewpad.x += xdist * decel;
+		viewpad.y += ydist * decel;
+		// Check if decelerated too much (to the opposite direction)
+		if( ( ( ( float )touch.x - viewpad.x ) * xdist ) < 0.0f )
+			viewpad.x = touch.x;
+		if( ( ( ( float )touch.y - viewpad.y ) * ydist ) < 0.0f )
+			viewpad.y = touch.y;
 	}
 
 	for( i = 0; i < CG_MAX_TOUCHES; ++i )
@@ -1718,19 +1706,19 @@ void CG_AddTouchViewAngles( vec3_t viewangles, float frametime, float flip )
 		cg_touch_t &touch = cg_touches[viewpad.touch];
 
 		float speed = cg_touch_lookSens->value * frametime * CG_GetSensitivityScale( 1.0f, 0.0f );
-		float scale = 600.0f / ( float )cgs.vidHeight;
+		float scale = 1.0f / cgs.pixelRatio;
 
 		float angle = ( ( float )touch.y - viewpad.y ) * scale;
 		if( cg_touch_lookInvert->integer )
 			angle = -angle;
 		float dir = ( ( angle < 0.0f ) ? -1.0f : 1.0f );
-		angle = fabsf( angle ) - cg_touch_lookThres->value;
+		angle = fabs( angle ) - cg_touch_lookThres->value;
 		if( angle > 0.0f )
 			viewangles[PITCH] += angle * dir * speed;
 
 		angle = ( viewpad.x - ( float )touch.x ) * scale;
 		dir = ( ( angle < 0.0f ) ? -1.0f : 1.0f ) * flip;
-		angle = fabsf( angle ) - cg_touch_lookThres->value;
+		angle = fabs( angle ) - cg_touch_lookThres->value;
 		if( angle > 0.0f )
 			viewangles[YAW] += angle * dir * speed;
 	}
@@ -1756,14 +1744,12 @@ void CG_AddTouchMovement( vec3_t movement )
 
 		cg_touch_t &touch = cg_touches[movepad.touch];
 
-		float scale = 600.0f / ( float )cgs.vidHeight;
-
 		float move = ( float )touch.x - movepad.x;
-		if( fabsf( move * scale ) > cg_touch_strafeThres->value )
+		if( fabs( move ) > cg_touch_strafeThres->value * cgs.pixelRatio )
 			movement[0] += ( move < 0 ) ? -1.0f : 1.0f;
 
 		move = movepad.y - ( float )touch.y;
-		if( fabsf( move * scale ) > cg_touch_moveThres->value )
+		if( fabs( move ) > cg_touch_moveThres->value * cgs.pixelRatio )
 			movement[1] += ( move < 0 ) ? -1.0f : 1.0f;
 	}
 
@@ -1807,7 +1793,7 @@ void CG_SetTouchpad( int padID, int touchID )
 	if( touchID >= 0 )
 	{
 		cg_touch_t &touch = cg_touches[touchID];
-		pad.x = touch.x;
-		pad.y = touch.y;
+		pad.x = ( float )touch.x;
+		pad.y = ( float )touch.y;
 	}
 }

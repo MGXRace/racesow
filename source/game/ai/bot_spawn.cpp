@@ -351,7 +351,7 @@ void BOT_Respawn( edict_t *self )
 	self->ai->changeweapon_timeout = 0;
 	self->ai->combatmovepush_timeout = 0;
 	self->ai->state_combat_timeout = 0;
-	self->ai->enemyReactionDelay = 0;
+	self->ai->enemyReactionDelay = 500 + random() * 300;
 	self->ai->last_attacker = NULL;
 
 	VectorClear( self->r.client->ps.pmove.delta_angles );
@@ -388,8 +388,9 @@ static void BOT_InitPersistant( edict_t *self )
 		self->ai->pers.netname = self->r.client->netname;
 	else
 		self->ai->pers.netname = "SomeBot";
-
-	G_Printf( "%s skill %i\n", self->r.client->netname, (int)( self->ai->pers.skillLevel * 100 ) );
+	
+	if( !level.gametype.disableObituaries ) // FIXME
+		G_Printf( "%s skill %i\n", self->r.client->netname, (int)( self->ai->pers.skillLevel * 100 ) );
 
 	//class: always set up default first
 	BOT_DMclass_InitPersistant( self );

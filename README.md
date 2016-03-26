@@ -3,13 +3,24 @@ qfusion - racesow
 
 Source code for the Racesow mod for the Warsow game
 
+qfusion is the id Tech 2 derived game engine powering the game <a href="https://warsow.gg/">Warsow</a>
 Added Features
 =============
 
 # Server
 
-## Pure mode
+- Fully open-source under the GPLv2 and easy to mod
+- Runs on Linux, OS X, Windows and Android (in development)
+- Modern and fast OpenGL 3.0 and OpenGL ES 3.0 renderer, running in a dedicated program thread
+- <a href="http://librocket.com/wiki/documentation">User Interface</a> based on XHTML/CSS standards with support for remote content
+- Support for vertex and skeletal animation
+- Powerful multiplayer & eSports features (global stats, friend lists, IRC, TV-server, etc.)
+- Ready to go FPS example gametype scripts from Warsow
+- Multithreaded sound mixer design
+- OpenAL support
+- Hardware-accelerated Ogg Theora video playback
 
+## Pure mode
 Set `sv_pure` to `2` to skip shaders in pure checks. Useful when having many
 maps with repeated and potentially conflicting shaders.
 

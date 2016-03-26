@@ -38,9 +38,7 @@ typedef enum
 
 	LE_EXPLOSION_TRACER,
 	LE_DASH_SCALE,
-	LE_DASH_SCALE_2,
 	LE_PUFF_SCALE,
-	LE_PUFF_SCALE_2,
 	LE_PUFF_SHRINK
 } letype_t;
 
@@ -128,12 +126,6 @@ static lentity_t *CG_AllocLocalEntity( letype_t type, float r, float g, float b,
 	case LE_SCALE_ALPHA_FADE:
 	case LE_INVERSESCALE_ALPHA_FADE:
 	case LE_PUFF_SHRINK:
-		le->ent.shaderRGBA[0] = ( uint8_t )( 255 * r );
-		le->ent.shaderRGBA[1] = ( uint8_t )( 255 * g );
-		le->ent.shaderRGBA[2] = ( uint8_t )( 255 * b );
-		le->ent.shaderRGBA[3] = ( uint8_t )( 255 * a );
-		break;
-	case LE_PUFF_SCALE_2:
 		le->ent.shaderRGBA[0] = ( uint8_t )( 255 * r );
 		le->ent.shaderRGBA[1] = ( uint8_t )( 255 * g );
 		le->ent.shaderRGBA[2] = ( uint8_t )( 255 * b );
@@ -428,15 +420,17 @@ void CG_BulletExplosion( const vec3_t pos, const vec_t *dir, const trace_t *trac
 
 	VecToAngles( local_dir, angles );
 
-	if( tr->surfFlags & SURF_FLESH ||
-		( tr->ent > 0 && cg_entities[tr->ent].current.type == ET_PLAYER ) ||
-		( tr->ent > 0 && cg_entities[tr->ent].current.type == ET_CORPSE ) )
+	if( tr->ent > 0 && cg_entities[tr->ent].current.type == ET_PLAYER )
 	{
-		le = CG_AllocModel( LE_ALPHA_FADE, pos, angles, 3, //3 frames for weak
-			1, 0, 0, 1, //full white no inducted alpha
-			0, 0, 0, 0, //dlight
-			CG_MediaModel( cgs.media.modBulletExplode ),
-			NULL );
+		return;
+	}
+	else if ( tr->surfFlags & SURF_FLESH || ( tr->ent > 0 && cg_entities[tr->ent].current.type == ET_CORPSE ) )
+	{
+		le = CG_AllocModel( LE_ALPHA_FADE, pos, angles, 3, //3 frames for weak 
+                        1, 0, 0, 1, //full white no inducted alpha
+                        0, 0, 0, 0, //dlight
+                        CG_MediaModel( cgs.media.modBulletExplode ),
+                        NULL );
 		le->ent.rotation = rand() % 360;
 		le->ent.scale = 1.0f;
 		if( ISVIEWERENTITY( tr->ent ) )
@@ -1332,7 +1326,7 @@ void CG_Dash( const entity_state_t *state )
 		return; // no smoke under water :)
 
 	le = CG_AllocModel( LE_DASH_SCALE, pos, angle, 7, //5
-		1.0, 1.0, 1.0, 1.0,
+		1.0, 1.0, 1.0, 0.2f,
 		0, 0, 0, 0,
 		CG_MediaModel( cgs.media.modDash ),
 		NULL
@@ -1365,7 +1359,7 @@ void CG_Explosion_Puff( const vec3_t pos, float radius, int frame )
 	local_pos[1] += crandom()*4;
 	local_pos[2] += crandom()*4;
 
-	le = CG_AllocSprite( LE_PUFF_SCALE_2, local_pos, radius, frame,
+	le = CG_AllocSprite( LE_PUFF_SCALE, local_pos, radius, frame,
 		1.0f, 1.0f, 1.0f, 1.0f,
 		0, 0, 0, 0,
 		shader );
@@ -1395,7 +1389,7 @@ void CG_Explosion_Puff_2( const vec3_t pos, const vec3_t vel, int radius )
 		radius = (int)floor( 35.0f + crandom()*5 );
 
 	le = CG_AllocSprite( LE_PUFF_SHRINK, pos, radius, 7,
-		1.0f, 1.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 1.0f, 0.2f,
 		0, 0, 0, 0,
 		shader );
 	VectorCopy( vel, le->velocity );
@@ -1617,7 +1611,7 @@ void CG_AddLocalEntities( void )
 
 		if( le->type == LE_DASH_SCALE )
 		{
-			if( f < 1 ) ent->scale = 0.2 * frac;
+			if( f < 1 ) ent->scale = 0.15 * frac;
 			else
 			{
 				VecToAngles( &ent->axis[AXIS_RIGHT], angles );
@@ -1634,40 +1628,7 @@ void CG_AddLocalEntities( void )
 				}
 			}
 		}
-		if( le->type == LE_DASH_SCALE_2 )
-		{
-			if( f < 1 ) ent->scale = 0.25 * frac;
-			else
-			{
-				VecToAngles( &ent->axis[AXIS_RIGHT], angles );
-				ent->axis[1*3+1] += 0.005f *sin( DEG2RAD ( angles[YAW] ) ); //length
-				ent->axis[1*3+0] += 0.005f *cos( DEG2RAD ( angles[YAW] ) ); //length
-				ent->axis[0*3+1] += 0.008f *cos( DEG2RAD ( angles[YAW] ) ); //width
-				ent->axis[0*3+0] -= 0.008f *sin( DEG2RAD ( angles[YAW] ) ); //width
-				ent->axis[2*3+2] -= 0.018f;              //height
-
-				ent->origin[1]  -= 0.6f *sin( DEG2RAD ( angles[YAW] ) ); //velocity
-				ent->origin[0]  -= 0.6f *cos( DEG2RAD ( angles[YAW] ) ); //velocity
-
-				if( ent->axis[AXIS_UP+2] <= 0 )
-				{
-					le->type = LE_FREE;
-					CG_FreeLocalEntity( le );
-				}
-			}
-		}
 		if( le->type == LE_PUFF_SCALE )
-		{
-			if( frac < 1 ) ent->scale = 7.0f*frac;
-			else ent->scale = 7.0f - 4.0f*( frac-1 );
-			if( ent->scale < 0 )
-			{
-				le->type = LE_FREE;
-				CG_FreeLocalEntity( le );
-			}
-
-		}
-		if( le->type == LE_PUFF_SCALE_2 )
 		{
 			if( le->frames - f < 4 )
 				ent->scale = 1.0f - 1.0f * ( frac - abs( 4-le->frames ) )/4;

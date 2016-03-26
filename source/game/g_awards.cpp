@@ -31,6 +31,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 void G_PlayerAward( edict_t *ent, const char *awardMsg )
 {
 	edict_t *other;
+	char cmd[MAX_STRING_CHARS];
 	gameaward_t *ga;
 	int i, size;
 	score_stats_t *stats;
@@ -38,7 +39,8 @@ void G_PlayerAward( edict_t *ent, const char *awardMsg )
 	if( !awardMsg || !awardMsg[0] || !ent->r.client )
 		return;
 
-	trap_GameCmd( ent, va( "aw \"%s\"", awardMsg ) );
+	Q_snprintfz( cmd, sizeof( cmd ), "aw \"%s\"", awardMsg );
+	trap_GameCmd( ent, cmd );
 
 	if( dedicated->integer )
 		G_Printf( "%s", COM_RemoveColorTokens( va( "%s receives a '%s' award.\n", ent->r.client->netname, awardMsg ) ) );
@@ -82,9 +84,8 @@ void G_PlayerAward( edict_t *ent, const char *awardMsg )
 		if( !other->r.client || !other->r.inuse || !other->r.client->resp.chase.active )
 			continue;
 
-		if( other->r.client->ps.POVnum == (unsigned)ENTNUM( ent ) ) {
-			trap_GameCmd( other, va( "aw \"%s\"", awardMsg ) );
-		}
+		if( other->r.client->resp.chase.target == ENTNUM( ent ) )
+			trap_GameCmd( other, cmd );
 	}
 }
 
@@ -410,9 +411,12 @@ void G_AwardPlayerKilled( edict_t *self, edict_t *inflictor, edict_t *attacker, 
 			Q_strncpyz( s, S_COLOR_YELLOW "Extermination!", sizeof( s ) );
 			G_PrintMsg( NULL, "%s" S_COLOR_YELLOW " is Exterminating!\n", attacker->r.client->netname );
 			break;
-		default:
+		case 5:
 			Q_strncpyz( s, S_COLOR_YELLOW "God Mode!", sizeof( s ) );
 			G_PrintMsg( NULL, "%s" S_COLOR_YELLOW " is in God Mode!\n", attacker->r.client->netname );
+		default:
+			Q_strncpyz( s, S_COLOR_YELLOW "God Mode!", sizeof( s ) );
+			G_PrintMsg( NULL, "%s" S_COLOR_YELLOW " is in God Mode! " S_COLOR_WHITE "%d" S_COLOR_YELLOW " frags!\n", attacker->r.client->netname, attacker->r.client->resp.awardInfo.frag_count );
 			break;
 		}
 
@@ -537,4 +541,11 @@ void G_AwardFairPlay( edict_t *ent )
 	client->level.stats.fairplay_count++;
 	client->resp.awardInfo.fairplay_award = true;
 	G_PlayerAward( ent, S_COLOR_CYAN "Fair Play!" );
+}
+
+void G_DeathAwards( edict_t *ent )
+{
+	int frag_count = ent->r.client->resp.awardInfo.frag_count;
+	if( frag_count >= 5 )
+		G_PrintMsg( NULL, "%s" S_COLOR_YELLOW " made a spree of " S_COLOR_WHITE "%d" S_COLOR_YELLOW "!\n", ent->r.client->netname, frag_count );
 }

@@ -49,6 +49,7 @@ const field_t fields[] = {
 	{ "mass", FOFS( mass ), F_INT },
 	{ "attenuation", FOFS( attenuation ), F_FLOAT },
 	{ "map", FOFS( map ), F_LSTRING },
+	{ "random", FOFS( random ), F_FLOAT },
 
 	// temp spawn vars -- only valid when the spawn function is called
 	{ "lip", STOFS( lip ), F_INT, FFL_SPAWNTEMP },
@@ -70,13 +71,12 @@ const field_t fields[] = {
 	{ "notteam", STOFS( notteam ), F_INT, FFL_SPAWNTEMP },
 	{ "notfree", STOFS( notfree ), F_INT, FFL_SPAWNTEMP },
 	{ "notduel", STOFS( notduel ), F_INT, FFL_SPAWNTEMP },
-	{ "notctf", STOFS( notctf ), F_INT, FFL_SPAWNTEMP },
-	{ "notffa", STOFS( notffa ), F_INT, FFL_SPAWNTEMP },
 	{ "noents", STOFS( noents ), F_INT, FFL_SPAWNTEMP },
 	{ "gameteam", STOFS( gameteam ), F_INT, FFL_SPAWNTEMP },
 	{ "weight", STOFS( weight ), F_INT, FFL_SPAWNTEMP },
 	{ "scale", STOFS( scale ), F_FLOAT, FFL_SPAWNTEMP },
 	{ "gametype", STOFS( gametype ), F_LSTRING, FFL_SPAWNTEMP },
+	{ "not_gametype", STOFS( not_gametype ), F_LSTRING, FFL_SPAWNTEMP },
 	{ "debris1", STOFS( debris1 ), F_LSTRING, FFL_SPAWNTEMP },
 	{ "debris2", STOFS( debris2 ), F_LSTRING, FFL_SPAWNTEMP },
 	{ "shaderName", STOFS( shaderName ), F_LSTRING, FFL_SPAWNTEMP },
@@ -186,6 +186,31 @@ static gsitem_t *G_ItemForEntity( edict_t *ent )
 }
 
 /*
+* G_GametypeFilterMatch
+*
+* Returns true if there's a direct match
+*/
+static bool G_GametypeFilterMatch( const char *filter )
+{
+	const char *list_separators = ", ";
+	char *tok, *temp;
+	bool match = false;
+
+	temp = G_CopyString( filter );
+	tok = strtok( temp, list_separators );
+	while( tok ) {
+		if( !Q_stricmp( tok, gs.gametypeName ) ) {
+			match = true;
+			break;
+		}
+		tok = strtok( NULL, list_separators );
+	}
+	G_Free( temp );
+
+	return match;
+}
+
+/*
 * G_CanSpawnEntity
 */
 static bool G_CanSpawnEntity( edict_t *ent )
@@ -195,19 +220,22 @@ static bool G_CanSpawnEntity( edict_t *ent )
 	if( ent == world )
 		return true;
 
-	if( !Q_stricmp( gs.gametypeName, "dm" ) && st.notfree )
+	if( !GS_TeamBasedGametype() && st.notfree )
 		return false;
-	if( !Q_stricmp( gs.gametypeName, "duel" ) && st.notduel )
+	if( ( GS_TeamBasedGametype() && ( GS_MaxPlayersInTeam() == 1 ) ) && ( st.notduel || st.notfree ) )
 		return false;
-	if( !Q_stricmp( gs.gametypeName, "tdm" ) && st.notteam )
-		return false;
-	if( !Q_stricmp( gs.gametypeName, "ctf" ) && st.notctf )
+	if( ( GS_TeamBasedGametype() && ( GS_MaxPlayersInTeam() != 1 ) ) && st.notteam )
 		return false;
 
 	// check for Q3TA-style inhibition key
 	if( st.gametype )
 	{
-		if( !strstr( st.gametype, gs.gametypeName ) )
+		if( !G_GametypeFilterMatch( st.gametype ) )
+			return false;
+	}
+	if( st.not_gametype )
+	{
+		if( G_GametypeFilterMatch( st.not_gametype ) )
 			return false;
 	}
 
@@ -232,7 +260,7 @@ static bool G_CanSpawnEntity( edict_t *ent )
 bool G_CallSpawn( edict_t *ent )
 {
 	spawn_t	*s;
-	gsitem_t	*item;
+	gsitem_t *item;
 
 	if( !ent->classname )
 	{
@@ -264,6 +292,12 @@ bool G_CallSpawn( edict_t *ent )
 		}
 	}
 	// !racesow
+
+	// see if there's a spawn definition in the gametype scripts
+	if( G_asCallMapEntitySpawnScript( ent->classname, ent ) )
+	{
+		return true; // handled by the script
+	}
 
 	if( sv_cheats->integer || developer->integer ) // mappers load their maps with devmap
 		G_Printf( "%s doesn't have a spawn function\n", ent->classname );
@@ -701,8 +735,130 @@ void G_PrecacheMedia( void )
 }
 
 /*
-* SpawnEntities
-* 
+* G_FreeEntities
+*/
+static void G_FreeEntities( void )
+{
+	int i;
+
+	if( !level.time )
+		memset( game.edicts, 0, game.maxentities * sizeof( game.edicts[0] ) );
+	else
+	{
+		G_FreeEdict( world );
+		for( i = gs.maxclients + 1; i < game.maxentities; i++ )
+		{
+			if( game.edicts[i].r.inuse )
+				G_FreeEdict( game.edicts + i );
+		}
+	}
+	
+	game.numentities = gs.maxclients + 1;
+}
+
+/*
+* G_SpawnEntities
+*/
+static void G_SpawnEntities( void )
+{
+	int i;
+	edict_t *ent;
+	char *token;
+	const gsitem_t *item;
+	char *entities;
+	
+	game.levelSpawnCount++;
+	level.spawnedTimeStamp = game.realtime;
+	level.canSpawnEntities = true;
+
+	G_InitBodyQueue(); // reserve some spots for dead player bodies
+	
+	entities = level.mapString;
+	level.map_parsed_ents[0] = 0;
+	level.map_parsed_len = 0;
+
+	i = 0;
+	ent = NULL;
+	while( 1 )
+	{
+		level.spawning_entity = NULL;
+		
+		// parse the opening brace
+		token = COM_Parse( &entities );
+		if( !entities )
+			break;
+		if( token[0] != '{' )
+			G_Error( "G_SpawnMapEntities: found %s when expecting {", token );
+		
+		if( !ent )
+		{
+			ent = world;
+			G_InitEdict( world );
+		}
+		else
+			ent = G_Spawn();
+		
+		ent->spawnString = entities; // keep track of string definition of this entity
+		
+		entities = ED_ParseEdict( entities, ent );
+		if( !ent->classname )
+		{
+			i++;
+			G_FreeEdict( ent );
+			continue;
+		}
+		
+		if( !G_CanSpawnEntity( ent ) )
+		{
+			i++;
+			G_FreeEdict( ent );
+			continue;
+		}
+
+		if( !G_CallSpawn( ent ) )
+		{
+			i++;
+			G_FreeEdict( ent );
+			continue;
+		}
+		
+		// check whether an item is allowed to spawn
+		if( ( item = ent->item ) )
+		{
+			// not pickable items aren't spawnable
+			if( item->flags & ITFLAG_PICKABLE )
+			{
+				if( G_Gametype_CanSpawnItem( item ) )
+				{
+					// override entity's classname with whatever item specifies
+					ent->classname = item->classname;
+					PrecacheItem( item );
+					continue;
+				}
+			}
+			
+			i++;
+			G_FreeEdict( ent );
+			continue;
+		}
+	}
+	
+	// is the parsing string sane?
+	assert( level.map_parsed_len < level.mapStrlen );
+	level.map_parsed_ents[level.map_parsed_len] = 0;
+	
+	G_FindTeams();
+	
+	// make sure server got the edicts data
+	trap_LocateEntities( game.edicts, sizeof( game.edicts[0] ), game.numentities, game.maxentities );
+	
+	// items need brush model entities spawned before they are linked
+	G_Items_FinishSpawningItems();
+}
+
+/*
+* G_InitLevel
+*
 * Creates a server's entity / program execution context by
 * parsing textual entity definitions out of an ent file.
 */
@@ -711,9 +867,6 @@ void G_InitLevel( char *mapname, char *entities, int entstrlen, unsigned int lev
 	char *mapString = NULL;
 	char name[MAX_CONFIGSTRING_CHARS];
 	int i;
-	edict_t *ent;
-	char *token;
-	const gsitem_t *item;
 
 	G_asGarbageCollect( true );
 
@@ -727,7 +880,6 @@ void G_InitLevel( char *mapname, char *entities, int entstrlen, unsigned int lev
 
 	game.serverTime = serverTime;
 	game.realtime = realTime;
-	game.levelSpawnCount++;
 
 	GClip_ClearWorld(); // clear areas links
 
@@ -748,7 +900,6 @@ void G_InitLevel( char *mapname, char *entities, int entstrlen, unsigned int lev
 	memset( &level, 0, sizeof( level_locals_t ) );
 	memset( &gs.gameState, 0, sizeof( gs.gameState ) );
 
-	level.spawnedTimeStamp = game.realtime;
 	level.time = levelTime;
 	level.gravity = g_gravity->value;
 
@@ -764,19 +915,7 @@ void G_InitLevel( char *mapname, char *entities, int entstrlen, unsigned int lev
 	level.map_parsed_ents = ( char * )G_LevelMalloc( entstrlen + 1 );
 	level.map_parsed_ents[0] = 0;
 
-	if( !level.time )
-		memset( game.edicts, 0, game.maxentities * sizeof( game.edicts[0] ) );
-	else
-	{
-		G_FreeEdict( world );
-		for( i = gs.maxclients + 1; i < game.maxentities; i++ )
-		{
-			if( game.edicts[i].r.inuse )
-				G_FreeEdict( game.edicts + i );
-		}
-	}
-
-	game.numentities = gs.maxclients + 1;
+	G_FreeEntities();
 
 	// link client fields on player ents
 	for( i = 0; i < gs.maxclients; i++ )
@@ -819,94 +958,7 @@ void G_InitLevel( char *mapname, char *entities, int entstrlen, unsigned int lev
 	AI_InitLevel(); // load navigation file of the current map
 
 	// start spawning entities
-
-	level.canSpawnEntities = true;
-	G_InitBodyQueue(); // reserve some spots for dead player bodies
-
-	entities = level.mapString;
-
-	i = 0;
-	ent = NULL;
-	while( 1 )
-	{
-		level.spawning_entity = NULL;
-
-		// parse the opening brace
-		token = COM_Parse( &entities );
-		if( !entities )
-			break;
-		if( token[0] != '{' )
-			G_Error( "G_SpawnMapEntities: found %s when expecting {", token );
-
-		if( !ent )
-		{
-			ent = world;
-			G_InitEdict( world );
-		}
-		else
-			ent = G_Spawn();
-
-		ent->spawnString = entities; // keep track of string definition of this entity
-
-		entities = ED_ParseEdict( entities, ent );
-		if( !ent->classname )
-		{
-			i++;
-			// racesow - introducing the freestyle map bug again in
-			// order to make some freestyle maps work
-			if( !level.gametype.freestyleMapFix )
-				G_FreeEdict( ent );
-			// !racesow
-			G_FreeEdict( ent );
-			continue;
-		}
-
-		if( !G_CanSpawnEntity( ent ) )
-		{
-			i++;
-			G_FreeEdict( ent );
-			continue;
-		}
-
-		if( !G_CallSpawn( ent ) )
-		{
-			i++;
-			G_FreeEdict( ent );
-			continue;
-		}
-
-		// check whether an item is allowed to spawn
-		if( ( item = ent->item ) )
-		{
-			// not pickable items aren't spawnable
-			if( item->flags & ITFLAG_PICKABLE )
-			{
-				if( G_Gametype_CanSpawnItem( item ) )
-				{
-					// override entity's classname with whatever item specifies
-					ent->classname = item->classname;
-					PrecacheItem( item );
-					continue;
-				}
-			}
-
-			i++;
-			G_FreeEdict( ent );
-			continue;
-		}
-	}
-
-	G_FindTeams();
-
-	// is the parsing string sane?
-	assert( (int)level.map_parsed_len < entstrlen );
-	level.map_parsed_ents[level.map_parsed_len] = 0;
-
-	// make sure server got the edicts data
-	trap_LocateEntities( game.edicts, sizeof( game.edicts[0] ), game.numentities, game.maxentities );
-
-	// items need brush model entities spawned before they are linked
-	G_Items_FinishSpawningItems();
+	G_SpawnEntities();
 
 	//
 	// initialize game subsystems which require entities initialized
@@ -926,8 +978,27 @@ void G_InitLevel( char *mapname, char *entities, int entstrlen, unsigned int lev
 
 	G_asGarbageCollect( true );
 
-	// racesow
-	RS_Init();
+	RS_Init(); // racesow
+}
+
+void G_ResetLevel( void )
+{
+	int i;
+	
+	G_FreeEdict( world );
+	for( i = gs.maxclients + 1; i < game.maxentities; i++ )
+	{
+		if( game.edicts[i].r.inuse )
+			G_FreeEdict( game.edicts + i );
+	}
+
+	G_SpawnEntities();
+
+	// call gametype specific
+	GT_asCallSpawn();
+	
+	// call map specific
+	G_asCallMapInit();
 }
 
 bool G_RespawnLevel( void )

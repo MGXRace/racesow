@@ -217,14 +217,7 @@ void CG_LocalPrint( const char *format, ... )
 	Q_vsnprintfz( msg, sizeof( msg ), format, argptr );
 	va_end( argptr );
 
-	if( con_chatCGame->integer )
-	{
-		trap_PrintToLog( msg );
-	}
-	else
-	{
-		trap_Print( msg );
-	}
+	trap_PrintToLog( msg );
 
 	CG_StackChatString( &cg.chat, msg );
 }
@@ -446,6 +439,42 @@ const char *CG_TranslateString( const char *string )
 		return string;
 	}
 	return translation;
+}
+
+/*
+* CG_TranslateColoredString
+*/
+const char *CG_TranslateColoredString( const char *string, char *dst, size_t dst_size )
+{
+	char c;
+	int colorindex = -1;
+	const char *l10n, *tmp;
+
+	if( dst_size < 3 )
+		return string;
+
+	tmp = string;
+	if( Q_GrabCharFromColorString( &tmp, &c, &colorindex ) == GRABCHAR_COLOR ) {
+		// attempt to translate the remaining string
+		l10n = trap_L10n_TranslateString( tmp );
+	} else {
+		l10n = trap_L10n_TranslateString( string );
+	}
+
+	if( l10n ) {
+		int offset = 0;
+
+		if( colorindex >= 0 ) {
+			dst[0] = '^';
+			dst[1] = '0' + colorindex;
+			offset = 2;
+		}
+		Q_strncpyz( &dst[offset], l10n, dst_size - offset );
+		return dst;
+	}
+
+	Q_strncpyz( dst, string, dst_size );
+	return dst;
 }
 
 /*
@@ -802,7 +831,7 @@ static void CG_RegisterVariables( void )
 	cg_showSelfShadow =	trap_Cvar_Get( "cg_showSelfShadow", "0", CVAR_ARCHIVE );
 
 	cg_cartoonEffects =		trap_Cvar_Get( "cg_cartoonEffects", "7", CVAR_ARCHIVE );
-	cg_cartoonHitEffect =	trap_Cvar_Get( "cg_cartoonHitEffect", "0", CVAR_ARCHIVE );
+	cg_cartoonHitEffect =	trap_Cvar_Get( "cg_cartoonHitEffect", "1", CVAR_ARCHIVE );
 
 	cg_damage_indicator =	trap_Cvar_Get( "cg_damage_indicator", "1", CVAR_ARCHIVE );
 	cg_damage_indicator_time =	trap_Cvar_Get( "cg_damage_indicator_time", "25", CVAR_ARCHIVE );
@@ -879,7 +908,7 @@ static void CG_RegisterVariables( void )
 	cg_touch_flip = trap_Cvar_Get( "cg_touch_flip", "0", CVAR_ARCHIVE );
 	cg_touch_scale = trap_Cvar_Get( "cg_touch_scale", "100", CVAR_ARCHIVE );
 	cg_touch_showMoveDir = trap_Cvar_Get( "cg_touch_showMoveDir", "1", CVAR_ARCHIVE );
-	cg_touch_zoomThres = trap_Cvar_Get( "cg_touch_zoomThres", "20", CVAR_ARCHIVE );
+	cg_touch_zoomThres = trap_Cvar_Get( "cg_touch_zoomThres", "24", CVAR_ARCHIVE );
 	cg_touch_zoomTime = trap_Cvar_Get( "cg_touch_zoomTime", "250", CVAR_ARCHIVE );
 
 	cg_playList = trap_Cvar_Get( "cg_playList", S_PLAYLIST_MATCH, CVAR_ARCHIVE );
@@ -895,8 +924,8 @@ static void CG_RegisterVariables( void )
 	cg_gamepad_strafeRunThres = trap_Cvar_Get( "cg_gamepad_strafeRunThres", "0.45", CVAR_ARCHIVE );
 	cg_gamepad_pitchThres = trap_Cvar_Get( "cg_gamepad_pitchThres", "0.265", CVAR_ARCHIVE );
 	cg_gamepad_yawThres = trap_Cvar_Get( "cg_gamepad_yawThres", "0.265", CVAR_ARCHIVE );
-	cg_gamepad_pitchSpeed = trap_Cvar_Get( "cg_gamepad_pitchSpeed", "260", CVAR_ARCHIVE );
-	cg_gamepad_yawSpeed = trap_Cvar_Get( "cg_gamepad_yawSpeed", "280", CVAR_ARCHIVE );
+	cg_gamepad_pitchSpeed = trap_Cvar_Get( "cg_gamepad_pitchSpeed", "240", CVAR_ARCHIVE );
+	cg_gamepad_yawSpeed = trap_Cvar_Get( "cg_gamepad_yawSpeed", "260", CVAR_ARCHIVE );
 	cg_gamepad_pitchInvert = trap_Cvar_Get( "cg_gamepad_pitchInvert", "0", CVAR_ARCHIVE );
 	cg_gamepad_accelMax = trap_Cvar_Get( "cg_gamepad_accelMax", "2", CVAR_ARCHIVE );
 	cg_gamepad_accelSpeed = trap_Cvar_Get( "cg_gamepad_accelSpeed", "3", CVAR_ARCHIVE );

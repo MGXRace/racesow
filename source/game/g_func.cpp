@@ -440,7 +440,6 @@ static void plat_spawn_inside_trigger( edict_t *ent )
 //notfree : when set to 1, entity will not spawn in "Free for all" and "Tournament" modes.
 //notduel : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes. (jal: todo)
 //notteam : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes.
-//notctf : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes. (jal: todo)
 //-------- SPAWNFLAGS --------
 //LOW_TRIGGER : &1 the plat is triggered from its lower side
 //-------- NOTES --------
@@ -553,7 +552,6 @@ void SP_func_plat( edict_t *ent )
 //notfree : when set to 1, entity will not spawn in "Free for all" and "Tournament" modes.
 //notduel : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes. (jal: todo)
 //notteam : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes.
-//notctf : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes. (jal: todo)
 //-------- SPAWNFLAGS --------
 //START_OPEN : &1 the door will spawn in the open state and operate in reverse.
 //CRUSHER : &4 door will not reverse direction when blocked and will keep damaging player until he dies or gets out of the way.
@@ -772,10 +770,7 @@ static void Think_SpawnDoorTrigger( edict_t *ent )
 	other->touch = Touch_DoorTrigger;
 	GClip_LinkEntity( other );
 
-	if( ent->spawnflags & DOOR_START_OPEN )
-	{
-		door_use_areaportals( ent, true );
-	}
+	door_use_areaportals( ent, ( ent->spawnflags & DOOR_START_OPEN ) != 0 );
 
 	Think_CalcMoveSpeed( ent );
 }
@@ -933,6 +928,9 @@ void SP_func_door( edict_t *ent )
 
 	GClip_LinkEntity( ent );
 
+	ent->style = -1;
+	door_use_areaportals( ent, ( ent->spawnflags & DOOR_START_OPEN ) != 0 );
+	
 	ent->nextThink = level.time + 1;
 	if( ent->targetname )
 		ent->think = Think_CalcMoveSpeed;
@@ -964,7 +962,6 @@ void SP_func_door( edict_t *ent )
 //notfree : when set to 1, entity will not spawn in "Free for all" and "Tournament" modes.
 //notduel : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes. (jal: todo)
 //notteam : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes.
-//notctf : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes. (jal: todo)
 //-------- SPAWNFLAGS --------
 //START_OPEN : &1 the door will spawn in the open state and operate in reverse.
 //REVERSE : &2 will cause the door to rotate in the opposite direction.
@@ -1183,7 +1180,6 @@ bool G_EntIsADoor( edict_t *ent )
 //notfree : when set to 1, entity will not spawn in "Free for all" and "Tournament" modes.
 //notduel : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes. (jal: todo)
 //notteam : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes.
-//notctf : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes. (jal: todo)
 //-------- SPAWNFLAGS --------
 //START_OFF : &1 must be triggered to start moving.
 //REVERSE : &2 will cause the it to rotate in the opposite direction.
@@ -1380,7 +1376,6 @@ void SP_func_rotating( edict_t *ent )
 //notfree : when set to 1, entity will not spawn in "Free for all" and "Tournament" modes.
 //notduel : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes. (jal: todo)
 //notteam : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes.
-//notctf : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes. (jal: todo)
 //nobot : bots can't trigger it  (jal: todo)
 //nomonster : monsters can't trigger it  (jal: todo)
 //-------- NOTES --------
@@ -1538,7 +1533,6 @@ void SP_func_button( edict_t *ent )
 //notfree : when set to 1, entity will not spawn in "Free for all" and "Tournament" modes.
 //notduel : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes. (jal: todo)
 //notteam : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes.
-//notctf : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes. (jal: todo)
 //-------- SPAWNFLAGS --------
 //START_ON : &1
 //TOGGLE : &2
@@ -1926,7 +1920,6 @@ void SP_func_timer( edict_t *self )
 //notfree : when set to 1, entity will not spawn in "Free for all" and "Tournament" modes.
 //notduel : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes. (jal: todo)
 //notteam : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes.
-//notctf : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes. (jal: todo)
 //-------- SPAWNFLAGS --------
 //START_ON : &1 start activated
 //TOGGLE : &2 must be triggered again to toogle it's state
@@ -2001,7 +1994,6 @@ void SP_func_killbox( edict_t *ent )
 //notfree : when set to 1, entity will not spawn in "Free for all" and "Tournament" modes.
 //notduel : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes. (jal: todo)
 //notteam : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes.
-//notctf : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes. (jal: todo)
 //-------- SPAWNFLAGS --------
 //X_AXIS : &1 entity will bob along the X axis.
 //Y_AXIS : &2 entity will bob along the Y axis.
@@ -2152,7 +2144,6 @@ static void func_pendulum_think( edict_t *ent )
 //notfree : when set to 1, entity will not spawn in "Free for all" and "Tournament" modes.
 //notduel : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes. (jal: todo)
 //notteam : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes.
-//notctf : when set to 1, entity will not spawn in "Teamplay" and "CTF" modes. (jal: todo)
 //-------- NOTES --------
 //You need to have an origin brush as part of this entity. The center of that brush will be the point through which the rotation axis passes. Setting the origin key is simply an alternate method to using an origin brush. Pendulum will rotate along the X axis by default. Very crude operation: pendulum cannot rotate along Z axis, the speed of swing (frequency) is not adjustable. When using the model2 key, the origin point of the model will correspond to the origin point defined by either the origin brush or the origin coordinate value. Pendulums always swing north / south on unrotated models. Add an angles field to the model to allow rotation in other directions. Pendulum frequency is a physical constant based on the length of the beam and gravity.
 void SP_func_pendulum( edict_t *ent )

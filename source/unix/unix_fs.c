@@ -225,28 +225,41 @@ void Sys_FS_FindClose( void )
 */
 const char *Sys_FS_GetHomeDirectory( void )
 {
-#ifndef __ANDROID__
 	static char home[PATH_MAX] = { '\0' };
-	const char *homeEnv;
 
-	if( home[0] != '\0' )
-		return home;
-	homeEnv = getenv( "HOME" );
-	if( !homeEnv )
-		return NULL;
+	if( home[0] == '\0' )
+	{
+#ifndef __ANDROID__
+		const char *homeEnv = getenv( "HOME" );
+		const char *base = NULL, *local = "";
 
 #ifdef __MACOSX__
-	Q_snprintfz( home, sizeof( home ), "%s/Library/Application Support/%s-%d.%d", homeEnv, APPLICATION,
-		APP_VERSION_MAJOR, APP_VERSION_MINOR );
+		base = homeEnv;
+		local = "Library/Application Support/";
 #else
-	Q_snprintfz( home, sizeof( home ), "%s/.%c%s-%d.%d", homeEnv, tolower( *( (const char *)APPLICATION ) ),
-		( (const char *)APPLICATION ) + 1, APP_VERSION_MAJOR, APP_VERSION_MINOR );
+		base = getenv( "XDG_DATA_HOME" );
+		local = "";
+		if( !base ) {
+			base = homeEnv;
+			local = ".local/share/";
+		}
 #endif
-	return home;
 
+		if( base ) {
+#ifdef __MACOSX__
+			Q_snprintfz( home, sizeof( home ), "%s/%s%s-%d.%d", base, local, APPLICATION,
+				APP_VERSION_MAJOR, APP_VERSION_MINOR );
 #else
-	return NULL;
+			Q_snprintfz( home, sizeof( home ), "%s/%s%c%s-%d.%d", base, local, tolower( *( (const char *)APPLICATION ) ),
+				( (const char *)APPLICATION ) + 1, APP_VERSION_MAJOR, APP_VERSION_MINOR );
 #endif
+		}
+#endif
+	}
+
+	if( home[0] == '\0' )
+		return NULL;
+	return home;
 }
 
 /*
@@ -254,17 +267,44 @@ const char *Sys_FS_GetHomeDirectory( void )
 */
 const char *Sys_FS_GetCacheDirectory( void )
 {
-#ifdef __ANDROID__
 	static char cache[PATH_MAX] = { '\0' };
-	if( !cache[0] )
+
+	if( cache[0] == '\0' )
 	{
-		Q_snprintfz( cache, sizeof( cache ), "/data/data/%s/cache/%d.%d",
-			sys_android_packageName, APP_VERSION_MAJOR, APP_VERSION_MINOR );
-	}
-	return cache;
+#ifdef __ANDROID__
+		Q_snprintfz( cache, sizeof( cache ), "%s/cache/%d.%d",
+			sys_android_internalDataPath, APP_VERSION_MAJOR, APP_VERSION_MINOR );
 #else
-	return NULL;
+		const char *homeEnv = getenv( "HOME" );
+		const char *base = NULL, *local = "";
+
+#ifdef __MACOSX__
+		base = homeEnv;
+		local = "Library/Caches/";
+#else
+		base = getenv( "XDG_CACHE_HOME" );
+		local = "";
+		if( !base ) {
+			base = homeEnv;
+			local = ".cache/";
+		}
 #endif
+
+		if( base ) {
+#ifdef __MACOSX__
+			Q_snprintfz( cache, sizeof( cache ), "%s/%s%s-%d.%d", base, local, APPLICATION,
+					APP_VERSION_MAJOR, APP_VERSION_MINOR );
+#else
+			Q_snprintfz( cache, sizeof( cache ), "%s/%s%c%s-%d.%d", base, local, tolower( *( (const char *)APPLICATION ) ),
+				( (const char *)APPLICATION ) + 1, APP_VERSION_MAJOR, APP_VERSION_MINOR );
+#endif
+		}
+#endif
+	}
+
+	if( cache[0] == '\0' )
+		return NULL;
+	return cache;
 }
 
 /*
@@ -348,6 +388,40 @@ const char *Sys_FS_GetMediaDirectory( fs_mediatype_t type )
 #else
 	return NULL;
 #endif
+}
+
+/*
+* Sys_FS_GetRuntimeDirectory
+*/
+const char *Sys_FS_GetRuntimeDirectory( void )
+{
+	// disabled because some distributions mount /var/run with 'noexec' flag and consequently 
+	// game libs fail to load with 'failed to map segment from shared object' error
+#if 0
+	static char runtime[PATH_MAX] = { '\0' };
+
+	if( runtime[0] == '\0' )
+	{
+#ifndef __ANDROID__
+#ifndef __MACOSX__
+		const char *base = NULL, *local = "";
+
+		base = getenv( "XDG_RUNTIME_DIR" );
+		local = "";
+
+		if( base ) {
+			Q_snprintfz( runtime, sizeof( runtime ), "%s/%s%c%s-%d.%d", base, local, tolower( *( (const char *)APPLICATION ) ),
+				( (const char *)APPLICATION ) + 1, APP_VERSION_MAJOR, APP_VERSION_MINOR );
+		}
+#endif
+#endif
+	}
+
+	if( runtime[0] != '\0' )
+		return runtime;
+#endif
+
+	return NULL;
 }
 
 /*

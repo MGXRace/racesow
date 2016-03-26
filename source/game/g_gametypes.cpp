@@ -191,7 +191,7 @@ static void G_Gametype_GENERIC_ThinkRules( void )
 		return;
 }
 
-char *G_Gametype_GENERIC_ScoreboardMessage( void )
+void G_Gametype_GENERIC_ScoreboardMessage( void )
 {
 	char entry[MAX_TOKEN_CHARS];
 	size_t len;
@@ -240,7 +240,7 @@ char *G_Gametype_GENERIC_ScoreboardMessage( void )
 		}
 	}
 
-	return scoreboardString;
+	// The result is stored in the global scoreboardString variable.
 }
 
 void G_Gametype_GENERIC_ClientRespawn( edict_t *self, int old_team, int new_team )
@@ -403,6 +403,7 @@ static void G_Gametype_GENERIC_Init( void )
 	level.gametype.isTutorial = false;
 	level.gametype.inverseScore = false;
 	level.gametype.hasChallengersQueue = false;
+	level.gametype.hasChallengersRoulette = false;
 	level.gametype.maxPlayersPerTeam = 0;
 
 	level.gametype.ammo_respawn = 20;
@@ -414,7 +415,7 @@ static void G_Gametype_GENERIC_Init( void )
 	level.gametype.ultrahealth_respawn = 60;
 
 	level.gametype.countdownEnabled = false;
-	level.gametype.mathAbortDisabled = false;
+	level.gametype.matchAbortDisabled = false;
 	level.gametype.canForceModels = true;
 	level.gametype.canShowMinimap = false;
 	level.gametype.teamOnlyMinimap = true;
@@ -422,6 +423,12 @@ static void G_Gametype_GENERIC_Init( void )
 
 	level.gametype.canShowMinimap = false;
 	level.gametype.teamOnlyMinimap = true;
+	
+	level.gametype.numBots = 0;
+	level.gametype.dummyBots = false;
+
+	level.gametype.forceTeamHumans = TEAM_SPECTATOR;
+	level.gametype.forceTeamBots = TEAM_SPECTATOR;
 
 	level.gametype.mmCompatible = false;
 
@@ -692,7 +699,7 @@ static void G_Match_CheckStateAbort( void )
 	bool enough;
 
 	if( GS_MatchState() <= MATCH_STATE_NONE || GS_MatchState() >= MATCH_STATE_POSTMATCH
-		|| level.gametype.mathAbortDisabled )
+		|| level.gametype.matchAbortDisabled )
 	{
 		GS_GamestatSetFlag( GAMESTAT_FLAG_WAITING, false );
 		return;
@@ -1880,6 +1887,7 @@ void G_Gametype_SetDefaults( void )
 	level.gametype.isTutorial = false;
     level.gametype.inverseScore = false;
     level.gametype.hasChallengersQueue = false;
+	level.gametype.hasChallengersRoulette = false;
     level.gametype.maxPlayersPerTeam = 0;
 
     level.gametype.ammo_respawn = 20;
@@ -1893,7 +1901,7 @@ void G_Gametype_SetDefaults( void )
     level.gametype.readyAnnouncementEnabled = false;
     level.gametype.scoreAnnouncementEnabled = false;
     level.gametype.countdownEnabled = false;
-    level.gametype.mathAbortDisabled = false;
+    level.gametype.matchAbortDisabled = false;
     level.gametype.shootingDisabled = false;
     level.gametype.infiniteAmmo = false;
     level.gametype.canForceModels = true;
@@ -1901,11 +1909,15 @@ void G_Gametype_SetDefaults( void )
     level.gametype.teamOnlyMinimap = true;
 	level.gametype.customDeadBodyCam = false;
 	level.gametype.removeInactivePlayers = true;
+	level.gametype.disableObituaries = false;
 
     level.gametype.spawnpointRadius = 64;
 
 	level.gametype.numBots = 0;
 	level.gametype.dummyBots = false;
+
+	level.gametype.forceTeamHumans = TEAM_SPECTATOR;
+	level.gametype.forceTeamBots = TEAM_SPECTATOR;
 
     level.gametype.mmCompatible = false;
 }
@@ -1995,11 +2007,12 @@ void G_Gametype_Init( void )
 
 	G_Gametype_SetDefaults();
 
+	// most GT_InitGametype implementations rely on gs.gametypeName being set for checking their default config file
+	GS_SetGametypeName( g_gametype->string );
+
 	// Init the current gametype
 	if( !GT_asLoadScript( g_gametype->string ) )
 		G_Gametype_GENERIC_Init();
-
-	GS_SetGametypeName( g_gametype->string );
 
 	trap_ConfigString( CS_GAMETYPENAME, g_gametype->string );
 

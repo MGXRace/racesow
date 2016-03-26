@@ -127,6 +127,12 @@ static const constant_numeric_t cg_numeric_constants[] = {
 	{ "PMOVE_TYPE_FREEZE", PM_FREEZE },
 	{ "PMOVE_TYPE_CHASECAM", PM_CHASECAM },
 
+	// config strings
+	{ "TEAM_SPECTATOR_NAME", CS_TEAM_SPECTATOR_NAME },
+	{ "TEAM_PLAYERS_NAME", CS_TEAM_PLAYERS_NAME },
+	{ "TEAM_ALPHA_NAME", CS_TEAM_ALPHA_NAME },
+	{ "TEAM_BETA_NAME", CS_TEAM_BETA_NAME },
+
 	{ NULL, 0 }
 };
 
@@ -213,9 +219,18 @@ static int CG_GetFPS( const void *parameter )
 	int i;
 	double t;
 
+	if( cg_showFPS->integer == 1 )
+	{
+		// FIXME: this should be removed once the API no longer locked
+		fps = (int)trap_R_GetAverageFramerate();
+		if( fps < 1 )
+			fps = 1;
+		return fps;
+	}
+
 	frameTimes[cg.frameCount & FPSSAMPLESMASK] = cg.realFrameTime;
 
-	if( cg_showFPS->integer != 1 )
+	if( cg_showFPS->integer == 2 )
 	{
 		for( avFrameTime = 0.0f, i = 0; i < FPSSAMPLESCOUNT; i++ )
 		{
@@ -228,7 +243,8 @@ static int CG_GetFPS( const void *parameter )
 	{
 		t = cg.realTime * 0.001f;
 		if( ( t - oldtime ) >= 0.25 )
-		{                       // updates 4 times a second
+		{
+			// updates 4 times a second
 			fps = ( cg.frameCount - oldframecount ) / ( t - oldtime ) + 0.5;
 			oldframecount = cg.frameCount;
 			oldtime = t;
@@ -2286,6 +2302,10 @@ static bool CG_LFuncFontFamily( struct cg_layoutnode_s *commandnode, struct cg_l
 	{
 		Q_strncpyz( layout_cursor_font_name, cgs.fontSystemFamily, sizeof( layout_cursor_font_name ) );
 	}
+	else if( !Q_stricmp( fontname, "con_fontSystemMono" ) )
+	{
+		Q_strncpyz( layout_cursor_font_name, cgs.fontSystemMonoFamily, sizeof( layout_cursor_font_name ) );
+	}
 	else
 	{
 		Q_strncpyz( layout_cursor_font_name, fontname, sizeof( layout_cursor_font_name ) );
@@ -2548,11 +2568,26 @@ static bool CG_LFuncDrawConfigstring( struct cg_layoutnode_s *commandnode, struc
 		CG_Printf( "WARNING 'CG_LFuncDrawConfigstring' Bad stat_string index" );
 		return false;
 	}
-	trap_SCR_DrawString( layout_cursor_x, layout_cursor_y, layout_cursor_align, cgs.configStrings[index], CG_GetLayoutCursorFont(), layout_cursor_color );
+	trap_SCR_DrawString( layout_cursor_x, layout_cursor_y, layout_cursor_align,
+		cgs.configStrings[index], CG_GetLayoutCursorFont(), layout_cursor_color );
 	return true;
 }
 
-static bool CG_LFuncDrawPlayername( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+static bool CG_LFuncDrawCleanConfigstring( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	int index = (int)CG_GetNumericArg( &argumentnode );
+
+	if( index < 0 || index >= MAX_CONFIGSTRINGS )
+	{
+		CG_Printf( "WARNING 'CG_LFuncDrawCleanConfigstring' Bad stat_string index" );
+		return false;
+	}
+	trap_SCR_DrawString( layout_cursor_x, layout_cursor_y, layout_cursor_align,
+		COM_RemoveColorTokensExt( cgs.configStrings[index], true ), CG_GetLayoutCursorFont(), layout_cursor_color );
+	return true;
+}
+
+static bool CG_LFuncDrawPlayerName( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
 {
 	int index = (int)CG_GetNumericArg( &argumentnode ) - 1;
 
@@ -2561,7 +2596,27 @@ static bool CG_LFuncDrawPlayername( struct cg_layoutnode_s *commandnode, struct 
 
 	if( ( index >= 0 && index < gs.maxclients ) && cgs.clientInfo[index].name[0] )
 	{
-		trap_SCR_DrawString( layout_cursor_x, layout_cursor_y, layout_cursor_align, cgs.clientInfo[index].name, CG_GetLayoutCursorFont(), layout_cursor_color );
+		vec4_t color;
+		VectorCopy( colorWhite, color );
+		color[3] = layout_cursor_color[3];
+		trap_SCR_DrawString( layout_cursor_x, layout_cursor_y, layout_cursor_align,
+			cgs.clientInfo[index].name, CG_GetLayoutCursorFont(), color );
+		return true;
+	}
+	return false;
+}
+
+static bool CG_LFuncDrawCleanPlayerName( struct cg_layoutnode_s *commandnode, struct cg_layoutnode_s *argumentnode, int numArguments )
+{
+	int index = (int)CG_GetNumericArg( &argumentnode ) - 1;
+
+	if( cgs.demoTutorial )
+		return true;
+
+	if( ( index >= 0 && index < gs.maxclients ) && cgs.clientInfo[index].name[0] )
+	{
+		trap_SCR_DrawString( layout_cursor_x, layout_cursor_y, layout_cursor_align,
+			COM_RemoveColorTokensExt( cgs.clientInfo[index].name, true ), CG_GetLayoutCursorFont(), layout_cursor_color );
 		return true;
 	}
 	return false;
@@ -2851,10 +2906,10 @@ static void CG_ViewUpFunc( int id, unsigned int time )
 	{
 		cg_touch_t &touch = cg_touches[id];
 
-		float scale = 600.0f / ( float )cgs.vidHeight;
+		int threshold = ( int )( cg_touch_zoomThres->value * cgs.pixelRatio );
 		if( !time || ( (int)( time - cg_hud_touch_zoomLastTouch ) > cg_touch_zoomTime->integer ) ||
-			( abs( touch.x - cg_hud_touch_zoomX ) * scale > cg_touch_zoomThres->value ) ||
-			( abs( touch.y - cg_hud_touch_zoomY ) * scale > cg_touch_zoomThres->value ) )
+			( abs( touch.x - cg_hud_touch_zoomX ) > threshold ) ||
+			( abs( touch.y - cg_hud_touch_zoomY ) > threshold ) )
 		{
 			cg_hud_touch_zoomSeq = 0;
 		}
@@ -2887,10 +2942,10 @@ static bool CG_LFuncTouchView( struct cg_layoutnode_s *commandnode, struct cg_la
 		cg_touch_t &touch = cg_touches[touchID];
 		if( cg_hud_touch_zoomSeq )
 		{
-			float scale = 600.0f / ( float )cgs.vidHeight;
+			int threshold = ( int )( cg_touch_zoomThres->value * cgs.pixelRatio );
 			if( ( ( int )( touch.time - cg_hud_touch_zoomLastTouch ) > cg_touch_zoomTime->integer ) ||
-				( abs( touch.x - cg_hud_touch_zoomX ) * scale > cg_touch_zoomThres->value ) ||
-				( abs( touch.y - cg_hud_touch_zoomY ) * scale > cg_touch_zoomThres->value ) )
+				( abs( touch.x - cg_hud_touch_zoomX ) > threshold ) ||
+				( abs( touch.y - cg_hud_touch_zoomY ) > threshold ) )
 			{
 				cg_hud_touch_zoomSeq = 0;
 			}
@@ -3311,11 +3366,20 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 	},
 
 	{
-		"drawPlayername",
-		CG_LFuncDrawPlayername,
+		"drawPlayerName",
+		CG_LFuncDrawPlayerName,
 		NULL,
 		1,
-		"Draws the name of the player with id provided by the argument",
+		"Draws the name of the player with id provided by the argument, colored with color tokens, white by default",
+		false
+	},
+
+	{
+		"drawCleanPlayerName",
+		CG_LFuncDrawCleanPlayerName,
+		NULL,
+		1,
+		"Draws the name of the player with id provided by the argument, using the current color",
 		false
 	},
 
@@ -3356,6 +3420,15 @@ static const cg_layoutcommand_t cg_LayoutCommands[] =
 		false
 	},
 	// !racesow
+
+	{
+		"drawCleanStatString",
+		CG_LFuncDrawCleanConfigstring,
+		NULL,
+		1,
+		"Draws configstring of argument id, ignoring color codes",
+		false
+	},
 
 	{
 		"drawItemName",
@@ -4900,10 +4973,7 @@ static void CG_LoadStatusBarFile( char *path )
 		return;
 	}
 
-	CG_CancelTouches();
-	cg_hud_touch_buttons = 0;
-	cg_hud_touch_upmove = 0;
-	cg_hud_touch_zoomSeq = 0;
+	CG_ClearHUDInputState();
 
 	// load the new status bar program
 	CG_ParseLayoutScript( opt, cg.statusBar );
@@ -4925,8 +4995,6 @@ static void CG_LoadStatusBarFile( char *path )
 	customWeaponSelectPic = NULL;
 
 	cg_touch_dropWeaponX = cg_touch_dropWeaponY = 0.0f;
-
-	trap_Cvar_ForceSet( "con_chatCGame", "0" );
 }
 
 /*
@@ -4999,4 +5067,15 @@ void CG_UpdateHUDPostTouch( void )
 {
 	if( cg.frame.playerState.pmove.pm_type != PM_NORMAL )
 		cg_hud_touch_buttons &= ~BUTTON_ZOOM;
+}
+
+/*
+* CG_ClearHUDInputState
+*/
+void CG_ClearHUDInputState( void )
+{
+	CG_CancelTouches();
+
+	cg_hud_touch_zoomSeq = 0;
+	cg_hud_touch_buttons &= ~BUTTON_ZOOM;
 }

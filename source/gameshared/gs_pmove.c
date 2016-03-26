@@ -1231,14 +1231,15 @@ static void PM_CheckWallJump( void )
 
 		point[0] = pml.origin[0];
 		point[1] = pml.origin[1];
-		point[2] = pml.origin[2] - WJHEIGHT;
+		point[2] = pml.origin[2] - STEPSIZE;
 
 		// don't walljump if our height is smaller than a step 
-		// unless the player is moving faster than dash speed and upwards
+		// unless jump is pressed or the player is moving faster than dash speed and upwards
 		hspeed = VectorLengthFast( tv( pml.velocity[0], pml.velocity[1], 0 ) );
 		module_Trace( &trace, pml.origin, pm->mins, pm->maxs, point, pm->playerState->POVnum, pm->contentmask, 0 );
 		
-		if( ( hspeed > pm->playerState->pmove.stats[PM_STAT_DASHSPEED] && pml.velocity[2] > 8 ) 
+		if( pml.upPush >= 10
+			|| ( hspeed > pm->playerState->pmove.stats[PM_STAT_DASHSPEED] && pml.velocity[2] > 8 )
 			|| ( trace.fraction == 1 ) || ( !ISWALKABLEPLANE( &trace.plane ) && !trace.startsolid ) )
 		{
 			VectorClear( normal );
@@ -2071,8 +2072,11 @@ void Pmove( pmove_t *pmove )
 #define MAX_FALLING_DAMAGE 15
 #define FALL_DAMAGE_SCALE 1.0
 
-	// check for falling damage
-	module_PMoveTouchTriggers( pm, pml.previous_origin ); // racesow - previous_origin
+	// Execute the triggers that are touched.
+	// We check the entire path between the origin before the pmove and the
+	// current origin to ensure no triggers are missed at high velocity.
+	// Note that this method assumes the movement has been linear.
+	module_PMoveTouchTriggers( pm, pml.previous_origin );
 
 	PM_UpdateDeltaAngles(); // in case some trigger action has moved the view angles (like teleported).
 

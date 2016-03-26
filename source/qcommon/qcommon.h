@@ -740,6 +740,8 @@ const char *FS_WriteDirectory( void );
 const char *FS_CacheDirectory( void );
 const char *FS_SecureDirectory( void );
 const char *FS_MediaDirectory( fs_mediatype_t type );
+const char *FS_DownloadsDirectory( void );
+const char *FS_RuntimeDirectory( void );
 void	    FS_CreateAbsolutePath( const char *path );
 const char *FS_AbsoluteNameForFile( const char *filename );
 const char *FS_AbsoluteNameForBaseFile( const char *filename );
@@ -760,7 +762,7 @@ int	    FS_Seek( int file, int offset, int whence );
 int	    FS_Eof( int file );
 int	    FS_Flush( int file );
 bool	FS_IsUrl( const char *url );
-int		FS_FileNo( int file );
+int		FS_FileNo( int file, size_t *offset );
 
 void	FS_SetCompressionLevel( int file, int level );
 int		FS_GetCompressionLevel( int file );
@@ -800,7 +802,7 @@ bool    FS_RemoveDirectory( const char *dirname );
 bool    FS_RemoveBaseDirectory( const char *dirname );
 bool    FS_RemoveAbsoluteDirectory( const char *dirname );
 unsigned    FS_ChecksumAbsoluteFile( const char *filename );
-unsigned    FS_ChecksumBaseFile( const char *filename );
+unsigned    FS_ChecksumBaseFile( const char *filename, bool ignorePakChecksum );
 bool	FS_CheckPakExtension( const char *filename );
 bool	FS_PakFileExists( const char *packfilename );
 
@@ -837,9 +839,11 @@ MISC
 void	    Com_BeginRedirect( int target, char *buffer, int buffersize, 
 				void ( *flush )(int, const char*, const void*), const void *extra );
 void	    Com_EndRedirect( void );
+void 	    Com_DeferConsoleLogReopen( void );
 void	    Com_Printf( const char *format, ... );
 void	    Com_DPrintf( const char *format, ... );
 void	    Com_Error( com_error_code_t code, const char *format, ... );
+void		Com_DeferQuit( void );
 void	    Com_Quit( void );
 
 int			Com_ClientState( void );        // this should have just been a cvar...
@@ -858,11 +862,8 @@ unsigned int Com_DaysSince1900( void );
 extern cvar_t *developer;
 extern cvar_t *dedicated;
 extern cvar_t *host_speeds;
-extern cvar_t *log_stats;
 extern cvar_t *versioncvar;
 extern cvar_t *revisioncvar;
-
-extern int log_stats_file;
 
 // host_speeds times
 extern unsigned int time_before_game;

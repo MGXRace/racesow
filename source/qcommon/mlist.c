@@ -76,6 +76,9 @@ static void ML_AddMap( const char *filename, const char *fullname )
 	if( !ML_ValidateFullname( fullname ) && *fullname )	// allow empty fullnames
 		return;
 
+	if( !strcmp(fullname, "ui") )
+		return;
+
 	ml_flush = true;	// tell everyone that maplist has changed
 	buffer = ( char* )Mem_ZoneMalloc( sizeof( mapinfo_t ) + strlen( filename ) + 1 + strlen( fullname ) + 1 );
 
@@ -438,7 +441,11 @@ void ML_Restart( bool forcemaps )
 {
 	ML_Shutdown();
 	if( forcemaps )
-		FS_RemoveFile( MLIST_CACHE );
+	{
+		int filenum;
+		if( FS_FOpenFile( MLIST_CACHE, &filenum, FS_WRITE|FS_CACHE ) != -1 )
+			FS_FCloseFile( filenum );
+	}
 	FS_Rescan();
 	ML_Init();
 }

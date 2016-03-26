@@ -39,10 +39,11 @@ static int com_argc;
 static char *com_argv[MAX_NUM_ARGVS+1];
 static char com_errormsg[MAX_PRINTMSG];
 
+static bool com_quit;
+
 static jmp_buf abortframe;     // an ERR_DROP occured, exit the entire frame
 
 cvar_t *host_speeds;
-cvar_t *log_stats;
 cvar_t *developer;
 cvar_t *timescale;
 cvar_t *dedicated;
@@ -60,7 +61,6 @@ static cvar_t *com_introPlayed3;
 
 static qmutex_t *com_print_mutex;
 
-int log_stats_file = 0;
 static int log_file = 0;
 
 static int server_state = CA_UNINITIALIZED;
@@ -141,6 +141,69 @@ void Com_EndRedirect( void )
 	QMutex_Unlock( com_print_mutex );
 }
 
+void Com_DeferConsoleLogReopen( void )
+{
+	if( logconsole != NULL ) {
+		logconsole->modified = true;
+	}
+}
+
+static void Com_CloseConsoleLog( bool lock, bool shutdown )
+{
+	if( shutdown )
+		lock = true;
+
+	if( lock )
+		QMutex_Lock( com_print_mutex );
+
+	if( log_file )
+	{
+		FS_FCloseFile( log_file );
+		log_file = 0;
+	}
+
+	if( shutdown )
+		logconsole = NULL;
+
+	if( lock )
+		QMutex_Unlock( com_print_mutex );
+}
+
+static void Com_ReopenConsoleLog( void )
+{
+	char errmsg[MAX_PRINTMSG] = { 0 };
+
+	QMutex_Lock( com_print_mutex );
+
+	Com_CloseConsoleLog( false, false );
+
+	if( logconsole && logconsole->string && logconsole->string[0] )
+	{
+		size_t name_size;
+		char *name;
+
+		name_size = strlen( logconsole->string ) + strlen( ".log" ) + 1;
+		name = ( char* )Mem_TempMalloc( name_size );
+		Q_strncpyz( name, logconsole->string, name_size );
+			COM_DefaultExtension( name, ".log", name_size );
+
+		if( FS_FOpenFile( name, &log_file, ( logconsole_append && logconsole_append->integer ? FS_APPEND : FS_WRITE ) ) == -1 )
+		{
+			log_file = 0;
+			Q_snprintfz( errmsg, MAX_PRINTMSG, "Couldn't open: %s\n", name );
+		}
+
+		Mem_TempFree( name );
+	}
+
+	QMutex_Unlock( com_print_mutex );
+
+	if( errmsg[0] )
+	{
+		Com_Printf( "%s", errmsg );
+	}
+}
+
 /*
 * Com_Printf
 * 
@@ -149,7 +212,7 @@ void Com_EndRedirect( void )
 */
 void Com_Printf( const char *format, ... )
 {
-	va_list	argptr;
+	va_list argptr;
 	char msg[MAX_PRINTMSG];
 
 	time_t timestamp;
@@ -178,48 +241,10 @@ void Com_Printf( const char *format, ... )
 		return;
 	}
 
-	QMutex_Unlock( com_print_mutex );
-
-	// console is protected with its own mutex
-	Con_Print( msg );
-
-	QMutex_Lock( com_print_mutex );
-
 	// also echo to debugging console
 	Sys_ConsoleOutput( msg );
 
-	// logconsole
-	if( logconsole && logconsole->modified )
-	{
-		logconsole->modified = false;
-
-		if( log_file )
-		{
-			FS_FCloseFile( log_file );
-			log_file = 0;
-		}
-
-		if( logconsole->string && logconsole->string[0] )
-		{
-			size_t name_size;
-			char *name;
-
-			name_size = strlen( logconsole->string ) + strlen( ".log" ) + 1;
-			name = ( char* )Mem_TempMalloc( name_size );
-			Q_strncpyz( name, logconsole->string, name_size );
-			COM_DefaultExtension( name, ".log", name_size );
-
-			if( FS_FOpenFile( name, &log_file, ( logconsole_append && logconsole_append->integer ? FS_APPEND : FS_WRITE ) ) == -1 )
-			{
-				log_file = 0;
-				// no dead lock here as both posix mutexes and critical sections 
-				// are reenterant for the thread, which owns the mutex/CS
-				Com_Printf( "Couldn't open: %s\n", name );
-			}
-
-			Mem_TempFree( name );
-		}
-	}
+	Con_Print( msg );
 
 	if( log_file )
 	{
@@ -304,6 +329,13 @@ void Com_Error( com_error_code_t code, const char *format, ... )
 	Sys_Error( "%s", msg );
 }
 
+/*
+* Com_DeferQuit
+*/
+void Com_DeferQuit( void )
+{
+	com_quit = true;
+}
 
 /*
 * Com_Quit
@@ -327,12 +359,6 @@ void Com_Quit( void )
 	SV_Shutdown( "Server quit\n" );
 	CL_Shutdown();
 	MM_Shutdown();
-
-	if( log_file )
-	{
-		FS_FCloseFile( log_file );
-		log_file = 0;
-	}
 
 	Sys_Quit();
 }
@@ -931,7 +957,6 @@ void Qcommon_Init( int argc, char **argv )
 	Qcommon_InitCommands();
 
 	host_speeds =	    Cvar_Get( "host_speeds", "0", 0 );
-	log_stats =	    Cvar_Get( "log_stats", "0", 0 );
 	developer =	    Cvar_Get( "developer", "0", 0 );
 	timescale =	    Cvar_Get( "timescale", "1.0", CVAR_CHEAT );
 	fixedtime =	    Cvar_Get( "fixedtime", "0", CVAR_CHEAT );
@@ -1027,29 +1052,16 @@ void Qcommon_Frame( unsigned int realmsec )
 	int time_before = 0, time_between = 0, time_after = 0;
 	static unsigned int gamemsec;
 
+	if( com_quit )
+		Com_Quit();
+
 	if( setjmp( abortframe ) )
 		return; // an ERR_DROP was thrown
 
-	if( log_stats->modified )
+	if( logconsole && logconsole->modified )
 	{
-		log_stats->modified = false;
-
-		if( log_stats->integer && !log_stats_file )
-		{
-			if( FS_FOpenFile( "stats.log", &log_stats_file, FS_WRITE ) != -1 )
-			{
-				FS_Printf( log_stats_file, "entities,dlights,parts,frame time\n" );
-			}
-			else
-			{
-				log_stats_file = 0;
-			}
-		}
-		else if( log_stats_file )
-		{
-			FS_FCloseFile( log_stats_file );
-			log_stats_file = 0;
-		}
+		logconsole->modified = false;
+		Com_ReopenConsoleLog();
 	}
 
 	if( fixedtime->integer > 0 )
@@ -1162,17 +1174,8 @@ void Qcommon_Shutdown( void )
 	Qcommon_ShutdownCommands();
 	Memory_ShutdownCommands();
 
-	if( log_stats_file )
-	{
-		FS_FCloseFile( log_stats_file );
-		log_stats_file = 0;
-	}
-	if( log_file )
-	{
-		FS_FCloseFile( log_file );
-		log_file = 0;
-	}
-	logconsole = NULL;
+	Com_CloseConsoleLog( true, true );
+
 	FS_Shutdown();
 
 	Com_UnloadCompressionLibraries();

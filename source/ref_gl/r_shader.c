@@ -37,7 +37,7 @@ typedef struct shadercache_s
 {
 	char *name;
 	char *buffer;
-	const char *filename;
+	char *filename;
 	size_t offset;
 	struct shadercache_s *hash_next;
 } shadercache_t;
@@ -666,6 +666,7 @@ static void Shader_SmallestMipMapSize( shader_t *shader, shaderpass_t *pass, con
 
 static void Shader_DeformVertexes( shader_t *shader, shaderpass_t *pass, const char **ptr )
 {
+	char tmp[128];
 	char *token;
 	deformv_t *deformv;
 	shaderfunc_t *func;
@@ -689,7 +690,7 @@ static void Shader_DeformVertexes( shader_t *shader, shaderpass_t *pass, const c
 		deformv->args[0] = Shader_ParseFloat( ptr );
 		Shader_ParseFunc( ptr, func );
 		Q_strncatz( r_shaderDeformvKey, 
-			va( "%g%i%g%g%g%g", 
+			va_r( tmp, sizeof( tmp ), "%g%i%g%g%g%g", 
 			deformv->args[0], func->type, func->args[0], func->args[1], func->args[2], func->args[3] ), 
 			sizeof( r_shaderDeformvKey ) );
 		deformv->args[0] = deformv->args[0] ? 1.0f / deformv->args[0] : 100.0f;
@@ -699,7 +700,7 @@ static void Shader_DeformVertexes( shader_t *shader, shaderpass_t *pass, const c
 		deformv->type = DEFORMV_BULGE;
 		Shader_ParseVector( ptr, deformv->args, 4 );
 		Q_strncatz( r_shaderDeformvKey, 
-			va( "%g%g%g%g", 
+			va_r( tmp, sizeof( tmp ), "%g%g%g%g", 
 			deformv->args[0], deformv->args[1], deformv->args[2], deformv->args[3] ), 
 			sizeof( r_shaderDeformvKey ) );
 	}
@@ -709,7 +710,7 @@ static void Shader_DeformVertexes( shader_t *shader, shaderpass_t *pass, const c
 		Shader_ParseVector( ptr, deformv->args, 3 );
 		Shader_ParseFunc( ptr, &deformv->func );
 		Q_strncatz( r_shaderDeformvKey, 
-			va( "%g%g%g%i%g%g%g%g", 
+			va_r( tmp, sizeof( tmp ), "%g%g%g%i%g%g%g%g", 
 			deformv->args[0], deformv->args[1], deformv->args[2],
 			func->type, func->args[0], func->args[1], func->args[2], func->args[3] ), 
 			sizeof( r_shaderDeformvKey ) );
@@ -1156,14 +1157,6 @@ static void Shaderpass_CubeMapExt( shader_t *shader, shaderpass_t *pass, int add
 	flags = Shader_SetImageFlags( shader ) | addFlags;
 	pass->anim_fps = 0;
 	pass->flags &= ~( SHADERPASS_LIGHTMAP|SHADERPASS_PORTALMAP );
-
-	if( !glConfig.ext.texture_cube_map )
-	{
-		ri.Com_DPrintf( S_COLOR_YELLOW "Shader %s has an unsupported cubemap stage: %s.\n", shader->name );
-		pass->images[0] = rsh.noTexture;
-		pass->tcgen = TC_GEN_BASE;
-		return;
-	}
 
 	pass->images[0] = R_FindImage( token, NULL, flags|IT_CUBEMAP, r_shaderMinMipSize, shader->imagetags );
 	if( pass->images[0] )
@@ -1882,10 +1875,13 @@ static void Shader_MakeCache( const char *filename )
 		cache = ( shadercache_t * )cacheMemBuf; cacheMemBuf += sizeof( shadercache_t ) + strlen( token ) + 1;
 		cache->hash_next = shadercache_hash[key];
 		cache->name = ( char * )( (uint8_t *)cache + sizeof( shadercache_t ) );
+		cache->filename = NULL;
 		strcpy( cache->name, token );
 		shadercache_hash[key] = cache;
 
 set_path_and_offset:
+		if( cache->filename )
+			R_Free( cache->filename );
 		cache->filename = R_CopyString( filename );
 		cache->buffer = buf;
 		cache->offset = ptr - buf;
@@ -1930,38 +1926,53 @@ static unsigned int Shader_GetCache( const char *name, shadercache_t **cache )
 */
 static void R_InitShadersCache( void )
 {
+	int d;
 	int i, j, k, numfiles;
+	int numfiles_total;
 	const char *fileptr;
 	char shaderPaths[1024];
+	const char *dirs[3] = { "<scripts", ">scripts", "scripts" };
 
 	r_shaderTemplateBuf = NULL;
 
 	memset( shadercache_hash, 0, sizeof( shadercache_t * )*SHADERCACHE_HASH_SIZE );
 	
-	// enumerate shaders
-	numfiles = ri.FS_GetFileList( "scripts", ".shader", NULL, 0, 0, 0 );
-	if( !numfiles ) {
-		ri.Com_Error( ERR_DROP, "Could not find any shaders!" );
-	}
-
 	Com_Printf( "Initializing Shaders:\n" );
 
-	// now load them all
-	for( i = 0; i < numfiles; i += k ) {
-		if( ( k = ri.FS_GetFileList( "scripts", ".shader", shaderPaths, sizeof( shaderPaths ), i, numfiles )) == 0 ) {
-			k = 1; // advance by one file
-			continue;
+	numfiles_total = 0;
+	for( d = 0; d < 3; d++ ) {
+		if( d == 2 ) {
+			// this is a fallback case for older bins that do not support the '<>' prefixes
+			// since we got some files, the binary is sufficiently up to date
+			if( numfiles_total )
+				break;
 		}
 
-		fileptr = shaderPaths;
-		for( j = 0; j < k; j++ ) {
-			Shader_MakeCache( fileptr );
+		// enumerate shaders
+		numfiles = ri.FS_GetFileList( dirs[d], ".shader", NULL, 0, 0, 0 );
+		numfiles_total += numfiles;
 
-			fileptr += strlen( fileptr ) + 1;
-			if( !*fileptr ) {
-				break;
+		// now load them all
+		for( i = 0; i < numfiles; i += k ) {
+			if( ( k = ri.FS_GetFileList( dirs[d], ".shader", shaderPaths, sizeof( shaderPaths ), i, numfiles )) == 0 ) {
+				k = 1; // advance by one file
+				continue;
+			}
+
+			fileptr = shaderPaths;
+			for( j = 0; j < k; j++ ) {
+				Shader_MakeCache( fileptr );
+
+				fileptr += strlen( fileptr ) + 1;
+				if( !*fileptr ) {
+					break;
+				}
 			}
 		}
+	}
+
+	if( !numfiles_total ) {
+		ri.Com_Error( ERR_DROP, "Could not find any shaders!" );
 	}
 
 	Com_Printf( "--------------------------------------\n" );

@@ -20,7 +20,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "android_sys.h"
 #include <pthread.h>
-#include <signal.h>
 #include <unistd.h>
 #include <android/log.h>
 #include <android/window.h>
@@ -30,6 +29,8 @@ unsigned int sys_frame_time;
 
 struct android_app *sys_android_app;
 
+char sys_android_internalDataPath[PATH_MAX];
+
 JNIEnv *sys_android_jniEnv;
 jclass sys_android_activityClass;
 jmethodID sys_android_getSystemService;
@@ -38,7 +39,7 @@ char sys_android_packageName[PATH_MAX];
 
 static pthread_key_t sys_android_jniEnvKey;
 
-static jobject sys_android_wakeLock;
+static jobject sys_android_wakeLock, sys_android_wifiLock;
 
 static bool sys_android_initialized = false;
 
@@ -257,33 +258,54 @@ void Sys_Sleep( unsigned int millis )
 void *Sys_AcquireWakeLock( void )
 {
 	JNIEnv *env = Sys_Android_GetJNIEnv();
-	static jmethodID acquire;
+	static jmethodID acquireWakeLock, acquireWifiLock;
+	jclass wlClass;
 
-	if( !acquire )
+	if( !acquireWakeLock )
 	{
-		jclass wlClass = (*env)->GetObjectClass( env, sys_android_wakeLock );
-		acquire = (*env)->GetMethodID( env, wlClass, "acquire", "()V" );
+		wlClass = (*env)->GetObjectClass( env, sys_android_wakeLock );
+		acquireWakeLock = (*env)->GetMethodID( env, wlClass, "acquire", "()V" );
+		(*env)->DeleteLocalRef( env, wlClass );
+	}
+	if( !acquireWifiLock )
+	{
+		wlClass = (*env)->GetObjectClass( env, sys_android_wifiLock );
+		acquireWifiLock = (*env)->GetMethodID( env, wlClass, "acquire", "()V" );
 		(*env)->DeleteLocalRef( env, wlClass );
 	}
 
-	(*env)->CallVoidMethod( env, sys_android_wakeLock, acquire );
+	(*env)->CallVoidMethod( env, sys_android_wakeLock, acquireWakeLock );
+	(*env)->CallVoidMethod( env, sys_android_wifiLock, acquireWifiLock );
 
-	return sys_android_wakeLock;
+	return ( void * )1;
 }
 
 void Sys_ReleaseWakeLock( void *wl )
 {
 	JNIEnv *env = Sys_Android_GetJNIEnv();
-	static jmethodID release;
+	static jmethodID releaseWakeLock, releaseWifiLock;
+	jclass wlClass;
 
-	if( !release )
+	if( !releaseWakeLock )
 	{
-		jclass wlClass = (*env)->GetObjectClass( env, wl );
-		release = (*env)->GetMethodID( env, wlClass, "release", "()V" );
+		wlClass = (*env)->GetObjectClass( env, sys_android_wakeLock );
+		releaseWakeLock = (*env)->GetMethodID( env, wlClass, "release", "()V" );
+		(*env)->DeleteLocalRef( env, wlClass );
+	}
+	if( !releaseWifiLock )
+	{
+		wlClass = (*env)->GetObjectClass( env, sys_android_wifiLock );
+		releaseWifiLock = (*env)->GetMethodID( env, wlClass, "release", "()V" );
 		(*env)->DeleteLocalRef( env, wlClass );
 	}
 
-	(*env)->CallVoidMethod( env, wl, release );
+	(*env)->CallVoidMethod( env, sys_android_wakeLock, releaseWakeLock );
+	(*env)->CallVoidMethod( env, sys_android_wifiLock, releaseWifiLock );
+}
+
+int Sys_GetCurrentProcessId( void )
+{
+	return getpid();
 }
 
 void Sys_Quit( void )
@@ -292,23 +314,18 @@ void Sys_Quit( void )
 	exit( 0 );
 }
 
-static void Sys_Android_SignalHandler( int sig )
-{
-	signal( SIGTERM, SIG_DFL );
-	signal( SIGINT, SIG_DFL );
-	Com_Printf( "Received signal %d, exiting...\n", sig );
-	Com_Quit();
-}
-
 static void Sys_Android_Init( void )
 {
 	struct android_app *app = sys_android_app;
 	JNIEnv *env;
 	jobject activity = app->activity->clazz;
 
-	// Set signal handlers.
-	signal( SIGTERM, Sys_Android_SignalHandler );
-	signal( SIGINT, Sys_Android_SignalHandler );
+	// Resolve the app's internal storage root directory.
+	{
+		char relativePath[PATH_MAX];
+		Q_snprintfz( relativePath, sizeof( relativePath ), "%s/..", app->activity->internalDataPath );
+		realpath( relativePath, sys_android_internalDataPath );
+	}
 
 	// Set working directory to external data path.
 	{
@@ -356,7 +373,7 @@ static void Sys_Android_Init( void )
 		jclass powerClass;
 		jmethodID newWakeLock;
 		jstring tag;
-		jobject wl;
+		jobject wakeLock;
 
 		name = (*env)->NewStringUTF( env, "power" );
 		power = (*env)->CallObjectMethod( env, activity, sys_android_getSystemService, name );
@@ -366,11 +383,35 @@ static void Sys_Android_Init( void )
 			"(ILjava/lang/String;)Landroid/os/PowerManager$WakeLock;" );
 		(*env)->DeleteLocalRef( env, powerClass );
 		tag = (*env)->NewStringUTF( env, "Qfusion" );
-		wl = (*env)->CallObjectMethod( env, power, newWakeLock, 1, tag );
+		wakeLock = (*env)->CallObjectMethod( env, power, newWakeLock, 1 /* PARTIAL_WAKE_LOCK */, tag );
 		(*env)->DeleteLocalRef( env, tag );
 		(*env)->DeleteLocalRef( env, power );
-		sys_android_wakeLock = (*env)->NewGlobalRef( env, wl );
-		(*env)->DeleteLocalRef( env, wl );
+		sys_android_wakeLock = (*env)->NewGlobalRef( env, wakeLock );
+		(*env)->DeleteLocalRef( env, wakeLock );
+	}
+
+	// Initialize the high-performance Wi-Fi lock.
+	{
+		jstring name;
+		jobject wifi;
+		jclass wifiClass;
+		jmethodID createWifiLock;
+		jstring tag;
+		jobject wifiLock;
+
+		name = (*env)->NewStringUTF( env, "wifi" );
+		wifi = (*env)->CallObjectMethod( env, activity, sys_android_getSystemService, name );
+		(*env)->DeleteLocalRef( env, name );
+		wifiClass = (*env)->FindClass( env, "android/net/wifi/WifiManager" );
+		createWifiLock = (*env)->GetMethodID( env, wifiClass, "createWifiLock",
+			"(ILjava/lang/String;)Landroid/net/wifi/WifiManager$WifiLock;" );
+		(*env)->DeleteLocalRef( env, wifiClass );
+		tag = (*env)->NewStringUTF( env, "Qfusion" );
+		wifiLock = (*env)->CallObjectMethod( env, wifi, createWifiLock, 3 /* WIFI_MODE_FULL_HIGH_PERF */, tag );
+		(*env)->DeleteLocalRef( env, tag );
+		(*env)->DeleteLocalRef( env, wifi );
+		sys_android_wifiLock = (*env)->NewGlobalRef( env, wifiLock );
+		(*env)->DeleteLocalRef( env, wifiLock );
 	}
 
 	// Set native app cmd handler to the actual one.

@@ -34,6 +34,7 @@ typedef struct filedownload_s {
 	char *temppath;
 	char *writepath;
 	int filenum;
+	unsigned checksum;
 	void (*done_cb)(struct filedownload_s *, int);
 	struct filedownload_s *next;
 } filedownload_t;
@@ -114,7 +115,7 @@ static filedownload_t *AU_AllocDownload( void )
 * AU_DownloadFile
 */
 static filedownload_t *AU_DownloadFile( const char *baseUrl, const char *filepath, bool silent, 
-	void (*done_cb)(struct filedownload_s *, int) )
+	unsigned checksum, void (*done_cb)(struct filedownload_s *, int) )
 {
 	int fsize, fnum;
 	int alloc_size;
@@ -143,9 +144,9 @@ static filedownload_t *AU_DownloadFile( const char *baseUrl, const char *filepat
 		Q_snprintfz( url, alloc_size, "%s/%s", baseUrl, filepath );
 
 	// add .tmp (relative + .tmp)
-	alloc_size = strlen( filepath ) + strlen( ".tmp" ) + 1;
+	alloc_size = strlen( filepath ) + 128 + strlen( ".tmp" ) + 1;
 	temppath = AU_MemAlloc( alloc_size );
-	Q_snprintfz( temppath, alloc_size, "%s.tmp", filepath );
+	Q_snprintfz( temppath, alloc_size, "%s.%i.tmp", filepath, Sys_GetCurrentProcessId() );
 
 	// full write path for curl
 	alloc_size = strlen( FS_WriteDirectory() ) + 1 + strlen( temppath ) + 1;
@@ -160,6 +161,7 @@ static filedownload_t *AU_DownloadFile( const char *baseUrl, const char *filepat
 	fd->filepath = AU_CopyString( filepath );
 	fd->temppath = temppath;
 	fd->writepath = writepath;
+	fd->checksum = checksum;
 	fd->done_cb = done_cb;
 
 	// test if file exist
@@ -221,6 +223,15 @@ static void AU_FinishDownload( filedownload_t *fd_, int status )
 		for( fd = au_download_head; fd; fd = fd->next ) {
 			temppath = fd->temppath;
 			filepath = fd->filepath;
+
+			if( fd->checksum ) {
+				unsigned checksum = FS_ChecksumBaseFile( temppath, true );
+				if( checksum != fd->checksum ) {
+					Com_Printf( "AU_FinishDownload: checksum mismatch for %s. Expected %u, got %u\n", temppath, fd->checksum, checksum );
+					au_download_errcount++;
+					break;
+				}
+			}
 
 			if( FS_MoveBaseFile( temppath, filepath ) )
 				continue;
@@ -297,10 +308,9 @@ static void AU_FinishDownload( filedownload_t *fd_, int status )
 static void AU_ParseUpdateList( const char *data, bool checkOnly )
 {
 	const char *ptr = (const char *)data;
-	char checksumString1[32], checksumString2[32];
-	unsigned int checksum;
+	unsigned int checksum, expected_checksum;
 	const char *token;
-	const char *path;
+	char path[MAX_TOKEN_CHARS];
 	char newVersionTag[MAX_QPATH];
 	bool newVersion = false;
 
@@ -325,11 +335,10 @@ static void AU_ParseUpdateList( const char *data, bool checkOnly )
 		if( !token[0] )
 			return;
 
-		// copy checksum reported by server
-		Q_strncpyz( checksumString1, token, sizeof( checksumString1 ) );
+		expected_checksum = strtoul( token, NULL, 10 );
 
 		// get filename
-		token = COM_ParseExt( &ptr, true );
+		token = COM_ParseExt( &ptr, false );
 		if( !token[0] )
 			return;
 
@@ -341,23 +350,22 @@ static void AU_ParseUpdateList( const char *data, bool checkOnly )
 		if( !COM_ValidateRelativeFilename( token ) )
 		{
 			Com_Printf( "AU_ParseUpdateList: Invalid filename %s\n", token );
-			continue;
+			goto skip_line;
 		}
 
 		if( !COM_FileExtension( token ) )
 		{
 			Com_Printf( "AU_ParseUpdateList: no file extension\n" );
-			continue;
+			goto skip_line;
 		}
 
-		path = token;
+		Q_strncpyz( path, token, sizeof( path ) );
 
-		checksum = FS_ChecksumBaseFile( token );
-		Q_snprintfz( checksumString2, sizeof( checksumString2 ), "%u", checksum );
+		checksum = FS_ChecksumBaseFile( token, false );
 
 		// if same checksum no need to update
-		if( !strcmp( checksumString1, checksumString2 ) )
-			continue;
+		if( checksum == expected_checksum )
+			goto skip_line;
 
 		// if it's a pack file and the file exists it can't be replaced, so skip
 		if( FS_CheckPakExtension( path ) && checksum )
@@ -366,21 +374,31 @@ static void AU_ParseUpdateList( const char *data, bool checkOnly )
 			Com_Printf( "WARNING: This file has been locally modified. It is highly \n" );
 			Com_Printf( "WARNING: recommended to restore the original file.\n" );
 			Com_Printf( "WARNING: Reinstalling \""APPLICATION"\" might be convenient.\n" );
-			continue;	
+			goto skip_line;
 		}
 
 		if( checkOnly )
 		{
 			Com_Printf( "File update available: %s\n", path );
-			continue;
+			goto skip_line;
+		}
+
+		// check optional md5-digest checksum
+		expected_checksum = 0;
+		token = COM_ParseExt( &ptr, false );
+		if( token[0] ) {
+			expected_checksum = strtoul( token, NULL, 10 );
+			if( expected_checksum == ULONG_MAX ) {
+				expected_checksum = 0;
+			}
 		}
 
 		if( developer->integer )
-			Com_Printf( "Downloading update of %s (checksum %s local checksum %s)\n", path, checksumString1, checksumString2 );
+			Com_Printf( "Downloading update of %s (checksum %u local checksum %u)\n", path, expected_checksum, checksum );
 		else
 			Com_Printf( "Updating %s\n", path );
 
-		fd = AU_DownloadFile( AU_BASE_URL, path, false, &AU_FinishDownload );
+		fd = AU_DownloadFile( AU_BASE_URL, path, false, expected_checksum, &AU_FinishDownload );
 		if( !fd )
 		{
 			Com_Printf( "Failed to update %s\n", path );
@@ -390,6 +408,11 @@ static void AU_ParseUpdateList( const char *data, bool checkOnly )
 		fd->next = au_download_head;
 		au_download_head = fd;
 		au_download_count++;
+
+skip_line:
+		while( token[0] ) {
+			token = COM_ParseExt( &ptr, false );
+		}
 	}
 
 	if( newVersion ) {

@@ -145,6 +145,7 @@ typedef struct
 	bool isTutorial;
 	bool inverseScore;
 	bool hasChallengersQueue;
+	bool hasChallengersRoulette;
 	int maxPlayersPerTeam;
 
 	// default item respawn time
@@ -160,7 +161,7 @@ typedef struct
 	bool readyAnnouncementEnabled;
 	bool scoreAnnouncementEnabled;
 	bool countdownEnabled;
-	bool mathAbortDisabled;
+	bool matchAbortDisabled;
 	bool shootingDisabled;
 	bool infiniteAmmo;
 	bool canForceModels;
@@ -168,6 +169,7 @@ typedef struct
 	bool teamOnlyMinimap;
 	bool customDeadBodyCam;
 	bool removeInactivePlayers;
+	bool disableObituaries;
 
 	int spawnpointRadius;
 
@@ -175,6 +177,9 @@ typedef struct
 
 	int numBots;
 	bool dummyBots;
+
+	int forceTeamHumans;
+	int forceTeamBots;
 
 	// racesow
 	bool autoInactivityRemove;
@@ -237,7 +242,7 @@ void G_Teams_CoachUnLockTeam( edict_t *ent );
 void G_Teams_CoachRemovePlayer( edict_t *ent );
 
 bool G_Gametype_Exists( const char *name );
-char *G_Gametype_GENERIC_ScoreboardMessage( void );
+void G_Gametype_GENERIC_ScoreboardMessage( void );
 void G_Gametype_GENERIC_ClientRespawn( edict_t *self, int old_team, int new_team );
 
 #endif //  __G_GAMETYPE_H__

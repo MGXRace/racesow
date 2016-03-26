@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "qcommon.h"
 
 #include "sys_fs.h"
+#include "sys_threads.h"
 
 #include "compression.h"
 #include "wswcurl.h"
@@ -73,6 +74,7 @@ static const char *forbidden_gamedirs[] = {
 	"libs",
 	"browser",
 	APPLICATION ".app",
+	"downloads",
 	NULL
 };
 
@@ -88,7 +90,7 @@ typedef struct
 #define FS_PACKFILE_COHERENT	    2
 #define FS_PACKFILE_DIRECTORY		4
 
-#define FS_PACKFILE_NUM_THREADS	4
+#define FS_PACKFILE_NUM_THREADS		4     // including the main thread
 
 typedef struct packfile_s
 {
@@ -111,7 +113,7 @@ typedef struct pack_s
 	char *manifest;
 	unsigned checksum;
 	fs_pure_t pure;
-	int deferred_shard;
+	bool deferred_load;
 	struct pack_s *deferred_pack;
 	void *sysHandle;
 	void *vfsHandle;
@@ -125,6 +127,7 @@ typedef struct filehandle_s
 {
 	FILE *fstream;
 	packfile_t *pakFile;
+	void *vfsHandle;
 	unsigned pakOffset;
 	unsigned uncompressedSize;		// uncompressed size
 	unsigned offset;				// current read/write pos
@@ -150,6 +153,7 @@ typedef struct searchpath_s
 {
 	char *path;                     // set on both, packs and directories, won't include the pack name, just path
 	pack_t *pack;
+	struct searchpath_s *base;		// parent basepath
 	struct searchpath_s *next;
 } searchpath_t;
 
@@ -166,6 +170,7 @@ static int fs_cursearchfiles;
 static cvar_t *fs_basepath;
 static cvar_t *fs_cdpath;
 static cvar_t *fs_usehomedir;
+static cvar_t *fs_usedownloadsdir;
 static cvar_t *fs_basegame;
 static cvar_t *fs_game;
 
@@ -174,7 +179,9 @@ static searchpath_t *fs_searchpaths = NULL;     // game search directories, plus
 static qmutex_t *fs_searchpaths_mutex;
 
 static searchpath_t *fs_base_searchpaths;       // same as above, but without extra gamedirs
+static searchpath_t *fs_root_searchpath;        // base path directory
 static searchpath_t *fs_write_searchpath;       // write directory
+static searchpath_t *fs_downloads_searchpath;   // write directory for downloads from game servers
 
 static mempool_t *fs_mempool;
 
@@ -313,6 +320,33 @@ static char **FS_ListFiles( char *findname, int *numfiles, unsigned musthave, un
 }
 
 /*
+* FS_VFSPathForFileName
+*/
+static bool FS_VFSPathForFileName( const searchpath_t *search, const char *fileName, char *vfsPath, size_t vfsPathSize )
+{
+	if( search == fs_root_searchpath ) {
+		Q_strncpyz( vfsPath, fileName, vfsPathSize );
+		return true;
+	}
+
+	if( search->base == fs_root_searchpath ) {
+		const char *vfsGameDir;
+
+		vfsGameDir = strrchr( search->path, '/' );
+		if( vfsGameDir ) {
+			vfsGameDir++;
+		} else {
+			vfsGameDir = search->path;
+		}
+
+		Q_snprintfz( vfsPath, vfsPathSize, "%s/%s", vfsGameDir, fileName );
+		return true;
+	}
+
+	return false;
+}
+
+/*
 * FS_SearchPakForFile
 */
 static bool FS_SearchPakForFile( pack_t *pak, const char *filename, packfile_t **pout )
@@ -338,10 +372,11 @@ static bool FS_SearchPakForFile( pack_t *pak, const char *filename, packfile_t *
 /*
 * FS_SearchDirectoryForFile
 */
-static bool FS_SearchDirectoryForFile( searchpath_t *search, const char *filename, char *path, size_t path_size )
+static bool FS_SearchDirectoryForFile( searchpath_t *search, const char *filename, char *path, size_t path_size, void **vfsHandle )
 {
 	FILE *f;
-	char tempname[FS_MAX_PATH];
+	char tempname[FS_MAX_PATH], vfstempname[FS_MAX_PATH];
+	bool found = false;
 
 	assert( search );
 	assert( !search->pack );
@@ -352,13 +387,21 @@ static bool FS_SearchDirectoryForFile( searchpath_t *search, const char *filenam
 	f = fopen( tempname, "rb" );
 	if( f )
 	{
-		if( path )
-			Q_strncpyz( path, tempname, path_size );
 		fclose( f );
-		return true;
+		found = true;
 	}
 
-	return false;
+	if( !found && vfsHandle && FS_VFSPathForFileName( search, filename, vfstempname, sizeof( vfstempname ) ) )
+	{
+		*vfsHandle = Sys_VFS_FindFile( vfstempname );
+		if( *vfsHandle )
+			found = true;
+	}
+
+	if( found && path )
+		Q_strncpyz( path, tempname, path_size );
+
+	return found;
 }
 
 /*
@@ -386,7 +429,7 @@ static int FS_FileLength( FILE *f, bool close )
 * 
 * Gives the searchpath element where this file exists, or NULL if it doesn't
 */
-static searchpath_t *FS_SearchPathForFile( const char *filename, packfile_t **pout, char *path, size_t path_size, int mode )
+static searchpath_t *FS_SearchPathForFile( const char *filename, packfile_t **pout, char *path, size_t path_size, void **vfsHandle, int mode )
 {
 	searchpath_t *search;
 	packfile_t *search_pak;
@@ -444,7 +487,7 @@ static searchpath_t *FS_SearchPathForFile( const char *filename, packfile_t **po
 			{
 				if( !purepass )
 				{
-					if( FS_SearchDirectoryForFile( search, filename, path, path_size ) ) {
+					if( FS_SearchDirectoryForFile( search, filename, path, path_size, vfsHandle ) ) {
 						result = search;
 						goto return_result;
 					}
@@ -480,7 +523,7 @@ return_result:
 * 
 * Gives the searchpath element where this file exists, or NULL if it doesn't
 */
-static searchpath_t *FS_SearchPathForBaseFile( const char *filename, char *path, size_t path_size )
+static searchpath_t *FS_SearchPathForBaseFile( const char *filename, char *path, size_t path_size, void **vfsHandle )
 {
 	searchpath_t *search;
 
@@ -494,7 +537,7 @@ static searchpath_t *FS_SearchPathForBaseFile( const char *filename, char *path,
 	search = fs_basepaths;
 	while( search )
 	{
-		if( FS_SearchDirectoryForFile( search, filename, path, path_size ) )
+		if( FS_SearchDirectoryForFile( search, filename, path, path_size, vfsHandle ) )
 			return search;
 
 		search = search->next;
@@ -531,12 +574,32 @@ static const char *FS_PakNameForPath( pack_t *pack )
 */
 const char *FS_PakNameForFile( const char *filename )
 {
-	searchpath_t *search = FS_SearchPathForFile( filename, NULL, NULL, 0, FS_SEARCH_PAKS );
+	searchpath_t *search = FS_SearchPathForFile( filename, NULL, NULL, 0, NULL, FS_SEARCH_PAKS );
 
 	if( !search || !search->pack )
 		return NULL;
 
 	return FS_PakNameForPath( search->pack );
+}
+
+/*
+* FS_VFSHandleForPakName
+*
+* Takes an explicit (not game tree related) path to a pak file.
+*/
+static void *FS_VFSHandleForPakName( const char *packfilename )
+{
+	// treat VFS similar to the root directory
+	size_t rootPathLength;
+
+	if( !fs_root_searchpath )
+		return NULL;
+
+	rootPathLength = strlen( fs_root_searchpath->path );
+	if( Q_strnicmp( packfilename, fs_root_searchpath->path, rootPathLength ) || packfilename[rootPathLength] != '/' )
+		return NULL;
+
+	return Sys_VFS_FindFile( packfilename + rootPathLength + 1 );
 }
 
 /*
@@ -655,6 +718,7 @@ static int FS_OpenFileHandle( void )
 	fs_free_filehandles = fh->next;
 
 	// put the handle at the start of the list
+	memset( fh, 0, sizeof( *fh ) );
 	fh->prev = &fs_filehandles_headnode;
 	fh->next = fs_filehandles_headnode.next;
 	fh->next->prev = fh;
@@ -794,7 +858,8 @@ const char *FS_FirstExtension( const char *filename, const char *extensions[], i
 			{
 				for( i = 0; i < num_extensions; i++ )
 				{
-					if( FS_SearchDirectoryForFile( search, filenames[i], NULL, 0 ) )
+					void *vfsHandle = NULL; // search in VFS as well
+					if( FS_SearchDirectoryForFile( search, filenames[i], NULL, 0, &vfsHandle ) )
 					{
 						result = extensions[i];
 						goto return_result;
@@ -828,10 +893,11 @@ return_result:
 /*
 * FS_FileExists
 */
-static int FS_FileExists( const char *filename, bool base )
+static int FS_FileExists( const char *filename, bool base, bool inVFS )
 {
 	searchpath_t *search;
 	packfile_t *pakFile = NULL;
+	void *vfsHandle = NULL;
 	char tempname[FS_MAX_PATH];
 
 	if ( FS_IsUrl( filename ) )
@@ -847,9 +913,9 @@ static int FS_FileExists( const char *filename, bool base )
 	}
 
 	if( base )
-		search = FS_SearchPathForBaseFile( filename, tempname, sizeof( tempname ) );
+		search = FS_SearchPathForBaseFile( filename, tempname, sizeof( tempname ), inVFS ? &vfsHandle : NULL );
 	else
-		search = FS_SearchPathForFile( filename, &pakFile, tempname, sizeof( tempname ), FS_SEARCH_ALL );
+		search = FS_SearchPathForFile( filename, &pakFile, tempname, sizeof( tempname ), inVFS ? &vfsHandle : NULL, FS_SEARCH_ALL );
 
 	if( !search )
 		return -1;
@@ -858,6 +924,10 @@ static int FS_FileExists( const char *filename, bool base )
 	{
 		assert( !base );
 		return pakFile->uncompressedSize;
+	}
+	else if( vfsHandle )
+	{
+		return Sys_VFS_FileSize( vfsHandle );
 	}
 	else
 	{
@@ -892,7 +962,7 @@ static int FS_AbsoluteFileExists( const char *filename )
 */
 bool FS_PakFileExists( const char *packfilename )
 {
-	return FS_FileExists( packfilename, true ) != -1 || Sys_VFS_FindFile( packfilename );
+	return FS_FileExists( packfilename, true, true ) != -1;
 }
 
 /*
@@ -969,11 +1039,7 @@ int FS_FOpenAbsoluteFile( const char *filename, int *filenum, int mode )
 	*filenum = FS_OpenFileHandle();
 	file = &fs_filehandles[*filenum - 1];
 	file->fstream = f;
-	file->pakFile = NULL;
-	file->pakOffset = 0;
-	file->zipEntry = NULL;
 	file->uncompressedSize = end;
-	file->offset = 0;
 	file->gzstream = gzf;
 	file->gzlevel = Z_DEFAULT_COMPRESSION;
 
@@ -1029,7 +1095,6 @@ static int _FS_FOpenPakFile( packfile_t *pakFile, int *filenum )
 	if( !file->fstream )
 		Com_Error( ERR_FATAL, "Error opening pak file: %s", pakFile->pakname );
 	file->uncompressedSize = pakFile->uncompressedSize;
-	file->offset = 0;
 	file->zipEntry = NULL;
 	file->pakFile = pakFile;
 
@@ -1090,6 +1155,7 @@ static int _FS_FOpenFile( const char *filename, int *filenum, int mode, bool bas
 	bool cache;
 	packfile_t *pakFile = NULL;
 	gzFile gzf = NULL;
+	void *vfsHandle = NULL;
 	int realmode;
 	char tempname[FS_MAX_PATH];
 
@@ -1113,7 +1179,7 @@ static int _FS_FOpenFile( const char *filename, int *filenum, int mode, bool bas
 	if( !filenum )
 	{
 		if( mode == FS_READ )
-			return FS_FileExists( filename, base );
+			return FS_FileExists( filename, base, !gz );
 		return -1;
 	}
 
@@ -1204,11 +1270,7 @@ static int _FS_FOpenFile( const char *filename, int *filenum, int mode, bool bas
 		*filenum = FS_OpenFileHandle();
 		file = &fs_filehandles[*filenum - 1];
 		file->fstream = f;
-		file->pakOffset = 0;
-		file->pakFile = NULL;
-		file->zipEntry = NULL;
 		file->uncompressedSize = end;
-		file->offset = 0;
 		file->gzstream = gzf;
 		file->gzlevel = Z_DEFAULT_COMPRESSION;
 
@@ -1221,9 +1283,10 @@ static int _FS_FOpenFile( const char *filename, int *filenum, int mode, bool bas
 	}
 
 	if( base )
-		search = FS_SearchPathForBaseFile( filename, tempname, sizeof( tempname ) );
+		search = FS_SearchPathForBaseFile( filename, tempname, sizeof( tempname ), !gz ? &vfsHandle : NULL );
 	else
-		search = FS_SearchPathForFile( filename, &pakFile, tempname, sizeof( tempname ), FS_SEARCH_ALL );
+		search = FS_SearchPathForFile( filename, &pakFile, tempname, sizeof( tempname ), !gz ? &vfsHandle : NULL, FS_SEARCH_ALL );
+
 	if( !search )
 		goto notfound_dprint;
 
@@ -1238,11 +1301,41 @@ static int _FS_FOpenFile( const char *filename, int *filenum, int mode, bool bas
 		{
 			if( *filenum > 0 )
 				FS_FCloseFile( *filenum );
-			goto notfound;
+			goto error;
 		}
 
 		Com_DPrintf( "PackFile: %s : %s\n", search->pack->filename, filename );
 		return uncompressedSize;
+	}
+	else if( vfsHandle )
+	{
+		const char *vfsName;
+		FILE *f;
+		unsigned int vfsOffset;
+
+		vfsName = Sys_VFS_VFSName( vfsHandle );
+		f = fopen( vfsName, "rb" );
+		if( !f ) {
+			Com_Error( ERR_FATAL, "Error opening VFS file: %s", vfsName );
+			goto error;
+		}
+
+		vfsOffset = Sys_VFS_FileOffset( vfsHandle );
+		if( fseek( f, vfsOffset, SEEK_SET ) != 0 ) {
+			Com_DPrintf( "FS_FOpen%sFile: can't seek %s\n", ( base ? "Base" : "" ), vfsName );
+			fclose( f );
+			goto error;
+		}
+
+		*filenum = FS_OpenFileHandle();
+		file = &fs_filehandles[*filenum - 1];
+		file->vfsHandle = vfsHandle;
+		file->fstream = f;
+		file->pakOffset = vfsOffset;
+		file->uncompressedSize = Sys_VFS_FileSize( vfsHandle );
+
+		Com_DPrintf( "FS_FOpen%sFile: VFS %s : %s\n", (base ? "Base" : ""), vfsName, tempname );
+		return file->uncompressedSize;
 	}
 	else
 	{
@@ -1251,7 +1344,7 @@ static int _FS_FOpenFile( const char *filename, int *filenum, int mode, bool bas
 
 		assert( tempname[0] != '\0' );
 		if( tempname[0] == '\0' ) {
-			goto notfound;
+			goto error;
 		}
 
 		f = fopen( tempname, "rb" );
@@ -1265,12 +1358,8 @@ static int _FS_FOpenFile( const char *filename, int *filenum, int mode, bool bas
 
 		*filenum = FS_OpenFileHandle();
 		file = &fs_filehandles[*filenum - 1];
-		file->pakOffset = 0;
-		file->pakFile = NULL;
-		file->zipEntry = NULL;
 		file->fstream = f;
 		file->uncompressedSize = end;
-		file->offset = 0;
 		file->gzstream = gzf;
 		file->gzlevel = Z_DEFAULT_COMPRESSION;
 
@@ -1281,7 +1370,7 @@ static int _FS_FOpenFile( const char *filename, int *filenum, int mode, bool bas
 notfound_dprint:
 	Com_DPrintf( "FS_FOpen%sFile: can't find %s\n", (base ? "Base" : ""), filename );
 
-notfound:
+error:
 	*filenum = 0;
 	return -1;
 }
@@ -1396,8 +1485,6 @@ static int FS_ReadPK3File( uint8_t *buf, size_t len, filehandle_t *fh )
 			block = min( zipEntry->restReadCompressed, FS_ZIP_BUFSIZE );
 
 			read = fread( zipEntry->readBuffer, 1, block, fh->fstream );
-			if( read != block )		// we might have been trying to read from a CD
-				read = fread( zipEntry->readBuffer + read, 1, block - read, fh->fstream );
 
 			if( read != block )
 				Sys_Error( "FS_Read: can't read %i bytes", block );
@@ -1444,7 +1531,7 @@ int FS_Read( void *buffer, size_t len, int file )
 
 	fh = FS_FileHandleForNum( file );
 
-	if( fh->fstream && fh->pakFile && len + fh->offset > fh->uncompressedSize ) {
+	if( fh->fstream && ( fh->pakFile || fh->vfsHandle ) && len + fh->offset > fh->uncompressedSize ) {
 		len = fh->uncompressedSize - fh->offset;
 		if( !len )
 			return 0;
@@ -1688,7 +1775,7 @@ int FS_Eof( int file )
 	if( fh->gzstream )
 		return qgzeof( fh->gzstream );
 	if( fh->fstream )
-		return fh->pakFile ? fh->offset >= fh->uncompressedSize : feof( fh->fstream );
+		return ( fh->pakFile || fh->vfsHandle ) ? fh->offset >= fh->uncompressedSize : feof( fh->fstream );
 	return 1;
 }
 
@@ -1710,14 +1797,26 @@ int FS_Flush( int file )
 
 /*
 * FS_FileNo
+*
+* Returns the file handle that can be used in system calls.
+* Optionally returns the offset of the data if the file is in a pack or the VFS.
 */
-int FS_FileNo( int file )
+int FS_FileNo( int file, size_t *offset )
 {
 	filehandle_t *fh;
 
+	if( offset ) {
+		*offset = 0;
+	}
+
 	fh = FS_FileHandleForNum( file );
-	if( fh->fstream )
+	if( fh->fstream && !fh->zipEntry && !fh->gzstream ) {
+		if( offset ) {
+			*offset = fh->pakOffset;
+		}
 		return Sys_FS_FileNo( fh->fstream );
+	}
+
 	return -1;
 }
 
@@ -1746,21 +1845,12 @@ int	FS_GetCompressionLevel( int file )
 }
 
 /*
-* FS_LoadFileExt
-* 
-* Filename are relative to the quake search path
-* a null buffer will just return the file length without loading
+* _FS_LoadFile
 */
-int FS_LoadFileExt( const char *path, int flags, void **buffer, void *stack, size_t stackSize, const char *filename, int fileline )
+static int _FS_LoadFile( int fhandle, unsigned int len, void **buffer, void *stack, size_t stackSize, const char *filename, int fileline )
 {
 	uint8_t *buf;
-	unsigned int len;
-	int fhandle;
 
-	buf = NULL; // quiet compiler warning
-
-	// look for it in the filesystem or pack files
-	len = FS_FOpenFile( path, &fhandle, FS_READ|flags );
 	if( !fhandle )
 	{
 		if( buffer )
@@ -1788,44 +1878,34 @@ int FS_LoadFileExt( const char *path, int flags, void **buffer, void *stack, siz
 }
 
 /*
+* FS_LoadFileExt
+*
+* Filename are relative to the quake search path
+* a null buffer will just return the file length without loading
+*/
+int FS_LoadFileExt( const char *path, int flags, void **buffer, void *stack, size_t stackSize, const char *filename, int fileline )
+{
+	unsigned int len;
+	int fhandle;
+
+	// look for it in the filesystem or pack files
+	len = FS_FOpenFile( path, &fhandle, FS_READ|flags );
+	return _FS_LoadFile( fhandle, len, buffer, stack, stackSize, filename, fileline );
+}
+
+/*
 * FS_LoadBaseFileExt
 * 
 * a NULL buffer will just return the file length without loading
 */
 int FS_LoadBaseFileExt( const char *path, int flags, void **buffer, void *stack, size_t stackSize, const char *filename, int fileline )
 {
-	uint8_t *buf;
 	unsigned int len;
 	int fhandle;
 
-	buf = NULL; // quiet compiler warning
-
-	// look for it in the filesystem or pack files
+	// look for it in the filesystem
 	len = FS_FOpenBaseFile( path, &fhandle, FS_READ|flags );
-	if( !fhandle )
-	{
-		if( buffer )
-			*buffer = NULL;
-		return -1;
-	}
-
-	if( !buffer )
-	{
-		FS_FCloseFile( fhandle );
-		return len;
-	}
-
-	if( stack && ( stackSize > len ) )
-		buf = ( uint8_t* )stack;
-	else
-		buf = ( uint8_t* )_Mem_AllocExt( tempMemPool, len + 1, 0, 0, 0, 0, filename, fileline );
-	buf[len] = 0;
-	*buffer = buf;
-
-	FS_Read( buf, len, fhandle );
-	FS_FCloseFile( fhandle );
-
-	return len;
+	return _FS_LoadFile( fhandle, len, buffer, stack, stackSize, filename, fileline );
 }
 
 /*
@@ -1840,7 +1920,7 @@ void *FS_MMapBaseFile( int file, size_t size, size_t offset )
 		return NULL;
 
 	fh = FS_FileHandleForNum( file );
-	if( !fh->fstream || fh->mapping )
+	if( !fh->fstream || fh->vfsHandle || fh->mapping )
 		return NULL;
 
 	data = Sys_FS_MMapFile( Sys_FS_FileNo( fh->fstream ), size, offset, &fh->mapping, &fh->mapping_offset );
@@ -1970,12 +2050,15 @@ static unsigned FS_PakChecksum( const char *filename )
 
 /*
 * FS_ChecksumBaseFile
+*
+* ignorePakChecksum - if true, returns md5 digest of file contents as found on the filesystem
+*                     otherwise, may return cached pk3 checksum
 */
-unsigned FS_ChecksumBaseFile( const char *filename )
+unsigned FS_ChecksumBaseFile( const char *filename, bool ignorePakChecksum )
 {
 	const char *fullname;
 
-	if( FS_CheckPakExtension( filename ) )
+	if( !ignorePakChecksum && FS_CheckPakExtension( filename ) )
 		return FS_PakChecksum( filename );
 
 	fullname = FS_AbsoluteNameForBaseFile( filename );
@@ -2034,7 +2117,7 @@ void FS_RemovePurePaks( void )
 */
 bool FS_IsPureFile( const char *filename )
 {
-	searchpath_t *search = FS_SearchPathForFile( filename, NULL, NULL, 0, FS_SEARCH_PAKS );
+	searchpath_t *search = FS_SearchPathForFile( filename, NULL, NULL, 0, NULL, FS_SEARCH_PAKS );
 
 	if( !search || !search->pack )
 		return false;
@@ -2047,7 +2130,7 @@ bool FS_IsPureFile( const char *filename )
 */
 const char *FS_FileManifest( const char *filename )
 {
-	searchpath_t *search = FS_SearchPathForFile( filename, NULL, NULL, 0, FS_SEARCH_PAKS );
+	searchpath_t *search = FS_SearchPathForFile( filename, NULL, NULL, 0, NULL, FS_SEARCH_PAKS );
 
 	if( !search || !search->pack )
 		return NULL;
@@ -2179,7 +2262,8 @@ bool FS_ExtractFile( const char *src, const char *dst )
 */
 bool _FS_MoveFile( const char *src, const char *dst, bool base, const char *dir )
 {
-	const char *fullname;
+	char temp[FS_MAX_PATH];
+	const char *fullname, *fulldestname;
 
 	if( base )
 		fullname = FS_AbsoluteNameForBaseFile( src );
@@ -2196,8 +2280,10 @@ bool _FS_MoveFile( const char *src, const char *dst, bool base, const char *dir 
 		return false;
 
 	if( base )
-		return ( rename( fullname, va( "%s/%s", dir, dst ) ) == 0 ? true : false );
-	return ( rename( fullname, va( "%s/%s/%s", dir, FS_GameDirectory(), dst ) ) == 0 ? true : false );
+		fulldestname = va_r( temp, sizeof( temp ), "%s/%s", dir, dst );
+	else
+		fulldestname = va_r( temp, sizeof( temp ), "%s/%s/%s", dir, FS_GameDirectory(), dst );
+	return rename( fullname, fulldestname ) == 0 ? true : false;
 }
 
 /*
@@ -2234,9 +2320,9 @@ static time_t _FS_FileMTime( const char *filename, bool base )
 	char tempname[FS_MAX_PATH];
 
 	if( base ) {
-		search = FS_SearchPathForBaseFile( filename, tempname, sizeof( tempname ) );
+		search = FS_SearchPathForBaseFile( filename, tempname, sizeof( tempname ), NULL );
 	} else {
-		search = FS_SearchPathForFile( filename, &pakFile, tempname, sizeof( tempname ), FS_SEARCH_ALL );
+		search = FS_SearchPathForFile( filename, &pakFile, tempname, sizeof( tempname ), NULL, FS_SEARCH_ALL );
 	}
 
 	if( !search ) {
@@ -2286,10 +2372,12 @@ bool FS_RemoveAbsoluteDirectory( const char *dirname )
 */
 bool FS_RemoveBaseDirectory( const char *dirname )
 {
+	char temp[FS_MAX_PATH];
+
 	if( !COM_ValidateRelativeFilename( dirname ) )
 		return false;
 
-	return ( FS_RemoveAbsoluteDirectory( va( "%s/%s", FS_WriteDirectory(), dirname ) ) );
+	return ( FS_RemoveAbsoluteDirectory( va_r( temp, sizeof( temp ), "%s/%s", FS_WriteDirectory(), dirname ) ) );
 }
 
 /*
@@ -2297,10 +2385,12 @@ bool FS_RemoveBaseDirectory( const char *dirname )
 */
 bool FS_RemoveDirectory( const char *dirname )
 {
+	char temp[FS_MAX_PATH];
+
 	if( !COM_ValidateRelativeFilename( dirname ) )
 		return false;
 
-	return ( FS_RemoveAbsoluteDirectory( va( "%s/%s/%s", FS_WriteDirectory(), FS_GameDirectory(), dirname ) ) );
+	return ( FS_RemoveAbsoluteDirectory( va_r( temp, sizeof( temp ), "%s/%s/%s", FS_WriteDirectory(), FS_GameDirectory(), dirname ) ) );
 }
 
 /*
@@ -2499,8 +2589,8 @@ static pack_t *FS_LoadPK3File( const char *packfilename, bool silent )
 	void *handle = NULL;
 	void *vfsHandle = NULL;
 
-	if( FS_FileExists( packfilename, true ) == -1 )
-		vfsHandle = Sys_VFS_FindFile( packfilename );
+	if( FS_AbsoluteFileExists( packfilename ) == -1 )
+		vfsHandle = FS_VFSHandleForPakName( packfilename );
 
 	if( !vfsHandle )
 	{
@@ -2891,81 +2981,103 @@ static int FS_PathGetFileListExt( searchpath_t *search, const char *dir, const c
 
 	if( !search->pack )
 	{
-		size_t searchlen;
-		int numfiles;
-		char **filenames;
+		char vfstempname[FS_MAX_PATH];
+		size_t pathlen;
+		int numfiles = 0, numvfsfiles = 0, totalnumfiles;
+		char **filenames, **vfsfilenames = NULL, *filepath;
+		const char *filename;
 		unsigned int musthave, canthave;
 
 		musthave = 0;
 		canthave = SFF_HIDDEN | SFF_SYSTEM;
 
-		Q_strncpyz( tempname, search->path, sizeof( tempname ) );
-		Q_strncatz( tempname, "/", sizeof( tempname ) );
-
-		if( dirlen )
-		{
-			Q_strncatz( tempname, dir, sizeof( tempname ) );
-			Q_strncatz( tempname, "/", sizeof( tempname ) );
-		}
-		searchlen = strlen( tempname );
+		pathlen = strlen( search->path ) + 1;
 
 		if( extension )
 		{
 			if( extension[0] != '/' )
-			{
-				Q_strncatz( tempname, "*", sizeof( tempname ) );
-				Q_strncatz( tempname, extension, sizeof( tempname ) );
 				canthave |= SFF_SUBDIR;
+			else
+				musthave |= SFF_SUBDIR;
+		}
+
+		Q_snprintfz( tempname, sizeof( tempname ), "%s/%s%s*%s",
+			search->path, dir, dirlen ? "/" : "", ( extension && ( extension[0] != '/' ) ) ? extension : ".*");
+		filenames = FS_ListFiles( tempname, &numfiles, musthave, canthave );
+
+		Q_snprintfz( tempname, sizeof( tempname ), "%s%s*%s",
+			dir, dirlen ? "/" : "", ( extension && ( extension[0] != '/' ) ) ? extension : "");
+		if( FS_VFSPathForFileName( search, tempname, vfstempname, sizeof( vfstempname ) ) )
+			vfsfilenames = Sys_VFS_ListFiles( vfstempname, NULL, &numvfsfiles, !( musthave & SFF_SUBDIR ), !( canthave & SFF_SUBDIR ) );
+
+		totalnumfiles = numfiles + numvfsfiles; // not caring about duplicates because they will be removed later
+		for( i = 0; i < totalnumfiles; i++ )
+		{
+			if( i < numfiles )
+			{
+				// real file
+				filepath = filenames[i];
+				filename = filepath + pathlen + ( dirlen ? dirlen + 1 : 0 );
 			}
 			else
 			{
-				Q_strncatz( tempname, "*.*", sizeof( tempname ) );
-				musthave |= SFF_SUBDIR;
-			}
-		}
-		else
-		{
-			Q_strncatz( tempname, "*.*", sizeof( tempname ) );
-		}
+				// VFS file
+				const char *p;
 
-		if( ( filenames = FS_ListFiles( tempname, &numfiles, musthave, canthave ) ) )
-		{
-			for( i = 0; i < numfiles; i++ )
-			{
-				if( found < size )
+				filepath = vfsfilenames[i - numfiles];
+				filename = filepath + ( dirlen ? dirlen + 1 : 0 );
+				if( search->base )
 				{
-					size_t len = strlen( filenames[i] + searchlen );
+					// skip game directory
+					p = strchr( filename, '/' );
+					if( p )
+						filename = p + 1;
+				}
 
-					if( ( musthave & SFF_SUBDIR ) )
+				// skip subdirectories
+				p = strchr( filename, '/' );
+				if( p && p[1] )
+				{
+					Mem_ZoneFree( filepath );
+					continue;
+				}
+			}
+
+			if( found < size )
+			{
+				size_t len = strlen( filename );
+
+				if( ( musthave & SFF_SUBDIR ) )
+				{
+					if( filename[len-1] != '/' )
 					{
-						if( filenames[i][searchlen+len-1] != '/' )
-						{
-							files[found].name = ( char* )Mem_ZoneMalloc( len + 2 );
-							strcpy( files[found].name, filenames[i] + searchlen );
-							files[found].name[len] = '/';
-							files[found].name[len+1] = 0;
-						}
-						else
-						{
-							files[found].name = ZoneCopyString( filenames[i] + searchlen );
-						}
+						files[found].name = ( char* )Mem_ZoneMalloc( len + 2 );
+						strcpy( files[found].name, filename );
+						files[found].name[len] = '/';
+						files[found].name[len+1] = 0;
 					}
 					else
 					{
-						if( extension && ( len <= extlen ) )
-						{
-							Mem_ZoneFree( filenames[i] );
-							continue;
-						}
-						files[found].name = ZoneCopyString( filenames[i] + searchlen );
+						files[found].name = ZoneCopyString( filename );
 					}
-					files[found].searchPath = search;
-					found++;
 				}
-				Mem_ZoneFree( filenames[i] );
+				else
+				{
+					if( extension && ( len <= extlen ) )
+					{
+						Mem_ZoneFree( filepath );
+						continue;
+					}
+					files[found].name = ZoneCopyString( filename );
+				}
+				files[found].searchPath = search;
+				found++;
 			}
+
+			Mem_ZoneFree( filepath );
 		}
 		Mem_ZoneFree( filenames );
+		Mem_ZoneFree( vfsfilenames );
 
 		return found;
 	}
@@ -3018,9 +3130,6 @@ static int FS_PathGetFileListExt( searchpath_t *search, const char *dir, const c
 	return found;
 }
 
-/*
-* FS_GetFileListExt_
-*/
 #define FS_MIN_SEARCHFILES      0x400
 #define FS_MAX_SEARCHFILES      0xFFFF          // cap
 static int FS_SortFilesCmp( const searchfile_t *file1, const searchfile_t *file2 )
@@ -3028,6 +3137,13 @@ static int FS_SortFilesCmp( const searchfile_t *file1, const searchfile_t *file2
 	return Q_stricmp( ( file1 )->name, ( file2 )->name );
 }
 
+/*
+* FS_GetFileListExt_
+*
+* Directory names should not contain a trailing /
+* Directory names, beginning with a '<' only return downloaded files.
+* Directory names, beginning with a '>' only return stock/official files.
+*/
 static int FS_GetFileListExt_( const char *dir, const char *extension, char *buf, size_t *bufsize, int maxFiles, int start, int end )
 {
 	int i;
@@ -3038,6 +3154,7 @@ static int FS_GetFileListExt_( const char *dir, const char *extension, char *buf
 	static int maxFilesCache;
 	static char dircache[MAX_QPATH], extcache[MAX_QPATH];
 	bool useCache;
+	bool onlyDownloads = false, skipDownloads = false;
 
 	assert( !dir || dir[strlen( dir )-1] != '/' );
 
@@ -3069,6 +3186,15 @@ static int FS_GetFileListExt_( const char *dir, const char *extension, char *buf
 	else
 		extcache[0] = '\0';
 
+	if( dir[0] == '<' ) {
+		onlyDownloads = true;
+		dir++;
+	}
+	else if( dir[0] == '>' ) {
+		skipDownloads = true;
+		dir++;
+	}
+
 	files = fs_searchfiles;
 	if( !useCache )
 	{
@@ -3077,6 +3203,14 @@ static int FS_GetFileListExt_( const char *dir, const char *extension, char *buf
 		search = fs_searchpaths;
 		while( search )
 		{
+			if( fs_downloads_searchpath ) {
+				if( ( onlyDownloads && search->base != fs_downloads_searchpath ) ||
+				   ( skipDownloads && search->base == fs_downloads_searchpath ) ) {
+					search = search->next;
+					continue;
+				}
+			}
+
 			limit = maxFiles ? min( fs_numsearchfiles, maxFiles ) : fs_numsearchfiles;
 			found = FS_PathGetFileListExt( search, dir, extension, files + allfound,
 				fs_numsearchfiles - allfound );
@@ -3248,6 +3382,30 @@ const char *FS_MediaDirectory( fs_mediatype_t type )
 }
 
 /*
+* FS_DownloadsDirectory
+* 
+* Returns directory where we can store downloads to, no gamedir attached.
+* Returns NULL if downloads are disabled.
+*/
+const char *FS_DownloadsDirectory( void )
+{
+	if( fs_downloads_searchpath )
+		return fs_downloads_searchpath->path;
+	return NULL;
+}
+
+/*
+* FS_RuntimeDirectory
+* 
+* Returns directory where we can write non-essential runtime files to, no gamedir attached
+*/
+const char *FS_RuntimeDirectory( void )
+{
+	const char *dir = Sys_FS_GetRuntimeDirectory();
+	return dir ? dir : FS_WriteDirectory();
+}
+
+/*
 * FS_Path_f
 */
 static void FS_Path_f( void )
@@ -3265,7 +3423,10 @@ static void FS_Path_f( void )
 		if( s == fs_base_searchpaths )
 			Com_Printf( "Base files:\n" );
 		if( s->pack )
-			Com_Printf( "%s (%s%i files)\n", s->pack->filename, ( s->pack->pure ? "pure, " : "" ), s->pack->numFiles );
+		{
+			Com_Printf( "%s (%s%s%i files)\n", s->pack->filename,
+				( s->pack->vfsHandle ? "in VFS, " : "" ), ( s->pack->pure ? "pure, " : "" ), s->pack->numFiles );
+		}
 		else
 			Com_Printf( "%s\n", s->path );
 	}
@@ -3302,8 +3463,8 @@ void FS_CreateAbsolutePath( const char *path )
 */
 const char *FS_AbsoluteNameForFile( const char *filename )
 {
-	static char absolutename[1024]; // fixme
-	searchpath_t *search = FS_SearchPathForFile( filename, NULL, NULL, 0, FS_SEARCH_DIRS );
+	static char absolutename[FS_MAX_PATH];
+	searchpath_t *search = FS_SearchPathForFile( filename, NULL, NULL, 0, NULL, FS_SEARCH_DIRS );
 
 	if( !search || search->pack )
 		return NULL;
@@ -3320,8 +3481,8 @@ const char *FS_AbsoluteNameForFile( const char *filename )
 */
 const char *FS_AbsoluteNameForBaseFile( const char *filename )
 {
-	static char absolutename[1024]; // fixme
-	searchpath_t *search = FS_SearchPathForBaseFile( filename, NULL, 0 );
+	static char absolutename[FS_MAX_PATH];
+	searchpath_t *search = FS_SearchPathForBaseFile( filename, NULL, 0, NULL );
 
 	if( !search )
 		return NULL;
@@ -3336,7 +3497,8 @@ const char *FS_AbsoluteNameForBaseFile( const char *filename )
 const char *FS_BaseNameForFile( const char *filename )
 {
 	const char *p;
-	searchpath_t *search = FS_SearchPathForFile( filename, NULL, NULL, 0, FS_SEARCH_DIRS );
+	void *vfsHandle = NULL; // search in VFS as well
+	searchpath_t *search = FS_SearchPathForFile( filename, NULL, NULL, 0, &vfsHandle, FS_SEARCH_DIRS );
 
 	if( !search || search->pack )
 		return NULL;
@@ -3359,6 +3521,7 @@ int FS_GetGameDirectoryList( char *buf, size_t bufsize )
 	size_t len, alllen;
 	const char *basename, *s;
 	searchpath_t *basepath;
+	char temp[FS_MAX_PATH+2];
 
 	if( !buf )
 		return 0;
@@ -3370,7 +3533,7 @@ int FS_GetGameDirectoryList( char *buf, size_t bufsize )
 	basepath = fs_basepaths;
 	while( basepath )
 	{
-		if( ( modnames = FS_ListFiles( va( "%s/*", basepath->path ), &nummods, SFF_SUBDIR, SFF_HIDDEN | SFF_SYSTEM ) ) )
+		if( ( modnames = FS_ListFiles( va_r( temp, sizeof( temp ), "%s/*", basepath->path ), &nummods, SFF_SUBDIR, SFF_HIDDEN | SFF_SYSTEM ) ) )
 		{
 			for( i = 0; i < nummods; i++ )
 			{
@@ -3419,22 +3582,24 @@ int FS_GetGameDirectoryList( char *buf, size_t bufsize )
 /*
 * FS_GamePathPaks
 */
-static char **FS_GamePathPaks( const char *basepath, const char *gamedir, int *numpaks )
+static char **FS_GamePathPaks( searchpath_t *basepath, const char *gamedir, int *numpaks )
 {
 	int i, e, numpakfiles;
 	char **paknames = NULL;
-	char tempname[FS_MAX_PATH];
+	char pattern[FS_MAX_PATH], basePattern[FS_MAX_PATH];
 
 	numpakfiles = 0;
 	for( e = 0; pak_extensions[e]; e++ )
 	{
 		int numvfsfiles = 0, numfiles = 0;
-		char **vfsfilenames, **filenames;
+		char **vfsfilenames = NULL, **filenames;
 
-		Q_snprintfz( tempname, sizeof( tempname ), "%s/%s/*.%s", basepath, gamedir, pak_extensions[e] );
+		Q_snprintfz( pattern, sizeof( pattern ), "%s/*.%s", gamedir, pak_extensions[e] );
+		Q_snprintfz( basePattern, sizeof( basePattern ), "%s/%s", basepath->path, pattern );
 
-		vfsfilenames = Sys_VFS_ListFiles( basepath, gamedir, pak_extensions[e], &numvfsfiles );
-		filenames = FS_ListFiles( tempname, &numfiles, 0, SFF_SUBDIR | SFF_HIDDEN | SFF_SYSTEM );
+		if( basepath == fs_root_searchpath ) // only add VFS once per game, treat it like the installation directory
+			vfsfilenames = Sys_VFS_ListFiles( pattern, basepath->path, &numvfsfiles, true, false );
+		filenames = FS_ListFiles( basePattern, &numfiles, 0, SFF_SUBDIR | SFF_HIDDEN | SFF_SYSTEM );
 		if( vfsfilenames || filenames )
 		{
 			if( numpakfiles || ( vfsfilenames && filenames ) )
@@ -3476,18 +3641,17 @@ static char **FS_GamePathPaks( const char *basepath, const char *gamedir, int *n
 
 		for( i = 0; i < numpakfiles; )
 		{
+			bool skip = false;
 			bool wrongpure;
 
 			// ignore similarly named paks if they appear in both vfs and fs
-			if( i && !Q_stricmp( paknames[i], paknames[i-1] ) )
-			{
-				Mem_Free( paknames[i] );
-				memmove( &paknames[i], &paknames[i+1], (numpakfiles-- - i) * sizeof( *paknames ) );
-			}
+			skip = skip || ( i && !Q_stricmp( paknames[i], paknames[i-1] ) );
 
 			// ignore pure data and modules pk3 files from other versions
-			if( FS_IsExplicitPurePak( paknames[i], &wrongpure ) && wrongpure ) {
-				//Com_Printf( "Skipping %s\n", pakbasename );
+			skip = skip || ( FS_IsExplicitPurePak( paknames[i], &wrongpure ) && wrongpure );
+
+			if( skip )
+			{
 				Mem_Free( paknames[i] );
 				memmove( &paknames[i], &paknames[i+1], (numpakfiles-- - i) * sizeof( *paknames ) );
 				continue;
@@ -3504,7 +3668,7 @@ static char **FS_GamePathPaks( const char *basepath, const char *gamedir, int *n
 /*
 * FS_TouchGamePath
 */
-static int FS_TouchGamePath( const char *basepath, const char *gamedir, bool initial )
+static int FS_TouchGamePath( searchpath_t *basepath, const char *gamedir, bool initial )
 {
 	int i, totalpaks, newpaks;
 	size_t path_size;
@@ -3521,9 +3685,10 @@ static int FS_TouchGamePath( const char *basepath, const char *gamedir, bool ini
 	{
 		search = ( searchpath_t* )FS_Malloc( sizeof( searchpath_t ) );
 
-		path_size = sizeof( char ) * ( strlen( basepath ) + 1 + strlen( gamedir ) + 1 );
+		path_size = sizeof( char ) * ( strlen( basepath->path ) + 1 + strlen( gamedir ) + 1 );
 		search->path = ( char* )FS_Malloc( path_size );
-		Q_snprintfz( search->path, path_size, "%s/%s", basepath, gamedir );
+		search->base = basepath;
+		Q_snprintfz( search->path, path_size, "%s/%s", basepath->path, gamedir );
 
 		search->next = fs_searchpaths;
 		fs_searchpaths = search;
@@ -3562,11 +3727,12 @@ static int FS_TouchGamePath( const char *basepath, const char *gamedir, bool ini
 			pak = ( pack_t* )FS_Malloc( sizeof( *pak ) );
 			pak->filename = FS_CopyString( paknames[i] );
 			pak->deferred_pack = NULL;
-			pak->deferred_shard = newpaks % FS_PACKFILE_NUM_THREADS + 1;
+			pak->deferred_load = true;
 
 			// now insert it for real
 			if( FS_FindPackFilePos( paknames[i], &search, &prev, &next ) )
 			{
+				search->base = basepath;
 				search->pack = pak;
 				if( !prev )
 				{
@@ -3594,7 +3760,7 @@ freename:
 /*
 * FS_AddGamePath
 */
-static int FS_AddGamePath( const char *basepath, const char *gamedir )
+static int FS_AddGamePath( searchpath_t *basepath, const char *gamedir )
 {
 	return FS_TouchGamePath( basepath, gamedir, true );
 }
@@ -3602,7 +3768,7 @@ static int FS_AddGamePath( const char *basepath, const char *gamedir )
 /*
 * FS_UpdateGamePath
 */
-static int FS_UpdateGamePath( const char *basepath, const char *gamedir )
+static int FS_UpdateGamePath( searchpath_t *basepath, const char *gamedir )
 {
 	return FS_TouchGamePath( basepath, gamedir, false );
 }
@@ -3622,7 +3788,7 @@ static void FS_ReplaceDeferredPaks( void )
 	for( search = fs_searchpaths; search != NULL;  ) {
 		pack_t *pak = search->pack;
 		
-		if( pak && pak->deferred_shard ) {
+		if( pak && pak->deferred_load ) {
 			if( !pak->deferred_pack ) {
 				// failed to load this one, remove
 				if( prev ) {
@@ -3648,17 +3814,33 @@ static void FS_ReplaceDeferredPaks( void )
 /*
 * FS_LoadDeferredPaks_Job
 */
-static void *FS_LoadDeferredPaks_Job( void *pshard )
+typedef struct
 {
-	searchpath_t *search;
-	const int shard = (intptr_t)pshard;
+	volatile int *cnt;
+	int maxcnt;
+	pack_t **packs;
+	qmutex_t *mutex;
+} deferred_pack_arg_t;
 
-	// scan for deferred paks with matching shard id
-	for( search = fs_searchpaths; search != NULL; search = search->next ) {
-		if( search->pack && search->pack->deferred_shard == shard )	{
-			search->pack->deferred_pack = FS_LoadPackFile( search->pack->filename, false );
-		}
+static void *FS_LoadDeferredPaks_Job( void *parg )
+{
+	int i;
+	pack_t *pack;
+	deferred_pack_arg_t *arg = parg;
+
+	while( true ) {
+		i = Sys_Atomic_Add( arg->cnt, 1, arg->mutex );
+		if( i >= arg->maxcnt )
+			break;
+
+		pack = arg->packs[i];
+
+		assert( pack != NULL );
+		assert( pack->deferred_load );
+
+		pack->deferred_pack = FS_LoadPackFile( pack->filename, false );
 	}
+
 	return NULL;
 }
 
@@ -3668,24 +3850,53 @@ static void *FS_LoadDeferredPaks_Job( void *pshard )
 static void FS_LoadDeferredPaks( int newpaks )
 {
 	int i;
-	qthread_t *threads[FS_PACKFILE_NUM_THREADS];
-	const int num_threads = min( newpaks, FS_PACKFILE_NUM_THREADS );
+	volatile int cnt;
+	qthread_t *threads[FS_PACKFILE_NUM_THREADS - 1] = { NULL };
+	const int num_threads = min( newpaks, FS_PACKFILE_NUM_THREADS ) - 1;
+	pack_t **packs;
+	searchpath_t *search;
+	deferred_pack_arg_t *arg;
 
 	if( !newpaks )
 		return;
-	
-	if( newpaks == 1 ) {
-		FS_LoadDeferredPaks_Job( (void *)((intptr_t )1) );
-		FS_ReplaceDeferredPaks();
+
+	packs = Mem_TempMalloc( sizeof( *packs ) * ( newpaks + 1 ) );
+	if( !packs )
 		return;
+
+	cnt = 0;
+	for( search = fs_searchpaths; search != NULL; search = search->next ) {
+		if( search->pack && search->pack->deferred_load ) {
+			packs[cnt++] = search->pack;
+			if( cnt == newpaks )
+				break;
+		}
 	}
 
-	for( i = 0; i < num_threads; i++ )
-		threads[i] = QThread_Create( FS_LoadDeferredPaks_Job, ( void * )((intptr_t )(i + 1)) );
-	for( i = 0; i < num_threads; i++ )
-		QThread_Join( threads[i] );
+	arg = Mem_TempMalloc( sizeof( *arg ) );
+	arg->cnt = Mem_TempMalloc( sizeof( int ) );
+	arg->maxcnt = newpaks;
+	arg->packs = packs;
+	arg->mutex = QMutex_Create();
+
+	if( num_threads > 0 ) {
+		for( i = 0; i < num_threads; i++ )
+			threads[i] = QThread_Create( FS_LoadDeferredPaks_Job, arg );
+	}
+
+	FS_LoadDeferredPaks_Job( arg );
+
+	if( num_threads > 0 ) {
+		for( i = 0; i < num_threads; i++ )
+			QThread_Join( threads[i] );
+	}
 
 	FS_ReplaceDeferredPaks();
+
+	Mem_TempFree( (void *)arg->cnt );
+	Mem_TempFree( arg->packs );
+	QMutex_Destroy( &arg->mutex );
+	Mem_TempFree( arg );
 }
 
 /*
@@ -3747,9 +3958,9 @@ static int FS_TouchGameDirectory( const char *gamedir, bool initial )
 		while( basepath->next != prev )
 			basepath = basepath->next;
 		if( initial )
-			newpaks += FS_AddGamePath( basepath->path, gamedir );
+			newpaks += FS_AddGamePath( basepath, gamedir );
 		else
-			newpaks += FS_UpdateGamePath( basepath->path, gamedir );
+			newpaks += FS_UpdateGamePath( basepath, gamedir );
 		prev = basepath;
 	}
 
@@ -4003,7 +4214,7 @@ static void Cmd_FS_Search_f( void )
 */
 static void Cmd_FileChecksum_f( void )
 {
-	unsigned int checksum;
+	unsigned int checksum, checksum2;
 	const char *filename;
 
 	if( Cmd_Argc() != 2 )
@@ -4025,14 +4236,16 @@ static void Cmd_FileChecksum_f( void )
 		return;
 	}
 
-	checksum = FS_ChecksumBaseFile( filename );
-	if( !checksum )
+	checksum = FS_ChecksumBaseFile( filename, false );
+	checksum2 = FS_ChecksumBaseFile( filename, true );
+
+	if( !checksum || !checksum2 )
 	{
 		Com_Printf( "%s not found\n", filename );
 		return;
 	}
 
-	Com_Printf( "%u %s\n", checksum, filename );
+	Com_Printf( "%u %s %u\n", checksum, filename, checksum2 );
 }
 
 /*
@@ -4084,6 +4297,7 @@ void FS_Init( void )
 	int i;
 	const char *homedir;
 	const char *cachedir;
+	char downloadsdir[FS_MAX_PATH];
 
 	assert( !fs_initialized );
 
@@ -4124,13 +4338,33 @@ void FS_Init( void )
 #else
 		fs_usehomedir = Cvar_Get( "fs_usehomedir", "0", CVAR_NOSET );
 #endif
+	fs_usedownloadsdir = Cvar_Get( "fs_usedownloadsdir", "1", CVAR_NOSET );
+
+	fs_downloads_searchpath = NULL;
+	if( fs_usedownloadsdir->integer ) {
+		if( homedir != NULL && fs_usehomedir->integer ) {
+			Q_snprintfz( downloadsdir, sizeof( downloadsdir ), "%s/%s", homedir, "downloads" );
+		}
+		else {
+			Q_snprintfz( downloadsdir, sizeof( downloadsdir ), "%s", "downloads" );
+		}
+
+		FS_AddBasePath( downloadsdir );
+		fs_downloads_searchpath = fs_basepaths;
+	}
 
 	if( fs_cdpath->string[0] )
 		FS_AddBasePath( fs_cdpath->string );
+
 	FS_AddBasePath( fs_basepath->string );
-	if( homedir != NULL && fs_usehomedir->integer )
-		FS_AddBasePath( homedir );
+	fs_root_searchpath = fs_basepaths;
 	fs_write_searchpath = fs_basepaths;
+
+	if( homedir != NULL && fs_usehomedir->integer ) {
+		FS_AddBasePath( homedir );
+		fs_write_searchpath = fs_basepaths;
+	}
+
 	cachedir = Sys_FS_GetCacheDirectory();
 	if( cachedir )
 		FS_AddBasePath( cachedir );

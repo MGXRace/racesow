@@ -278,7 +278,8 @@ char *CM_LoadMapMessage( char *name, char *message, int size )
 	char *data, *entitystring;
 	lump_t l;
 	bool isworld;
-	char key[MAX_KEY], value[MAX_VALUE], *token;
+	char key[MAX_KEY], value[MAX_VALUE], token[MAX_TOKEN_CHARS];
+	size_t keyLength;
 	const modelFormatDescr_t *descr;
 	const bspFormatDesc_t *bspFormat = NULL;
 
@@ -292,7 +293,7 @@ char *CM_LoadMapMessage( char *name, char *message, int size )
 		return message;
 	}
 
-	FS_Read( h_v, 4 + sizeof( int ), file );
+	FS_Read( h_v, sizeof( h_v ), file );
 	descr = Q_FindFormatDescriptor( cm_supportedformats, h_v, &bspFormat );
 	if( !descr )
 	{
@@ -303,10 +304,8 @@ char *CM_LoadMapMessage( char *name, char *message, int size )
 
 	FS_Seek( file, descr->headerLen + sizeof( int ) + sizeof( lump_t ) * bspFormat->entityLumpNum, FS_SEEK_SET );
 
-	FS_Read( &l.fileofs, sizeof( l.fileofs ), file );
+	FS_Read( &l, sizeof( l ), file );
 	l.fileofs = LittleLong( l.fileofs );
-
-	FS_Read( &l.filelen, sizeof( l.filelen ), file );
 	l.filelen = LittleLong( l.filelen );
 
 	if( !l.filelen )
@@ -317,26 +316,31 @@ char *CM_LoadMapMessage( char *name, char *message, int size )
 
 	FS_Seek( file, l.fileofs, FS_SEEK_SET );
 
-	entitystring = Mem_TempMalloc( l.filelen );
+	entitystring = Mem_TempMalloc( l.filelen + 1 );
 	FS_Read( entitystring, l.filelen, file );
+	entitystring[l.filelen] = '\0';
 
 	FS_FCloseFile( file );
 
-	for( data = entitystring; ( token = COM_Parse( &data ) ) && token[0] == '{'; )
+	for( data = entitystring; ( COM_Parse_r( token, sizeof( token ), &data ) ) && token[0] == '{'; )
 	{
-		isworld = true;
+		isworld = false;
+		*message = '\0';
 
 		while( 1 )
 		{
-			token = COM_Parse( &data );
+			COM_Parse_r( token, sizeof( token ), &data );
 			if( !token[0] || token[0] == '}' )
 				break; // end of entity
 
 			Q_strncpyz( key, token, sizeof( key ) );
-			while( key[strlen( key )-1] == ' ' )  // remove trailing spaces
-				key[strlen( key )-1] = 0;
+			// remove trailing spaces
+			keyLength = strlen( key );
+			while( keyLength && key[keyLength - 1] == ' ' )
+				keyLength--;
+			key[keyLength] = '\0';
 
-			token = COM_Parse( &data );
+			COM_Parse_r( token, sizeof( token ), &data );
 			if( !token[0] )
 				break; // error
 
@@ -345,13 +349,15 @@ char *CM_LoadMapMessage( char *name, char *message, int size )
 			// now that we have the key pair worked out...
 			if( !strcmp( key, "classname" ) )
 			{
-				if( strcmp( value, "worldspawn" ) )
-					isworld = false;
+				isworld = strcmp( value, "worldspawn" ) == 0;
+				if( *message )
+					break;
 			}
 			else if( !strcmp( key, "message" ) )
 			{
 				Q_strncpyz( message, token, size );
-				break;
+				if( isworld )
+					break;
 			}
 		}
 

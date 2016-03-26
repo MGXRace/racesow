@@ -441,6 +441,7 @@ typedef struct
 
 	// fonts
 	char fontSystemFamily[MAX_QPATH];
+	char fontSystemMonoFamily[MAX_QPATH];
 	int fontSystemSmallSize;
 	int fontSystemMediumSize;
 	int fontSystemBigSize;
@@ -724,7 +725,7 @@ void CG_CheckPredictionError( void );
 void CG_BuildSolidList( void );
 void CG_Trace( trace_t *t, vec3_t start, vec3_t mins, vec3_t maxs, vec3_t end, int ignore, int contentmask );
 int CG_PointContents( const vec3_t point );
-void CG_Predict_TouchTriggers( pmove_t *pm, vec3_t previous_origin ); // racesow - add previous_origin argument
+void CG_Predict_TouchTriggers( pmove_t *pm, vec3_t previous_origin );
 
 //
 // cg_screen.c
@@ -742,6 +743,7 @@ extern cvar_t *cg_showFPS;
 extern cvar_t *cg_showAwards;
 extern cvar_t *cg_showZoomEffect;
 extern cvar_t *cg_showCaptureAreas;
+extern cvar_t *cg_showChasers;
 
 void CG_ScreenInit( void );
 void CG_ScreenShutdown( void );
@@ -846,6 +848,7 @@ void CG_GetHUDTouchButtons( unsigned int *buttons, int *upmove );
 void CG_UpdateHUDPostDraw( void );
 void CG_UpdateHUDPostTouch( void );
 void CG_ShowWeaponCross( void );
+void CG_ClearHUDInputState( void );
 
 // racesow
 void CG_CheckpointsClear( void );
@@ -985,6 +988,7 @@ void CG_LocalPrint( const char *format, ... );
 int CG_AsyncGetRequest( const char *resource, void (*done_cb)(int status, const char *resp), void *privatep );
 
 const char *CG_TranslateString( const char *string );
+const char *CG_TranslateColoredString( const char *string, char *dst, size_t dst_size );
 
 unsigned int CG_GetTouchButtonBits( void );
 void CG_AddTouchViewAngles( vec3_t viewangles, float frametime, float flip );
@@ -1046,7 +1050,8 @@ void CG_ViewSmoothPredictedSteps( vec3_t vieworg );
 float CG_ViewSmoothFallKick( void );
 void CG_RenderView( float frameTime, float realFrameTime, int realTime, unsigned int serverTime, float stereo_separation, unsigned int extrapolationTime, bool flipped );
 void CG_AddKickAngles( vec3_t viewangles );
-void CG_ChaseStep( int step );
+bool CG_ChaseStep( int step );
+bool CG_SwitchChaseCamMode( void );
 
 //
 // cg_lents.c

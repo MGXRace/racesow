@@ -218,14 +218,15 @@ typedef struct
 #define CS_LOCATIONS		( CS_GAMECOMMANDS+MAX_GAMECOMMANDS )
 #define CS_WEAPONDEFS		( CS_LOCATIONS+MAX_LOCATIONS )
 #define CS_GENERAL			( CS_WEAPONDEFS+MAX_WEAPONDEFS )
-#define CS_HELPMESSAGES		( CS_GENERAL+MAX_GENERAL ) // for localizable messages, that got a special place on the HUD
+#define CS_MMPLAYERINFOS 	( CS_GENERAL+MAX_GENERAL )
+#define CS_HELPMESSAGES		( CS_MMPLAYERINFOS+MAX_MMPLAYERINFOS ) // for localizable messages, that got a special place on the HUD
 
 #define	MAX_CONFIGSTRINGS	( CS_HELPMESSAGES+MAX_HELPMESSAGES )
 
 //==============================================
 
 // masterservers cvar is shared by client and server. This ensures both have the same default string
-#define	DEFAULT_MASTER_SERVERS_IPS			"dpmaster.deathmask.net ghdigital.com excalibur.nvg.ntnu.no eu.master.warsow.net"
+#define	DEFAULT_MASTER_SERVERS_IPS			"dpmaster.deathmask.net ghdigital.com excalibur.nvg.ntnu.no eu.master.warsow.gg"
 #define DEFAULT_MASTER_SERVERS_STEAM_IPS	"208.64.200.65:27015 208.64.200.39:27011 208.64.200.52:27011"
 #define SERVER_PINGING_TIMEOUT				50
 #define LAN_SERVER_PINGING_TIMEOUT			20

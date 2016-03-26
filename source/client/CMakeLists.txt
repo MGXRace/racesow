@@ -3,7 +3,7 @@ project(${QFUSION_CLIENT_NAME})
 include_directories(${ZLIB_INCLUDE_DIR} ${CURL_INCLUDE_DIR})
 
 if (USE_SDL2 OR (${CMAKE_SYSTEM_NAME} MATCHES "Linux"))
-    include_directories(${SDL2_INCLUDE_DIRS})
+    include_directories(${SDL2_INCLUDE_DIR})
 endif()
 
 if (NOT QFUSION_MAC_ICON)
@@ -72,7 +72,7 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "Windows")
             "../win32/qfusion.rc"
         )
 
-        set(CLIENT_PLATFORM_LIBRARIES ${SDL2_LIBRARIES} "ws2_32.lib" "winmm.lib")
+        set(CLIENT_PLATFORM_LIBRARIES ${SDL2_LIBRARY} ${SDL2MAIN_LIBRARY} "ws2_32.lib" "winmm.lib")
     else()
         file(GLOB CLIENT_PLATFORM_SOURCES
             "../win32/win_fs.c"
@@ -102,8 +102,6 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "Windows")
 endif()
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-    set(GAME_DATA_DIR Warsow_20)
-
 	set(CLIENT_PLATFORM_HEADERS "")
 	
     file(GLOB CLIENT_PLATFORM_SOURCES
@@ -132,11 +130,14 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
 
     set(BUNDLE_RESOURCES
         ../mac/Frameworks
-        ../../../${GAME_DATA_DIR}/basewsw
-        ../../../${GAME_DATA_DIR}/docs
-        ../../glsl
         ${QFUSION_MAC_ICON}
     )
+	if (QFUSION_DATA_DIR)
+		list(APPEND BUNDLE_RESOURCES
+			${QFUSION_DATA_DIR}/${QFUSION_GAME_DIR}
+			${QFUSION_DATA_DIR}/docs
+		)
+	endif()
 endif()
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
@@ -198,16 +199,15 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     set_source_files_properties(${QFUSION_MAC_ICON} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
 
     set_source_files_properties(../mac/Frameworks                 PROPERTIES MACOSX_PACKAGE_LOCATION .)
-    set_source_files_properties(../../../${GAME_DATA_DIR}/basewsw PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
-    set_source_files_properties(../../../${GAME_DATA_DIR}/docs    PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
-    set_source_files_properties(../../glsl                        PROPERTIES MACOSX_PACKAGE_LOCATION Resources/basewsw)
+	if (QFUSION_DATA_DIR)
+	    set_source_files_properties(${QFUSION_DATA_DIR}/${QFUSION_GAME_DIR}    PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+		set_source_files_properties(${QFUSION_DATA_DIR}/docs    PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+	endif()
 
     set(BUNDLE_PATH ${CMAKE_HOME_DIRECTORY}/build/$(CONFIGURATION)/${QFUSION_CLIENT_NAME}.app/Contents)
     set(COPY_DYLIBS
-        cp -r ${CMAKE_HOME_DIRECTORY}/build/$(CONFIGURATION)/base/ ${BUNDLE_PATH}/Resources/basewsw/ &&
-        cp -r ${CMAKE_HOME_DIRECTORY}/build/$(CONFIGURATION)/libs/ ${BUNDLE_PATH}/Resources/libs/ &&
-        cd ${BUNDLE_PATH}/Resources/ &&
-        ln -sfh ./basewsw/ ${BUNDLE_PATH}/Resources/base
+        cp -r ${CMAKE_HOME_DIRECTORY}/build/$(CONFIGURATION)/${QFUSION_GAME_DIR}/ ${BUNDLE_PATH}/Resources/${QFUSION_GAME_DIR}/ &&
+        cp -r ${CMAKE_HOME_DIRECTORY}/build/$(CONFIGURATION)/libs/ ${BUNDLE_PATH}/Resources/libs/
     )
         
     add_custom_command(TARGET ${QFUSION_CLIENT_NAME} POST_BUILD COMMAND ${COPY_DYLIBS})

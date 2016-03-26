@@ -758,15 +758,7 @@ edict_t *W_Fire_Grenade( edict_t *self, vec3_t start, vec3_t angles, int speed, 
 	if( aim_up )
 	{
 		if( !GS_RaceGametype() ) // racesow
-			angles[PITCH] -= 5; // aim some degrees upwards from view dir
-
-		// clamp to front side of the player
-		angles[PITCH] += -90; // rotate to make easier the check
-		while( angles[PITCH] < -360 ) angles[PITCH] += 360;
-		clamp( angles[PITCH], -180, 0 );
-		angles[PITCH] += 90;
-		while( angles[PITCH] > 360 ) angles[PITCH] -= 360;
-	}
+			angles[PITCH] -= 5.0f * cos( DEG2RAD( angles[PITCH] ) ); // aim some degrees upwards from view dir
 
 	grenade = W_Fire_TossProjectile( self, start, angles,
 		rs_grenade_speed->integer, damage,
@@ -1376,7 +1368,8 @@ void W_Fire_Instagun( edict_t *self, vec3_t start, vec3_t angles, float damage, 
 {
 	vec3_t from, end, dir;
 	trace_t	tr;
-	edict_t	*ignore, *event;
+	edict_t	*ignore, *event, *hit;
+	int hit_movetype;
 	int mask;
 	bool missed = true;
 	int dmgflags = 0;
@@ -1401,24 +1394,27 @@ void W_Fire_Instagun( edict_t *self, vec3_t start, vec3_t angles, float damage, 
 			break;
 
 		// allow trail to go through SOLID_BBOX entities (players, gibs, etc)
-		if( !ISBRUSHMODEL( game.edicts[tr.ent].s.modelindex ) )
-			ignore = &game.edicts[tr.ent];
+		hit = &game.edicts[tr.ent];
+		hit_movetype = hit->movetype; // backup the original movetype as the entity may "die"
 
-		if( ( &game.edicts[tr.ent] != self ) && ( game.edicts[tr.ent].takedamage ) )
+		if( !ISBRUSHMODEL( hit->s.modelindex ) )
+			ignore = hit;
+	
+		if( ( hit != self ) && ( hit->takedamage ) )
 		{
-			G_Damage( &game.edicts[tr.ent], self, self, dir, dir, tr.endpos, damage, knockback, stun, dmgflags, mod );
+			G_Damage( hit, self, self, dir, dir, tr.endpos, damage, knockback, stun, dmgflags, mod );
 			// spawn a impact event on each damaged ent
 			event = G_SpawnEvent( EV_INSTA_EXPLOSION, DirToByte( tr.plane.normal ), tr.endpos );
 			event->s.ownerNum = ENTNUM( self );
 			event->s.firemode = FIRE_MODE_STRONG;
-			if( game.edicts[tr.ent].r.client )
+			if( hit->r.client )
 				missed = false;
 		}
 
 		// some entity was touched
-		if( tr.ent == world->s.number 
-			|| game.edicts[tr.ent].movetype == MOVETYPE_NONE 
-			|| game.edicts[tr.ent].movetype == MOVETYPE_PUSH )
+		if( hit == world
+			|| hit_movetype == MOVETYPE_NONE
+			|| hit_movetype == MOVETYPE_PUSH )
 		{
 			if( g_instajump->integer && self && self->r.client )
 			{
@@ -1508,6 +1504,8 @@ static void _LaserImpact( trace_t *trace, vec3_t dir )
 
 	if( !trace || trace->ent <= 0 )
 		return;
+	if( trace->ent == laser_attackerNum )
+		return; // should not be possible theoretically but happened at least once in practice
 
 	attacker = &game.edicts[laser_attackerNum];
 

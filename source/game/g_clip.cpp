@@ -1094,12 +1094,6 @@ void GClip_TouchTriggers( edict_t *ent )
 	}
 }
 
-// racesow
-/**
- * Racesow flavored G_PMoveTouchTriggers
- * @param pm              Player pmove information, marks end of search volume
- * @param previous_origin Last player location, marks start of search volume
- */
 void G_PMoveTouchTriggers( pmove_t *pm, vec3_t previous_origin )
 {
 	int i, num;
@@ -1137,19 +1131,25 @@ void G_PMoveTouchTriggers( pmove_t *pm, vec3_t previous_origin )
 
 	GClip_LinkEntity( ent );
 
+	// expand the search bounds to include the space between the previous and current origin
 	for( i = 0; i < 3; i++ )
 	{
-		if( previous_origin[i] < ent->s.origin[i] )
+		if( previous_origin[i] < pm->playerState->pmove.origin[i] )
 		{
-			mins[i] = previous_origin[i] + pm->mins[i];
-			maxs[i] = ent->s.origin[i] + pm->maxs[i];
+			mins[i] = previous_origin[i] + pm->maxs[i];
+			if( mins[i] > pm->playerState->pmove.origin[i] + pm->mins[i] )
+				mins[i] = pm->playerState->pmove.origin[i] + pm->mins[i];
+			maxs[i] = pm->playerState->pmove.origin[i] + pm->maxs[i];
 		}
 		else
 		{
-			mins[i] = ent->s.origin[i] + pm->mins[i];
-			maxs[i] = previous_origin[i] + pm->maxs[i];
+			mins[i] = pm->playerState->pmove.origin[i] + pm->mins[i];
+			maxs[i] = previous_origin[i] + pm->mins[i];
+			if( maxs[i] < pm->playerState->pmove.origin[i] + pm->maxs[i] )
+				maxs[i] = pm->playerState->pmove.origin[i] + pm->maxs[i];
 		}
 	}
+
 	num = GClip_AreaEdicts( mins, maxs, touch, MAX_EDICTS, AREA_TRIGGERS, 0 );
 
 	// be careful, it is possible to have an entity in this
@@ -1172,7 +1172,6 @@ void G_PMoveTouchTriggers( pmove_t *pm, vec3_t previous_origin )
 		G_CallTouch( hit, ent, NULL, 0 );
 	}
 }
-// !racesow
 
 /*
 * GClip_FindBoxInRadius

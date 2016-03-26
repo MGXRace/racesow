@@ -317,9 +317,14 @@ static inline void trap_R_RenderScene( const refdef_t *fd )
 	CGAME_IMPORT.R_RenderScene( fd );
 }
 
-static inline const char *trap_R_SpeedsMessage( char *out, size_t size )
+static inline const char *trap_R_GetSpeedsMessage( char *out, size_t size )
 {
-	return CGAME_IMPORT.R_SpeedsMessage( out, size );
+	return CGAME_IMPORT.R_GetSpeedsMessage( out, size );
+}
+
+static inline int trap_R_GetAverageFramerate( void )
+{
+	return CGAME_IMPORT.R_GetAverageFramerate();
 }
 
 static inline void trap_R_RegisterWorldModel( const char *name )
@@ -631,6 +636,11 @@ static inline bool trap_SCR_HaveQuickMenu( void )
 static inline bool trap_SCR_IsQuickMenuShown( void )
 {
 	return CGAME_IMPORT.SCR_IsQuickMenuShown();
+}
+
+static inline void trap_SCR_DrawChat( int x, int y, int width, struct qfontface_s *font )
+{
+	CGAME_IMPORT.SCR_DrawChat( x, y, width, font );
 }
 
 static inline void *trap_MemAlloc( size_t size, const char *filename, int fileline )

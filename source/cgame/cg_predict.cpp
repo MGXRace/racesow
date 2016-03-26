@@ -207,7 +207,7 @@ static bool CG_ClipEntityContact( const vec3_t origin, const vec3_t mins, const 
 /*
 * CG_Predict_TouchTriggers
 */
-void CG_Predict_TouchTriggers( pmove_t *pm, vec3_t previous_origin ) // racesow - add previous_origin argument needed by game module
+void CG_Predict_TouchTriggers( pmove_t *pm, vec3_t previous_origin )
 {
 	int i;
 	entity_state_t *state;

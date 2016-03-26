@@ -46,6 +46,9 @@ static void ClientObituary( edict_t *self, edict_t *inflictor, edict_t *attacker
 	char message[64];
 	char message2[64];
 
+	if( level.gametype.disableObituaries )
+		return;
+
 	mod = meansOfDeath;
 
 	GS_Obituary( self, G_PlayerGender( self ), attacker, mod, message, message2 );
@@ -463,6 +466,8 @@ void G_ClientClearStats( edict_t *ent )
 */
 void G_GhostClient( edict_t *ent )
 {
+	G_DeathAwards( ent );
+
 	ent->movetype = MOVETYPE_NONE;
 	ent->r.solid = SOLID_NOT;
 
@@ -505,6 +510,8 @@ void G_ClientRespawn( edict_t *self, bool ghost )
 	vec3_t spawn_origin, spawn_angles;
 	gclient_t *client;
 	int old_team;
+
+	G_DeathAwards( self );
 
 	G_SpawnQueue_RemoveClient( self );
 
@@ -775,7 +782,8 @@ void ClientBegin( edict_t *ent )
 		G_PrintMsg( NULL, "%s" S_COLOR_WHITE " (" S_COLOR_YELLOW "%s" S_COLOR_WHITE ") entered the game\n", client->netname, mm_login );
 	}
 	else {
-		G_PrintMsg( NULL, "%s" S_COLOR_WHITE " entered the game\n", client->netname );
+		if( !level.gametype.disableObituaries || !(ent->r.svflags & SVF_FAKECLIENT ) )
+			G_PrintMsg( NULL, "%s" S_COLOR_WHITE " entered the game\n", client->netname );
 	}
 
 	client->level.respawnCount = 0; // clear respawncount
@@ -1050,6 +1058,32 @@ static void G_UpdatePlayerInfoString( int playerNum )
 }
 
 /*
+* G_UpdateMMPlayerInfoString
+*/
+static void G_UpdateMMPlayerInfoString( int playerNum )
+{
+	char playerString[MAX_INFO_STRING];
+	gclient_t *client;
+
+	assert( playerNum >= 0 && playerNum < gs.maxclients );
+	client = &game.clients[playerNum];
+
+	if( playerNum >= MAX_MMPLAYERINFOS ) {
+		return; // oops
+	}
+
+	// update client information in cgame
+	playerString[0] = 0;
+
+	if( client->mmflags != 0 ) {
+		Info_SetValueForKey( playerString, "f", va( "%x", client->mmflags ) ); // use hex for shorter representation
+	}
+
+	playerString[MAX_CONFIGSTRING_CHARS-1] = 0;
+	trap_ConfigString( CS_MMPLAYERINFOS + playerNum, playerString );
+}
+
+/*
 * ClientUserinfoChanged
 * called whenever the player updates a userinfo variable.
 * 
@@ -1216,6 +1250,9 @@ void ClientUserinfoChanged( edict_t *ent, char *userinfo )
 	s = Info_ValueForKey( userinfo, "cl_mm_session" );
 	cl->mm_session = ( s == NULL ) ? 0 : atoi( s );
 
+	s = Info_ValueForKey( userinfo, "mmflags" );
+	cl->mmflags = ( s == NULL ) ? 0 : strtoul( s, NULL, 10 );
+
 	// tv
 	if( cl->isTV )
 	{
@@ -1242,6 +1279,7 @@ void ClientUserinfoChanged( edict_t *ent, char *userinfo )
 	Q_strncpyz( cl->userinfo, userinfo, sizeof( cl->userinfo ) );
 
 	G_UpdatePlayerInfoString( PLAYERNUM( ent ) );
+	G_UpdateMMPlayerInfoString( PLAYERNUM( ent ) );
 
 	RS_PlayerUserinfoChanged( &authplayers[PLAYERNUM( ent )], oldname ); // racesow
 	G_Gametype_ScoreEvent( cl, "userinfochanged", oldname );
@@ -1260,7 +1298,6 @@ void ClientUserinfoChanged( edict_t *ent, char *userinfo )
 bool ClientConnect( edict_t *ent, char *userinfo, bool fakeClient, bool tvClient )
 {
 	char *value;
-	char message[MAX_STRING_CHARS];
 
 	assert( ent );
 	assert( userinfo && Info_Validate( userinfo ) );
@@ -1334,10 +1371,15 @@ bool ClientConnect( edict_t *ent, char *userinfo, bool fakeClient, bool tvClient
 
 	ClientUserinfoChanged( ent, userinfo );
 
-	Q_snprintfz( message, sizeof( message ), "%s%s connected", ent->r.client->netname, S_COLOR_WHITE );
-	G_PrintMsg( NULL, "%s\n", message );
+	if( !fakeClient ) {
+		char message[MAX_STRING_CHARS];
 
-	G_Printf( "%s%s connected from %s\n", ent->r.client->netname, S_COLOR_WHITE, ent->r.client->ip );
+		Q_snprintfz( message, sizeof( message ), "%s%s connected", ent->r.client->netname, S_COLOR_WHITE );
+
+		G_PrintMsg( NULL, "%s\n", message );
+
+		G_Printf( "%s%s connected from %s\n", ent->r.client->netname, S_COLOR_WHITE, ent->r.client->ip );
+	}
 
 	// let the gametype scripts know this client just connected
 	G_Gametype_ScoreEvent( ent->r.client, "connect", NULL );
@@ -1367,10 +1409,13 @@ void ClientDisconnect( edict_t *ent, const char *reason )
 	for( team = TEAM_PLAYERS; team < GS_MAX_TEAMS; team++ )
 		G_Teams_UnInvitePlayer( team, ent );
 
-	if( !reason )
-		G_PrintMsg( NULL, "%s" S_COLOR_WHITE " disconnected\n", ent->r.client->netname );
-	else
-		G_PrintMsg( NULL, "%s" S_COLOR_WHITE " disconnected (%s" S_COLOR_WHITE ")\n", ent->r.client->netname, reason );
+	if( !level.gametype.disableObituaries || !(ent->r.svflags & SVF_FAKECLIENT ) )
+	{
+		if( !reason )
+			G_PrintMsg( NULL, "%s" S_COLOR_WHITE " disconnected\n", ent->r.client->netname );
+		else
+			G_PrintMsg( NULL, "%s" S_COLOR_WHITE " disconnected (%s" S_COLOR_WHITE ")\n", ent->r.client->netname, reason );
+	}
 
 	// send effect
 	if( ent->s.team > TEAM_SPECTATOR )

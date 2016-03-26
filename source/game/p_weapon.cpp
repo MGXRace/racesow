@@ -93,6 +93,13 @@ bool Pickup_Weapon( edict_t *other, const gsitem_t *item, int flags, int ammo_co
 
 	weapondef = GS_GetWeaponDef( item->tag );
 
+	if( !(flags & DROPPED_ITEM) )
+	{
+		// weapons stay in race
+		if( GS_RaceGametype() && ( other->r.client->ps.inventory[item->tag] != 0 ) )
+			return false;
+	}
+
 	other->r.client->ps.inventory[item->tag]++;
 	G_AddPlayerStateEvent( other->r.client, PSEV_PICKUP, ( item->flags & IT_WEAPON ? item->tag : 0 ) ); // racesow - trigger autoswitch
 

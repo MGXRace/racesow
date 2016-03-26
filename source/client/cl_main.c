@@ -790,8 +790,6 @@ void CL_ClearState( void )
 	cls.lastPacketSentTime = 0;
 	cls.lastPacketReceivedTime = 0;
 
-	cls.sv_pure = false;
-
 	if( cls.wakelock )
 	{
 		Sys_ReleaseWakeLock( cls.wakelock );
@@ -861,7 +859,7 @@ void CL_Disconnect( const char *message )
 	bool wasconnecting;
 
 	// We have to shut down webdownloading first
-	if( cls.download.web )
+	if( cls.download.web && !cls.download.disconnect )
 	{
 		cls.download.disconnect = true;
 		return;
@@ -945,13 +943,8 @@ void CL_Disconnect( const char *message )
 
 	if( cls.download.requestname )
 	{
-		if( cls.download.name )
-		{
-			assert( !cls.download.web );
-
-			cls.download.cancelled = true;
-			CL_StopServerDownload();
-		}
+		cls.download.pending_reconnect = false;
+		cls.download.cancelled = true;
 		CL_DownloadDone();
 	}
 
@@ -1679,7 +1672,7 @@ void CL_RequestNextDownload( void )
 
 		// we're done with the download phase, so clear the list
 		CL_FreeDownloadList();
-		if( cls.sv_pure )
+		if( cls.pure_restart )
 		{
 			restart = true;
 			restart_msg = "Pure server. Restarting media...";
@@ -2102,7 +2095,7 @@ static void CL_InitLocal( void )
 	m_accelStyle =	Cvar_Get( "m_accelStyle", "0", CVAR_ARCHIVE );
 	m_accelOffset =	Cvar_Get( "m_accelOffset", "0", CVAR_ARCHIVE );
 	m_accelPow =	Cvar_Get( "m_accelPow", "2", CVAR_ARCHIVE );
-	m_filter =		Cvar_Get( "m_filter", "1", CVAR_ARCHIVE );
+	m_filter =		Cvar_Get( "m_filter", "0", CVAR_ARCHIVE );
 	m_filterStrength =	Cvar_Get( "m_filterStrength", "0.5", CVAR_ARCHIVE );
 	m_pitch =		Cvar_Get( "m_pitch", "0.022", CVAR_ARCHIVE );
 	m_yaw =			Cvar_Get( "m_yaw", "0.022", CVAR_ARCHIVE );
@@ -2255,34 +2248,6 @@ static void CL_ShutdownLocal( void )
 
 //============================================================================
 
-
-#ifdef _DEBUG
-static void CL_LogStats( void )
-{
-	static unsigned int lasttimecalled = 0;
-	if( log_stats->integer )
-	{
-		if( cls.state == CA_ACTIVE )
-		{
-			if( !lasttimecalled )
-			{
-				lasttimecalled = Sys_Milliseconds();
-				if( log_stats_file )
-					FS_Printf( log_stats_file, "0\n" );
-			}
-			else
-			{
-				unsigned int now = Sys_Milliseconds();
-
-				if( log_stats_file )
-					FS_Printf( log_stats_file, "%u\n", now - lasttimecalled );
-				lasttimecalled = now;
-			}
-		}
-	}
-}
-#endif
-
 /*
 * CL_TimedemoStats
 */
@@ -2311,7 +2276,7 @@ void CL_AdjustServerTime( unsigned int gamemsec )
 	// hurry up if coming late (unless in demos)
 	if( !cls.demo.playing )
 	{
-		if( ( cl.newServerTimeDelta < cl.serverTimeDelta ) && gamemsec > 1 )
+		if( ( cl.newServerTimeDelta < cl.serverTimeDelta ) && gamemsec > 0 )
 			cl.serverTimeDelta--;
 		if( cl.newServerTimeDelta > cl.serverTimeDelta )
 			cl.serverTimeDelta++;
@@ -2594,6 +2559,8 @@ static void CL_NetFrame( int realmsec, int gamemsec )
 	// resend a connection request if necessary
 	CL_CheckForResend();
 	CL_CheckDownloadTimeout();
+
+	CL_ServerListFrame();
 }
 
 /*
@@ -2665,11 +2632,17 @@ void CL_Frame( int realmsec, int gamemsec )
 	
 	if( cls.state == CA_CINEMATIC )
 	{
+#if 1
+		maxFps = 10000.0f;
+		minMsec = 1;
+		roundingMsec = 0;
+#else
 		maxFps = SCR_CinematicFramerate() * 2;
 		if( maxFps < 24 ) 
 			maxFps = 24.0f;
 		minMsec = max( ( 1000.0f / maxFps ), 1 );
 		roundingMsec += max( ( 1000.0f / maxFps ), 1.0f ) - minMsec;
+#endif
 	}
 	else if( cl_maxfps->integer > 0 && !cl_timedemo->integer 
 		&& !( cls.demo.avi_video && cls.state == CA_ACTIVE ) )
@@ -2779,9 +2752,6 @@ void CL_Frame( int realmsec, int gamemsec )
 	allGameMsec = 0;
 
 	cls.framecount++;
-#ifdef _DEBUG
-	CL_LogStats();
-#endif
 }
 
 

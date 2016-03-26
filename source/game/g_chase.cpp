@@ -48,6 +48,9 @@ static bool G_Chase_IsValidTarget( edict_t *ent, edict_t *target, bool teamonly 
 	if( teamonly && target->s.team != ent->s.team )
 		return false;
 
+	if( G_ISGHOSTING( target ) && !target->deadflag && target->s.team != TEAM_SPECTATOR )
+		return false; // ghosts that are neither dead, nor speccing (probably originating from gt-specific rules)
+
 	return true;
 }
 

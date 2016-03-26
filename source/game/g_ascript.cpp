@@ -586,6 +586,21 @@ static const asEnumVal_t asDamageEnumVals[] =
 	ASLIB_ENUM_VAL_NULL
 };
 
+static const asEnumVal_t asKeyiconEnumVals[] =
+{
+	ASLIB_ENUM_VAL( KEYICON_FORWARD ),
+	ASLIB_ENUM_VAL( KEYICON_BACKWARD ),
+	ASLIB_ENUM_VAL( KEYICON_LEFT ),
+	ASLIB_ENUM_VAL( KEYICON_RIGHT ),
+	ASLIB_ENUM_VAL( KEYICON_FIRE ),
+	ASLIB_ENUM_VAL( KEYICON_JUMP ),
+	ASLIB_ENUM_VAL( KEYICON_CROUCH ),
+	ASLIB_ENUM_VAL( KEYICON_SPECIAL ),
+	ASLIB_ENUM_VAL( KEYICON_TOTAL ),
+	
+	ASLIB_ENUM_VAL_NULL
+};
+
 static const asEnumVal_t asMiscelaneaEnumVals[] =
 {
 	ASLIB_ENUM_VAL_NULL
@@ -634,6 +649,7 @@ static const asEnum_t asEnums[] =
 	{ "serverflags_e", asSVFlagEnumVals },
 	{ "meaningsofdeath_e", asMeaningsOfDeathEnumVals },
 	{ "takedamage_e", asDamageEnumVals },
+	{ "keyicon_e", asKeyiconEnumVals },
 	{ "miscelanea_e", asMiscelaneaEnumVals },
 	{ "rs_cmds_e", asRsCmdVals }, // racesow - RS_QueryTop parameters
 
@@ -1188,6 +1204,7 @@ static const asProperty_t gametypedescr_Properties[] =
 	{ ASLIB_PROPERTY_DECL(bool, isTutorial), ASLIB_FOFFSET(gametype_descriptor_t, isTutorial) },
 	{ ASLIB_PROPERTY_DECL(bool, inverseScore), ASLIB_FOFFSET(gametype_descriptor_t, inverseScore) },
 	{ ASLIB_PROPERTY_DECL(bool, hasChallengersQueue), ASLIB_FOFFSET(gametype_descriptor_t, hasChallengersQueue) },
+	{ ASLIB_PROPERTY_DECL(bool, hasChallengersRoulette), ASLIB_FOFFSET(gametype_descriptor_t, hasChallengersRoulette) },
 	{ ASLIB_PROPERTY_DECL(int, maxPlayersPerTeam), ASLIB_FOFFSET(gametype_descriptor_t, maxPlayersPerTeam) },
 	{ ASLIB_PROPERTY_DECL(int, ammoRespawn), ASLIB_FOFFSET(gametype_descriptor_t, ammo_respawn) },
 	{ ASLIB_PROPERTY_DECL(int, armorRespawn), ASLIB_FOFFSET(gametype_descriptor_t, armor_respawn) },
@@ -1199,7 +1216,8 @@ static const asProperty_t gametypedescr_Properties[] =
 	{ ASLIB_PROPERTY_DECL(bool, readyAnnouncementEnabled), ASLIB_FOFFSET(gametype_descriptor_t, readyAnnouncementEnabled) },
 	{ ASLIB_PROPERTY_DECL(bool, scoreAnnouncementEnabled), ASLIB_FOFFSET(gametype_descriptor_t, scoreAnnouncementEnabled) },
 	{ ASLIB_PROPERTY_DECL(bool, countdownEnabled), ASLIB_FOFFSET(gametype_descriptor_t, countdownEnabled) },
-	{ ASLIB_PROPERTY_DECL(bool, mathAbortDisabled), ASLIB_FOFFSET(gametype_descriptor_t, mathAbortDisabled) },
+	{ ASLIB_PROPERTY_DECL(bool, mathAbortDisabled), ASLIB_FOFFSET(gametype_descriptor_t, matchAbortDisabled) },
+	{ ASLIB_PROPERTY_DECL(bool, matchAbortDisabled), ASLIB_FOFFSET(gametype_descriptor_t, matchAbortDisabled) },
 	{ ASLIB_PROPERTY_DECL(bool, shootingDisabled), ASLIB_FOFFSET(gametype_descriptor_t, shootingDisabled) },
 	{ ASLIB_PROPERTY_DECL(bool, infiniteAmmo), ASLIB_FOFFSET(gametype_descriptor_t, infiniteAmmo) },
 	{ ASLIB_PROPERTY_DECL(bool, canForceModels), ASLIB_FOFFSET(gametype_descriptor_t, canForceModels) },
@@ -1207,10 +1225,13 @@ static const asProperty_t gametypedescr_Properties[] =
 	{ ASLIB_PROPERTY_DECL(bool, teamOnlyMinimap), ASLIB_FOFFSET(gametype_descriptor_t, teamOnlyMinimap) },
 	{ ASLIB_PROPERTY_DECL(int, spawnpointRadius), ASLIB_FOFFSET(gametype_descriptor_t, spawnpointRadius) },
 	{ ASLIB_PROPERTY_DECL(bool, customDeadBodyCam), ASLIB_FOFFSET(gametype_descriptor_t, customDeadBodyCam) },
-	{ ASLIB_PROPERTY_DECL(bool, removeInactivePlayers), ASLIB_FOFFSET(gametype_descriptor_t, removeInactivePlayers ) },
-	{ ASLIB_PROPERTY_DECL(bool, mmCompatible), ASLIB_FOFFSET(gametype_descriptor_t, mmCompatible ) },
-	{ ASLIB_PROPERTY_DECL(uint, numBots), ASLIB_FOFFSET(gametype_descriptor_t, numBots ) },
-	{ ASLIB_PROPERTY_DECL(bool, dummyBots), ASLIB_FOFFSET(gametype_descriptor_t, dummyBots ) },
+	{ ASLIB_PROPERTY_DECL(bool, removeInactivePlayers), ASLIB_FOFFSET(gametype_descriptor_t, removeInactivePlayers) },
+	{ ASLIB_PROPERTY_DECL(bool, mmCompatible), ASLIB_FOFFSET(gametype_descriptor_t, mmCompatible) },
+	{ ASLIB_PROPERTY_DECL(uint, numBots), ASLIB_FOFFSET(gametype_descriptor_t, numBots) },
+	{ ASLIB_PROPERTY_DECL(bool, dummyBots), ASLIB_FOFFSET(gametype_descriptor_t, dummyBots) },
+	{ ASLIB_PROPERTY_DECL(uint, forceTeamHumans), ASLIB_FOFFSET(gametype_descriptor_t, forceTeamHumans) },
+	{ ASLIB_PROPERTY_DECL(uint, forceTeamBots), ASLIB_FOFFSET(gametype_descriptor_t, forceTeamBots) },
+	{ ASLIB_PROPERTY_DECL(bool, disableObituaries), ASLIB_FOFFSET(gametype_descriptor_t, disableObituaries) },
 
 	// racesow
 	{ ASLIB_PROPERTY_DECL(bool, autoInactivityRemove), ASLIB_FOFFSET(gametype_descriptor_t, autoInactivityRemove) },
@@ -1602,6 +1623,20 @@ static asstring_t *objectGameClient_getClanName( gclient_t *self )
 	return angelExport->asStringFactoryBuffer( temp, strlen( temp ) );
 }
 
+static asstring_t *objectGameClient_getMMLogin( gclient_t *self )
+{
+	const char *login = NULL;
+
+	if( self->mm_session > 0 ) {
+		login = Info_ValueForKey( self->userinfo, "cl_mm_login" );
+	}
+	if( !login ) {
+		login = "";
+	}
+
+	return angelExport->asStringFactoryBuffer( login, strlen( login ) );
+}
+
 static void objectGameClient_Respawn( bool ghost, gclient_t *self )
 {
 	int playerNum;
@@ -1817,6 +1852,11 @@ static unsigned int objectGameClient_getPMoveFeatures( gclient_t *self )
 	return self->ps.pmove.stats[PM_STAT_FEATURES];
 }
 
+static unsigned int objectGameClient_getPressedKeys(gclient_t *self)
+{
+	return self->ps.plrkeys;
+}
+
 static void objectGameClient_setPMoveMaxSpeed( float speed, gclient_t *self )
 {
 	if( speed < 0.0f )
@@ -1996,6 +2036,7 @@ static const asMethod_t gameclient_Methods[] =
 	{ ASLIB_FUNCTION_DECL(void, clearPlayerStateEvents, ()), asFUNCTION(objectGameClient_ClearPlayerStateEvents), asCALL_CDECL_OBJLAST },
 	{ ASLIB_FUNCTION_DECL(const String @, get_name, () const), asFUNCTION(objectGameClient_getName), asCALL_CDECL_OBJLAST },
 	{ ASLIB_FUNCTION_DECL(const String @, get_clanName, () const), asFUNCTION(objectGameClient_getClanName), asCALL_CDECL_OBJLAST },
+	{ ASLIB_FUNCTION_DECL(const String @, getMMLogin, () const), asFUNCTION(objectGameClient_getMMLogin), asCALL_CDECL_OBJLAST },
 	{ ASLIB_FUNCTION_DECL(Entity @, getEnt, () const), asFUNCTION(objectGameClient_GetEntity), asCALL_CDECL_OBJLAST },
 	{ ASLIB_FUNCTION_DECL(int, inventoryCount, ( int tag ) const), asFUNCTION(objectGameClient_InventoryCount), asCALL_CDECL_OBJLAST },
 	{ ASLIB_FUNCTION_DECL(void, inventorySetCount, ( int tag, int count )), asFUNCTION(objectGameClient_InventorySetCount), asCALL_CDECL_OBJLAST },
@@ -2015,6 +2056,7 @@ static const asMethod_t gameclient_Methods[] =
 	{ ASLIB_FUNCTION_DECL(void, set_pmoveJumpSpeed, ( float speed )), asFUNCTION(objectGameClient_setPMoveJumpSpeed), asCALL_CDECL_OBJLAST },
 	{ ASLIB_FUNCTION_DECL(void, set_pmoveDashSpeed, ( float speed )), asFUNCTION(objectGameClient_setPMoveDashSpeed), asCALL_CDECL_OBJLAST },
 	{ ASLIB_FUNCTION_DECL(uint, get_pmoveFeatures, () const), asFUNCTION(objectGameClient_getPMoveFeatures), asCALL_CDECL_OBJLAST },
+	{ ASLIB_FUNCTION_DECL(uint, get_pressedKeys, () const), asFUNCTION(objectGameClient_getPressedKeys), asCALL_CDECL_OBJLAST },
 	{ ASLIB_FUNCTION_DECL(float, get_pmoveMaxSpeed, () const), asFUNCTION(objectGameClient_getPMoveMaxSpeed), asCALL_CDECL_OBJLAST },
 	{ ASLIB_FUNCTION_DECL(float, get_pmoveJumpSpeed, () const), asFUNCTION(objectGameClient_getPMoveJumpSpeed), asCALL_CDECL_OBJLAST },
 	{ ASLIB_FUNCTION_DECL(float, get_pmoveDashSpeed, () const), asFUNCTION(objectGameClient_getPMoveDashSpeed), asCALL_CDECL_OBJLAST },
@@ -2055,6 +2097,7 @@ static const asProperty_t gameclient_Properties[] =
 	{ ASLIB_PROPERTY_DECL(const int16, pendingWeapon), ASLIB_FOFFSET(gclient_t, ps.stats[STAT_PENDING_WEAPON]) },
 	{ ASLIB_PROPERTY_DECL(bool, takeStun), ASLIB_FOFFSET(gclient_t, resp.takeStun) },
 	{ ASLIB_PROPERTY_DECL(uint, lastActivity), ASLIB_FOFFSET(gclient_t, level.last_activity) },
+	{ ASLIB_PROPERTY_DECL(const uint, uCmdTimeStamp), ASLIB_FOFFSET(gclient_t, ucmd.serverTimeStamp) },
 
 	ASLIB_PROPERTY_NULL
 };
@@ -2340,13 +2383,20 @@ static void objectGameEntity_UseTargets( edict_t *activator, edict_t *self )
 	G_UseTargets( self, activator );
 }
 
-static edict_t *objectGameEntity_DropItem( int tag, edict_t *self )
+static edict_t *objectGameEntity_DropItemByTag( int tag, edict_t *self )
 {
 	gsitem_t *item = GS_FindItemByTag( tag );
 
 	if( !item )
 		return NULL;
 
+	return Drop_Item( self, item );
+}
+
+static edict_t *objectGameEntity_DropItem( gsitem_t *item, edict_t *self )
+{
+	if( !item )
+		return NULL;
 	return Drop_Item( self, item );
 }
 
@@ -2506,7 +2556,8 @@ static const asMethod_t gedict_Methods[] =
 	{ ASLIB_FUNCTION_DECL(array<Entity @> @, findTargets, () const), asFUNCTION(objectGameEntity_findTargets), asCALL_CDECL_OBJLAST },
 	{ ASLIB_FUNCTION_DECL(array<Entity @> @, findTargeting, () const), asFUNCTION(objectGameEntity_findTargeting), asCALL_CDECL_OBJLAST },
 	{ ASLIB_FUNCTION_DECL(void, useTargets, ( const Entity @activator )), asFUNCTION(objectGameEntity_UseTargets), asCALL_CDECL_OBJLAST },
-	{ ASLIB_FUNCTION_DECL(Entity @, dropItem, ( int tag ) const), asFUNCTION(objectGameEntity_DropItem), asCALL_CDECL_OBJLAST },
+	{ ASLIB_FUNCTION_DECL(Entity @, dropItem, ( int tag ) const), asFUNCTION(objectGameEntity_DropItemByTag), asCALL_CDECL_OBJLAST },
+	{ ASLIB_FUNCTION_DECL(Entity @, dropItem, ( Item @ ) const), asFUNCTION(objectGameEntity_DropItem), asCALL_CDECL_OBJLAST },
 	{ ASLIB_FUNCTION_DECL(void, sustainDamage, ( Entity @inflicter, Entity @attacker, const Vec3 &in dir, float damage, float knockback, float stun, int mod )), asFUNCTION(objectGameEntity_sustainDamage), asCALL_CDECL_OBJLAST },
 	{ ASLIB_FUNCTION_DECL(void, splashDamage, ( Entity @attacker, int radius, float damage, float knockback, float stun, int mod )), asFUNCTION(objectGameEntity_splashDamage), asCALL_CDECL_OBJLAST },
 	{ ASLIB_FUNCTION_DECL(void, explosionEffect, ( int radius )), asFUNCTION(objectGameEntity_explosionEffect), asCALL_CDECL_OBJLAST },
@@ -2557,6 +2608,7 @@ static const asProperty_t gedict_Properties[] =
 	{ ASLIB_PROPERTY_DECL(int, count), ASLIB_FOFFSET(edict_t, count) },
 	{ ASLIB_PROPERTY_DECL(float, wait), ASLIB_FOFFSET(edict_t, wait) },
 	{ ASLIB_PROPERTY_DECL(float, delay), ASLIB_FOFFSET(edict_t, delay) },
+	{ ASLIB_PROPERTY_DECL(float, random), ASLIB_FOFFSET(edict_t, random) },
 	{ ASLIB_PROPERTY_DECL(int, waterLevel), ASLIB_FOFFSET(edict_t, waterlevel) },
 	{ ASLIB_PROPERTY_DECL(float, attenuation), ASLIB_FOFFSET(edict_t, attenuation) },
 	{ ASLIB_PROPERTY_DECL(int, mass), ASLIB_FOFFSET(edict_t, mass) },
@@ -2843,6 +2895,11 @@ static gsitem_t *asFunc_GS_FindItemByClassname( asstring_t *name )
 static void asFunc_G_Match_RemoveAllProjectiles( void )
 {
 	G_Match_RemoveAllProjectiles();
+}
+
+static void asFunc_G_ResetLevel( void )
+{
+	G_ResetLevel();
 }
 
 static void asFunc_G_Match_FreeBodyQueue( void )
@@ -3218,6 +3275,12 @@ static void asFunc_ConfigString( int index, asstring_t *str )
 		return;
 	}
 
+	if( index >= CS_MMPLAYERINFOS && index < CS_MMPLAYERINFOS+MAX_MMPLAYERINFOS )
+	{
+		G_Printf( "WARNING: ConfigString %i is write protected\n", index );
+		return;
+	}
+
 	// prevent team name exploits
 	if( index >= CS_TEAM_SPECTATOR_NAME && index < CS_TEAM_SPECTATOR_NAME + GS_MAX_TEAMS )
 	{
@@ -3469,6 +3532,7 @@ static const asglobfuncs_t asGlobFuncs[] =
 	// misc management utils
 	{ "void G_RemoveAllProjectiles()", asFUNCTION(asFunc_G_Match_RemoveAllProjectiles), NULL },
 	{ "void G_RemoveProjectiles( Entity @ )", asFUNCTION(asFunc_RS_removeProjectiles), NULL }, // racesow
+	{ "void G_ResetLevel()", asFUNCTION(asFunc_G_ResetLevel), NULL },
 	{ "void G_RemoveDeadBodies()", asFUNCTION(asFunc_G_Match_FreeBodyQueue), NULL },
 	{ "void G_Items_RespawnByType( uint typeMask, int item_tag, float delay )", asFUNCTION(asFunc_G_Items_RespawnByType), NULL },
 
@@ -3696,8 +3760,9 @@ bool G_asCallMapEntitySpawnScript( const char *classname, edict_t *ent )
 		return false;
 	}
 
-	// the spawn function may remove the entity
-	return ent->r.inuse == true;
+	// check the inuse flag because the entity might have been removed at the spawn
+	ent->scriptSpawned = ent->r.inuse;
+	return true;
 }
 
 /*

@@ -67,6 +67,15 @@ uid_t saved_euid;
 extern void CL_Shutdown( void );
 #endif
 
+static void sigusr_handler( int sig )
+{
+	if( sig == SIGUSR1 )
+	{
+		Com_DeferConsoleLogReopen();
+	}
+	return;
+}
+
 static void signal_handler( int sig )
 {
 	static int try = 0;
@@ -76,46 +85,47 @@ static void signal_handler( int sig )
 	case 0:
 		if( sig == SIGINT || sig == SIGTERM )
 		{
-			Com_Printf( "Received signal %d, exiting...\n", sig );
-			Com_Quit();
+			printf( "Received signal %d, exiting...\n", sig );
 		}
 		else
 		{
-			Com_Error( ERR_FATAL, "Received signal %d\n", sig );
+			fprintf( stderr, "Received signal %d\n", sig );
 		}
+		Com_DeferQuit();
 		break;
 	case 1:
-#ifndef DEDICATED_ONLY
-		printf( "Received signal %d, exiting...\n", sig );
-		SV_Shutdown( "Received signal, exiting...\n" );
-		CL_Shutdown();
-		_exit( 1 );
-		break;
-	case 2:
-#endif
 		printf( "Received signal %d, exiting...\n", sig );
 		_exit( 1 );
 		break;
-
 	default:
-		_exit( 1 );
+		_exit( 2 );
 		break;
 	}
 }
 
+static void catchsig( int sig, void (*handler)(int) )
+{
+	struct sigaction new_action, old_action;
+	new_action.sa_handler = handler;
+	sigemptyset( &new_action.sa_mask );
+	new_action.sa_flags = SA_RESTART;
+	sigaction( sig, &new_action, &old_action );
+}
+
 static void InitSig( void )
 {
-	signal( SIGHUP, signal_handler );
-	signal( SIGQUIT, signal_handler );
-	signal( SIGILL, signal_handler );
-	signal( SIGTRAP, signal_handler );
-	signal( SIGIOT, signal_handler );
-	signal( SIGBUS, signal_handler );
-	signal( SIGFPE, signal_handler );
-	signal( SIGSEGV, signal_handler );
-	signal( SIGTERM, signal_handler );
-	signal( SIGINT, signal_handler );
-	signal( SIGPIPE, SIG_IGN );
+	catchsig( SIGHUP, signal_handler );
+	catchsig( SIGQUIT, signal_handler );
+	catchsig( SIGILL, signal_handler );
+	catchsig( SIGTRAP, signal_handler );
+	catchsig( SIGIOT, signal_handler );
+	catchsig( SIGBUS, signal_handler );
+	catchsig( SIGFPE, signal_handler );
+	catchsig( SIGSEGV, signal_handler );
+	catchsig( SIGTERM, signal_handler );
+	catchsig( SIGINT, signal_handler );
+	catchsig( SIGPIPE, SIG_IGN );
+	catchsig( SIGUSR1, sigusr_handler );
 }
 
 /*

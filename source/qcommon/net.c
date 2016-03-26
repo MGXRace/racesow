@@ -64,8 +64,7 @@ typedef struct
 } loopback_t;
 
 static loopback_t loopbacks[2];
-static char *errorstring = NULL;
-static size_t errorstring_size = 0;
+static char errorstring[MAX_PRINTMSG];
 static bool	net_initialized = false;
 
 #define MAX_IPS 16
@@ -1571,15 +1570,7 @@ void NET_SetErrorString( const char *format, ... )
 	Q_vsnprintfz( msg, sizeof( msg ), format, argptr );
 	va_end( argptr );
 
-	if( errorstring_size < strlen( msg ) + 1 )
-	{
-		if( errorstring )
-			Mem_ZoneFree( errorstring );
-		errorstring_size = strlen( msg ) + 1 + 64;
-		errorstring = ( char* )Mem_ZoneMalloc( errorstring_size );
-	}
-
-	Q_strncpyz( errorstring, msg, errorstring_size );
+	Q_strncpyz( errorstring, msg, sizeof( errorstring ) );
 }
 
 /*
@@ -1987,12 +1978,7 @@ void NET_Shutdown( void )
 	if( !net_initialized )
 		return;
 
-	if( errorstring )
-	{
-		Mem_ZoneFree( errorstring );
-		errorstring = NULL;
-		errorstring_size = 0;
-	}
+	errorstring[0] = '\0';
 
 	Sys_NET_Shutdown();
 

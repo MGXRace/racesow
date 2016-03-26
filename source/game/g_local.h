@@ -283,8 +283,6 @@ typedef struct
 	int notteam;
 	int notfree;
 	int notduel;
-	int notctf;
-	int notffa;
 	int noents;
 
 	int gameteam;
@@ -292,6 +290,7 @@ typedef struct
 	int weight;
 	float scale;
 	const char *gametype;
+	const char *not_gametype;
 	const char *shaderName;
 	int size;
 
@@ -493,7 +492,7 @@ void GT_asCallThinkRules( void );
 void GT_asCallPlayerKilled( edict_t *targ, edict_t *inflictor, edict_t *attacker, int damage, vec3_t point, int mod );
 void GT_asCallPlayerRespawn( edict_t *ent, int old_team, int new_team );
 void GT_asCallScoreEvent( gclient_t *client, const char *score_event, const char *args );
-char *GT_asCallScoreboardMessage( unsigned int maxlen );
+void GT_asCallScoreboardMessage( unsigned int maxlen );
 edict_t *GT_asCallSelectSpawnPoint( edict_t *ent );
 bool GT_asCallGameCommand( gclient_t *client, const char *cmd, const char *args, int argc );
 bool GT_asCallBotStatus( edict_t *ent );
@@ -765,7 +764,7 @@ void GClip_SetAreaPortalState( edict_t *ent, bool open );
 void GClip_LinkEntity( edict_t *ent );
 void GClip_UnlinkEntity( edict_t *ent );
 void GClip_TouchTriggers( edict_t *ent );
-void G_PMoveTouchTriggers( pmove_t *pm, vec3_t previous_origin ); // racesow - previous_origin
+void G_PMoveTouchTriggers( pmove_t *pm, vec3_t previous_origin );
 entity_state_t *G_GetEntityStateForDeltaTime( int entNum, int deltaTime );
 int GClip_FindRadius( vec3_t org, float rad, int *list, int maxcount );
 
@@ -936,6 +935,7 @@ void MoveClientToIntermission( edict_t *client );
 void G_SetClientStats( edict_t *ent );
 void G_Snap_UpdateWeaponListMessages( void );
 void G_ScoreboardMessage_AddSpectators( void );
+void G_ScoreboardMessage_AddChasers( int entnum, int entnum_self );
 void G_UpdateScoreBoardMessages( void );
 
 //
@@ -984,6 +984,7 @@ void G_SnapFrame( void );
 //
 bool G_CallSpawn( edict_t *ent );
 bool G_RespawnLevel( void );
+void G_ResetLevel( void );
 void G_InitLevel( char *mapname, char *entities, int entstrlen, unsigned int levelTime, unsigned int serverTime, unsigned int realTime );
 const char *G_GetEntitySpawnKey( const char *key, edict_t *self );
 
@@ -999,6 +1000,7 @@ void G_AwardPlayerKilled( edict_t *self, edict_t *inflictor, edict_t *attacker, 
 void G_AwardPlayerPickup( edict_t *self, edict_t *item );
 void G_AwardResetPlayerComboStats( edict_t *ent );
 void G_AwardRaceRecord( edict_t *self );
+void G_DeathAwards( edict_t *ent );
 
 /**
  * Gives the player the Fair Play award if all conditions are met.
@@ -1237,6 +1239,7 @@ struct gclient_s
 	byte_vec4_t color;
 	int team;
 	int hand;
+	unsigned mmflags;
 	int handicap;
 	int movestyle;
 	int movestyle_latched;

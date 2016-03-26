@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2014 SiPlus, Chasseur de bots
+Copyright (C) 2016 SiPlus, Warsow development team
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
@@ -29,8 +29,11 @@ void Sys_VFS_TouchGamePath( const char *gamedir, bool initial )
 {
 }
 
-char **Sys_VFS_ListFiles( const char *basepath, const char *gamedir, const char *extension, int *numfiles )
+char **Sys_VFS_ListFiles( const char *pattern, const char *prependBasePath, int *numFiles, bool listFiles, bool listDirs )
 {
+	if( numFiles )
+		*numFiles = 0;
+
 	return NULL;
 }
 
