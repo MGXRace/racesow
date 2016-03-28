@@ -615,14 +615,7 @@ void CG_DrawClock( int x, int y, int align, struct qfontface_s *font, vec4_t col
 	if( GS_MatchState() > MATCH_STATE_PLAYTIME )
 		return;
 
-	if( GS_RaceGametype() )
-	{
-		if( cg.predictedPlayerState.stats[STAT_TIME_SELF] != STAT_NOTSET )
-			clocktime = cg.predictedPlayerState.stats[STAT_TIME_SELF] * 100;
-		else
-			clocktime = 0;
-	}
-	else if( GS_MatchClockOverride() )
+	if( GS_MatchClockOverride() )
 	{
 		clocktime = GS_MatchClockOverride();
 	}
@@ -654,13 +647,7 @@ void CG_DrawClock( int x, int y, int align, struct qfontface_s *font, vec4_t col
 	seconds -= minutes * 60;
 
 	// fixme?: this could have its own HUD drawing, I guess.
-
-	if( GS_RaceGametype() )
-	{
-		Q_snprintfz( string, sizeof( string ), "%02i:%02i.%i",
-			minutes, ( int )seconds, ( int )( seconds * 10.0 ) % 10 );
-	}
-	else if( cg.predictedPlayerState.stats[STAT_NEXT_RESPAWN] )
+	if( cg.predictedPlayerState.stats[STAT_NEXT_RESPAWN] )
 	{
 		int respawn = cg.predictedPlayerState.stats[STAT_NEXT_RESPAWN];
 		Q_snprintfz( string, sizeof( string ), "%02i:%02i R:%02i", minutes, (int)seconds, respawn );
