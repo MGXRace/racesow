@@ -759,6 +759,7 @@ edict_t *W_Fire_Grenade( edict_t *self, vec3_t start, vec3_t angles, int speed, 
 	{
 		if( !GS_RaceGametype() ) // racesow
 			angles[PITCH] -= 5.0f * cos( DEG2RAD( angles[PITCH] ) ); // aim some degrees upwards from view dir
+	}
 
 	grenade = W_Fire_TossProjectile( self, start, angles,
 		rs_grenade_speed->integer, damage,
